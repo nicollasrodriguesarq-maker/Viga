@@ -22,9 +22,25 @@ export async function POST(req: Request) {
   const roleRes = await fetch(`${SUPABASE_URL}/rest/v1/usuarios?id=eq.${me.id}&select=role`, {
     headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
   })
+  if (!roleRes.ok) {
+    const errText = await roleRes.text()
+    return Response.json(
+      { error: `Erro ao verificar permissão (status ${roleRes.status}): ${errText.slice(0, 300)}` },
+      { status: 500 }
+    )
+  }
   const roleRows = await roleRes.json()
-  if (!Array.isArray(roleRows) || roleRows[0]?.role !== 'admin') {
-    return Response.json({ error: 'Apenas administradores podem criar usuários' }, { status: 403 })
+  if (!Array.isArray(roleRows) || roleRows.length === 0) {
+    return Response.json(
+      { error: `Seu usuário (id ${me.id}) não tem perfil na tabela "usuarios". Rode o SQL de bootstrap novamente.` },
+      { status: 403 }
+    )
+  }
+  if (roleRows[0]?.role !== 'admin') {
+    return Response.json(
+      { error: `Apenas administradores podem criar usuários (seu papel atual: "${roleRows[0]?.role}")` },
+      { status: 403 }
+    )
   }
 
   // 3. Valida o corpo da requisição

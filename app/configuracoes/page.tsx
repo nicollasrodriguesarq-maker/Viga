@@ -71,18 +71,38 @@ export default function Configuracoes() {
 
   async function carregarMeuPerfil() {
     setLoading(true)
+    let linha: any = null
+
+    // 1) tenta resolver pelo id, a partir do token de sessão
     try {
       const token = localStorage.getItem('viga_token')
       const meRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
       })
-      const me = await meRes.json()
-      if (me?.id) {
-        setMeuId(me.id)
-        const rows = await get('usuarios', `?id=eq.${me.id}&select=role`)
-        setMinhaRole(rows[0]?.role === 'admin' ? 'admin' : 'usuario')
+      if (meRes.ok) {
+        const me = await meRes.json()
+        if (me?.id) {
+          const rows = await get('usuarios', `?id=eq.${me.id}&select=id,role`)
+          if (rows[0]) linha = rows[0]
+        }
       }
-    } catch { setMinhaRole('usuario') }
+    } catch {}
+
+    // 2) se o token estiver expirado/inválido, cai para busca por e-mail (sem diferenciar maiúsculas)
+    if (!linha) {
+      const emailSalvo = localStorage.getItem('viga_email') || ''
+      if (emailSalvo) {
+        const rows = await get('usuarios', `?email=ilike.${encodeURIComponent(emailSalvo)}&select=id,role`)
+        if (rows[0]) linha = rows[0]
+      }
+    }
+
+    if (linha) {
+      setMeuId(linha.id)
+      setMinhaRole(linha.role === 'admin' ? 'admin' : 'usuario')
+    } else {
+      setMinhaRole('usuario')
+    }
     setLoading(false)
   }
 

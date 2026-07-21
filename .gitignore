@@ -36,6 +36,10 @@ yarn-error.log*
 # vercel
 .vercel
 
+# design reference material (not part of the app)
+/Arquivos Stitch/
+.claude/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

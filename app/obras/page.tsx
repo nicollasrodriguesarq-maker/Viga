@@ -76,6 +76,13 @@ const SERV_BADGE: Record<string, string> = {
 
 const TIPOS_OBRA = ['Obra Nova', 'Reforma', 'Retrofit', 'Projeto Arquitetura', 'Projeto Engenharia', 'Consultoria', 'Outro']
 
+const ETAPA_STATUS: Record<string, string> = {
+  pendente: 'Pendente',
+  em_andamento: 'Em Andamento',
+  concluida: 'Concluída',
+  atrasada: 'Atrasada',
+}
+
 function gerarCodigo(obras: any[]) {
   const ano = new Date().getFullYear()
   const qtd = obras.filter(o => o.codigo?.startsWith('OBR-' + ano)).length
@@ -114,6 +121,10 @@ export default function Obras() {
   const [lancs,    setLancs]    = useState<any[]>([])
   const [gastos,   setGastos]   = useState<any[]>([])
   const [servicos, setServicos] = useState<any[]>([])
+  const [orcamentos, setOrcamentos] = useState<any[]>([])
+  const [orcAmbientes, setOrcAmbientes] = useState<any[]>([])
+  const [orcItens, setOrcItens] = useState<any[]>([])
+  const [etapas, setEtapas] = useState<any[]>([])
   const [loading,  setLoading]  = useState(true)
   const [detalhe,  setDetalhe]  = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('resumo')
@@ -155,16 +166,24 @@ export default function Obras() {
 
   async function carregar() {
     setLoading(true)
-    const [o, l, g, s] = await Promise.all([
+    const [o, l, g, s, orc, orcAmb, orcIt, et] = await Promise.all([
       buscar('obras', '?order=created_at.desc'),
       buscar('lancamentos', '?order=data.desc'),
       buscar('gastos_cartao', '?order=data.desc'),
       buscar('obra_servicos', '?order=created_at'),
+      buscar('orcamentos', '?order=created_at.desc'),
+      buscar('orcamento_ambientes', '?order=ordem'),
+      buscar('orcamento_itens', '?order=created_at'),
+      buscar('cronograma_etapas', '?order=created_at'),
     ])
     setObras(o)
     setLancs(l)
     setGastos(g)
     setServicos(s)
+    setOrcamentos(orc)
+    setOrcAmbientes(orcAmb)
+    setOrcItens(orcIt)
+    setEtapas(et)
     setLoading(false)
   }
 
@@ -302,6 +321,9 @@ export default function Obras() {
     const atrasada  = detalhe.data_previsao && new Date(detalhe.data_previsao) < new Date() && detalhe.status === 'em_execucao'
     const margem    = receitas - custos
     const pctMargem = receitas > 0 ? Math.min(Math.max(((receitas - custos) / receitas) * 100, 0), 100) : 0
+    const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
+    const etapasObra = etapas.filter(e => e.obra_id === detalhe.id)
+    const hoje = new Date(); hoje.setHours(0,0,0,0)
 
     return (
       <Layout userEmail={userEmail} onLogout={sair}>
@@ -377,7 +399,7 @@ export default function Obras() {
 
         {/* abas */}
         <div className="flex gap-2 mb-lg flex-wrap">
-          {([['resumo', '📋 Resumo'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão']] as [string, string][]).map(([id, nome]) => (
+          {([['resumo', '📋 Resumo'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ...(orcamentoObra ? [['cronograma', '📅 Cronograma']] as [string, string][] : [])] as [string, string][]).map(([id, nome]) => (
             <button key={id} className={abaDetalhe === id ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe(id)}>{nome}</button>
           ))}
         </div>
@@ -559,6 +581,73 @@ export default function Obras() {
                   <div className="text-error font-bold">{moeda(parseFloat(g.valor))}</div>
                 </div>
               ))}
+          </div>
+        )}
+
+        {/* aba cronograma */}
+        {abaDetalhe === 'cronograma' && orcamentoObra && (
+          <div className={sectionCls}>
+            <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
+              <div>
+                <div className="text-sm font-bold text-on-surface">📅 Cronograma da Obra</div>
+                <div className="text-body-sm text-on-surface-variant mt-0.5">Uma etapa por serviço do orçamento vinculado — preencha as datas previstas</div>
+              </div>
+            </div>
+            {etapasObra.length === 0 ? (
+              <div className="text-center py-8 text-on-surface-variant">Nenhuma etapa encontrada. Volte ao orçamento vinculado e re-selecione a obra para gerar as etapas.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b border-outline-variant">
+                      {['Ambiente', 'Serviço', 'Início Previsto', 'Fim Previsto', 'Status'].map(h => (
+                        <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {etapasObra.map(et => {
+                      const item = orcItens.find(i => i.id === et.orcamento_item_id)
+                      const amb = item ? orcAmbientes.find(a => a.id === item.ambiente_id) : null
+                      const atrasadaEtapa = !!(et.data_fim_prevista && new Date(et.data_fim_prevista) < hoje && et.status !== 'concluida')
+                      return (
+                        <tr key={et.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
+                          <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{amb?.nome || '—'}</td>
+                          <td className="px-3 py-2.5 font-semibold text-on-surface">{item?.servico || '—'}</td>
+                          <td className="px-3 py-2.5">
+                            <input type="date" className={inputCls + ' text-xs py-1.5'} value={et.data_inicio_prevista || ''}
+                              onChange={e => {
+                                const v = e.target.value
+                                setEtapas(etapas.map(x => x.id === et.id ? { ...x, data_inicio_prevista: v } : x))
+                                editar('cronograma_etapas', et.id, { data_inicio_prevista: v || null })
+                              }} />
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <input type="date" className={inputCls + ' text-xs py-1.5'} value={et.data_fim_prevista || ''}
+                              onChange={e => {
+                                const v = e.target.value
+                                setEtapas(etapas.map(x => x.id === et.id ? { ...x, data_fim_prevista: v } : x))
+                                editar('cronograma_etapas', et.id, { data_fim_prevista: v || null })
+                              }} />
+                          </td>
+                          <td className="px-3 py-2.5">
+                            <select className={inputCls + ' text-xs py-1.5 w-auto'} value={et.status}
+                              onChange={e => {
+                                const v = e.target.value
+                                setEtapas(etapas.map(x => x.id === et.id ? { ...x, status: v } : x))
+                                editar('cronograma_etapas', et.id, { status: v })
+                              }}>
+                              {Object.entries(ETAPA_STATUS).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+                            </select>
+                            {atrasadaEtapa && <div className="text-[10px] text-error mt-1">⚠️ prazo vencido</div>}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         )}
 

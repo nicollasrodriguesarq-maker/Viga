@@ -11,6 +11,24 @@ const moeda = (v: number) => Number(v||0).toLocaleString('pt-BR', { style: 'curr
 const num = (v: string) => parseFloat(String(v || '0').replace(',', '.')) || 0
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']
 
+// Calcula a área/quantidade conforme a unidade: m² usa comprimento x altura
+// (medida típica de parede), com fallback pra comprimento x largura quando não
+// há altura informada (medida típica de piso); m³ usa os três; demais
+// unidades (ml, un, vb, cj, kg, hr) ficam para preenchimento manual.
+function calcularArea(unidade: string, comprimento: string, largura: string, altura: string): string {
+  const c = num(comprimento), l = num(largura), a = num(altura)
+  if (unidade === 'm²') {
+    if (c && a) return (c * a).toFixed(2)
+    if (c && l) return (c * l).toFixed(2)
+    return ''
+  }
+  if (unidade === 'm³') {
+    if (c && l && a) return (c * l * a).toFixed(2)
+    return ''
+  }
+  return ''
+}
+
 async function uploadFotoServico(file: File): Promise<string | null> {
   const ext = file.name.split('.').pop()
   const nome = `foto_${Date.now()}.${ext}`
@@ -177,7 +195,7 @@ export default function Levantamento() {
 
   async function salvarItem() {
     if (!ambienteAtivo || !fItem.servico) return alert('Preencha o serviço')
-    const area = fItem.area ? num(fItem.area) : (num(fItem.comprimento) * num(fItem.largura))
+    const area = fItem.area ? num(fItem.area) : num(calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura))
     let fotoUrl = fItem.foto_url
     if (arquivoFoto) {
       setEnviandoFoto(true)
@@ -395,8 +413,7 @@ export default function Levantamento() {
 
       <div style="height:110px;border-radius:12px;background:linear-gradient(120deg,#171c23,#1b2027);border:1px solid #3d4948;display:flex;align-items:center;padding:0 24px;margin-bottom:12px">
         <div>
-          <p style="font-size:18px;font-weight:600;color:#dee2ec">${nomeEmpresa.toUpperCase()} GESTÃO INTEGRADA</p>
-          <p style="font-size:12px;color:#6ee9e0">Engenharia, Medição e Resultados.</p>
+          <p style="font-size:18px;font-weight:600;color:#dee2ec">${nomeEmpresa.toUpperCase()}</p>
         </div>
       </div>
 
@@ -739,27 +756,33 @@ export default function Levantamento() {
                   <label className={labelCls}>Comprim. (m)</label>
                   <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.comprimento}
                     onChange={e => {
-                      const c = e.target.value; const l = fItem.largura
-                      const area = c && l ? (num(c) * num(l)).toFixed(2) : ''
-                      setFItem({ ...fItem, comprimento: c, area })
+                      const c = e.target.value
+                      setFItem({ ...fItem, comprimento: c, area: calcularArea(fItem.unidade, c, fItem.largura, fItem.altura) })
                     }} />
                 </div>
                 <div>
                   <label className={labelCls}>Largura (m)</label>
                   <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.largura}
                     onChange={e => {
-                      const l = e.target.value; const c = fItem.comprimento
-                      const area = c && l ? (num(c) * num(l)).toFixed(2) : ''
-                      setFItem({ ...fItem, largura: l, area })
+                      const l = e.target.value
+                      setFItem({ ...fItem, largura: l, area: calcularArea(fItem.unidade, fItem.comprimento, l, fItem.altura) })
                     }} />
                 </div>
                 <div>
                   <label className={labelCls}>Altura (m)</label>
-                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.altura} onChange={e => setFItem({ ...fItem, altura: e.target.value })} />
+                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.altura}
+                    onChange={e => {
+                      const a = e.target.value
+                      setFItem({ ...fItem, altura: a, area: calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, a) })
+                    }} />
                 </div>
                 <div>
                   <label className={labelCls}>Unidade</label>
-                  <select className={inputCls} value={fItem.unidade} onChange={e => setFItem({ ...fItem, unidade: e.target.value })}>
+                  <select className={inputCls} value={fItem.unidade}
+                    onChange={e => {
+                      const u = e.target.value
+                      setFItem({ ...fItem, unidade: u, area: calcularArea(u, fItem.comprimento, fItem.largura, fItem.altura) })
+                    }}>
                     {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
                   </select>
                 </div>
@@ -767,7 +790,12 @@ export default function Levantamento() {
               <div className="mb-3.5">
                 <label className={labelCls}>Área / Quantidade calculada</label>
                 <input className={inputCls + ' text-primary font-bold'} placeholder="Calculado automaticamente ou digite" value={fItem.area} onChange={e => setFItem({ ...fItem, area: e.target.value })} />
-                {fItem.comprimento && fItem.largura && <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {(num(fItem.comprimento) * num(fItem.largura)).toFixed(2)} m²</div>}
+                {fItem.unidade === 'm²' && fItem.comprimento && (fItem.altura || fItem.largura) && (
+                  <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {fItem.comprimento}m × {fItem.altura || fItem.largura}m{fItem.altura ? ' (altura)' : ' (largura)'} = {calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura)} m²</div>
+                )}
+                {fItem.unidade === 'm³' && fItem.comprimento && fItem.largura && fItem.altura && (
+                  <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {fItem.comprimento}m × {fItem.largura}m × {fItem.altura}m = {calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura)} m³</div>
+                )}
               </div>
               <div className="mb-5">
                 <label className={labelCls}>Observação técnica</label>

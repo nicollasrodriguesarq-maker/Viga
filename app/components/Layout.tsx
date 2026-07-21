@@ -2,6 +2,7 @@
 import { ReactNode } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import AlertsBell from './AlertsBell'
 
 interface NavItem {
   icon: string
@@ -99,7 +100,17 @@ export default function Layout({ children, userEmail, onLogout, topbarSlot, sear
         <div className="flex items-center flex-1 max-w-xl">
           {searchSlot ?? (headerTitle && <h2 className="font-headline text-headline-sm text-on-surface">{headerTitle}</h2>)}
         </div>
-        <div className="flex items-center gap-md">{topbarSlot}</div>
+        <div className="flex items-center gap-md">
+          <AlertsBell />
+          <Link
+            href="/configuracoes"
+            className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer"
+          >
+            settings
+          </Link>
+          {topbarSlot && <div className="h-8 w-[1px] bg-outline-variant" />}
+          {topbarSlot}
+        </div>
       </header>
 
       <main className="ml-64 p-lg overflow-y-auto h-[calc(100vh-5rem)] custom-scrollbar">

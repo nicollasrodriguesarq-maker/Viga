@@ -323,14 +323,6 @@ export default function Orcamento() {
     !busca || [o.cliente_nome, o.codigo, o.endereco].some(v => v?.toLowerCase().includes(busca.toLowerCase()))
   )
 
-  const topbarIcons = (
-    <>
-      <span className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer">notifications</span>
-      <span className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer">settings</span>
-      <div className="h-8 w-[1px] bg-outline-variant" />
-    </>
-  )
-
   if (loading) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
       <div className="text-primary text-lg">Carregando orçamentos...</div>
@@ -349,7 +341,7 @@ export default function Orcamento() {
     const bancoBusca = bancoItens.filter(b => !buscaBanco || b.nome.toLowerCase().includes(buscaBanco.toLowerCase()))
 
     return (
-      <Layout userEmail={userEmail} onLogout={sair} topbarSlot={topbarIcons}>
+      <Layout userEmail={userEmail} onLogout={sair}>
         <div className="flex items-start justify-between gap-4 flex-wrap mb-lg">
           <div>
             <button onClick={() => { setDetalhe(null); setAmbienteAtivo(null) }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
@@ -710,7 +702,6 @@ export default function Orcamento() {
       }
       topbarSlot={
         <>
-          {topbarIcons}
           <button
             onClick={() => { setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '' }); setJanela('orcamento') }}
             className="flex items-center gap-2 px-4 py-2 bg-primary-container text-on-primary-container rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary-container/20"

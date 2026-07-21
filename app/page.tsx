@@ -178,15 +178,10 @@ export default function Home() {
           </div>
         }
         topbarSlot={
-          <>
-            <span className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer">notifications</span>
-            <span className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer">settings</span>
-            <div className="h-8 w-[1px] bg-outline-variant" />
-            <Link href="/financeiro" className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20">
-              <span className="material-symbols-outlined text-[20px]">add</span>
-              Novo Lançamento
-            </Link>
-          </>
+          <Link href="/financeiro" className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20">
+            <span className="material-symbols-outlined text-[20px]">add</span>
+            Novo Lançamento
+          </Link>
         }
       >
         {/* Saudação */}

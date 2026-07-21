@@ -277,14 +277,6 @@ export default function Obras() {
     return matchStatus && matchBusca
   })
 
-  const topbarIcons = (
-    <>
-      <span className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer">notifications</span>
-      <span className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer">settings</span>
-      <div className="h-8 w-[1px] bg-outline-variant" />
-    </>
-  )
-
   // ── LOADING ───────────────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
@@ -309,7 +301,7 @@ export default function Obras() {
     const pctMargem = receitas > 0 ? Math.min(Math.max(((receitas - custos) / receitas) * 100, 0), 100) : 0
 
     return (
-      <Layout userEmail={userEmail} onLogout={sair} topbarSlot={topbarIcons}>
+      <Layout userEmail={userEmail} onLogout={sair}>
         {/* header da obra */}
         <div className="flex items-start justify-between gap-4 flex-wrap mb-lg">
           <div>
@@ -654,7 +646,6 @@ export default function Obras() {
       }
       topbarSlot={
         <>
-          {topbarIcons}
           <button onClick={abrirNovaObra} className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20">
             <span className="material-symbols-outlined text-[20px]">add</span>
             Nova Obra

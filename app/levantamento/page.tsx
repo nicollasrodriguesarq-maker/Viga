@@ -206,14 +206,6 @@ export default function Levantamento() {
     !busca || [l.cliente, l.codigo, l.endereco].some(v => v?.toLowerCase().includes(busca.toLowerCase()))
   )
 
-  const topbarIcons = (
-    <>
-      <span className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer">notifications</span>
-      <span className="material-symbols-outlined p-2 text-on-surface-variant hover:bg-primary-container/10 rounded-xl transition-all cursor-pointer">settings</span>
-      <div className="h-8 w-[1px] bg-outline-variant" />
-    </>
-  )
-
   if (loading) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
       <div className="text-primary text-lg">Carregando levantamentos...</div>
@@ -226,7 +218,7 @@ export default function Levantamento() {
     const itensDetalhe = itens.filter(i => i.levantamento_id === detalhe.id)
 
     return (
-      <Layout userEmail={userEmail} onLogout={sair} topbarSlot={topbarIcons}>
+      <Layout userEmail={userEmail} onLogout={sair}>
         <div className="flex items-start justify-between gap-4 flex-wrap mb-lg">
           <div>
             <button onClick={() => { setDetalhe(null); setAmbienteAtivo(null) }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
@@ -513,7 +505,6 @@ export default function Levantamento() {
       }
       topbarSlot={
         <>
-          {topbarIcons}
           <button
             onClick={() => { setFLev({ codigo: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '' }); setJanela('levantamento') }}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20"

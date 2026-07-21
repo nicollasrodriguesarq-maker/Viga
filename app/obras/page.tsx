@@ -26,7 +26,8 @@ async function criar(tabela: string, dados: object) {
       headers: { ...HDR, 'Prefer': 'return=representation' },
       body: JSON.stringify(dados)
     })
-    return await r.json()
+    const d = await r.json()
+    return Array.isArray(d) ? d[0] : d
   } catch { return null }
 }
 
@@ -125,10 +126,15 @@ export default function Obras() {
   const [orcAmbientes, setOrcAmbientes] = useState<any[]>([])
   const [orcItens, setOrcItens] = useState<any[]>([])
   const [etapas, setEtapas] = useState<any[]>([])
+  const [medicoes, setMedicoes] = useState<any[]>([])
+  const [medItens, setMedItens] = useState<any[]>([])
+  const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
+  const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
+  const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '' })
   const [loading,  setLoading]  = useState(true)
   const [detalhe,  setDetalhe]  = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('resumo')
-  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | null>(null)
+  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | null>(null)
   const [filtro,   setFiltro]   = useState('todos')
   const [busca,    setBusca]    = useState('')
   const [userEmail, setUserEmail] = useState('')
@@ -166,7 +172,7 @@ export default function Obras() {
 
   async function carregar() {
     setLoading(true)
-    const [o, l, g, s, orc, orcAmb, orcIt, et] = await Promise.all([
+    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt] = await Promise.all([
       buscar('obras', '?order=created_at.desc'),
       buscar('lancamentos', '?order=data.desc'),
       buscar('gastos_cartao', '?order=data.desc'),
@@ -175,6 +181,8 @@ export default function Obras() {
       buscar('orcamento_ambientes', '?order=ordem'),
       buscar('orcamento_itens', '?order=created_at'),
       buscar('cronograma_etapas', '?order=created_at'),
+      buscar('medicoes', '?order=data.desc'),
+      buscar('medicao_itens', '?order=created_at'),
     ])
     setObras(o)
     setLancs(l)
@@ -184,7 +192,162 @@ export default function Obras() {
     setOrcAmbientes(orcAmb)
     setOrcItens(orcIt)
     setEtapas(et)
+    setMedicoes(med)
+    setMedItens(medIt)
     setLoading(false)
+  }
+
+  // ── Medições ──────────────────────────────────────────────
+  function ultimoRegistro(orcamentoItemId: string, medicaoIdAtual?: string) {
+    return medItens
+      .filter(mi => mi.orcamento_item_id === orcamentoItemId && mi.medicao_id !== medicaoIdAtual)
+      .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
+      .filter(mi => mi.medicao)
+      .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0] || null
+  }
+
+  function abrirPreenchimentoMedicao(medicao: any, itensFiltrados: any[]) {
+    const preench: Record<string, { valor_base: string; percentual: string }> = {}
+    itensFiltrados.forEach(item => {
+      const existente = medItens.find(mi => mi.medicao_id === medicao.id && mi.orcamento_item_id === item.id)
+      const ultimo = ultimoRegistro(item.id, medicao.id)
+      preench[item.id] = {
+        valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(parseFloat(item.total_item || 0))),
+        percentual: existente ? String(existente.percentual_acumulado * 100) : (ultimo ? String(ultimo.percentual_acumulado * 100) : '0'),
+      }
+    })
+    setPreenchimento(preench)
+    setMedicaoAtiva(medicao)
+  }
+
+  async function criarMedicao(orcamentoId: string) {
+    const ano = new Date().getFullYear()
+    const medicoesObraAno = medicoes.filter(m => m.obra_id === detalhe.id && m.numero?.startsWith('MED-' + ano))
+    const numero = 'MED-' + ano + '-' + String(medicoesObraAno.length + 1).padStart(3, '0')
+    const nova = await criar('medicoes', {
+      obra_id: detalhe.id,
+      orcamento_id: orcamentoId,
+      tipo: fMedicao.tipo,
+      fornecedor: fMedicao.tipo === 'fornecedor' ? (fMedicao.fornecedor || null) : null,
+      numero,
+      data: fMedicao.data,
+      observacao: fMedicao.observacao,
+      status: 'rascunho',
+    })
+    setJanela(null)
+    if (nova?.id) {
+      const [med, medIt] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('medicao_itens', '?order=created_at')])
+      setMedicoes(med); setMedItens(medIt)
+      const itensOrc = orcItens.filter(i => i.orcamento_id === orcamentoId)
+      const itensFiltrados = itensOrc.filter(i => nova.tipo !== 'fornecedor' || !nova.fornecedor || i.fornecedor === nova.fornecedor)
+      abrirPreenchimentoMedicao(nova, itensFiltrados)
+    }
+  }
+
+  async function salvarPreenchimentoMedicao(itensFiltrados: any[]) {
+    for (const item of itensFiltrados) {
+      const p = preenchimento[item.id]
+      if (!p) continue
+      const existente = medItens.find(mi => mi.medicao_id === medicaoAtiva.id && mi.orcamento_item_id === item.id)
+      const dados = {
+        medicao_id: medicaoAtiva.id,
+        orcamento_item_id: item.id,
+        valor_base: parseFloat(p.valor_base || '0'),
+        percentual_acumulado: parseFloat(p.percentual || '0') / 100,
+      }
+      if (existente) await editar('medicao_itens', existente.id, dados)
+      else await criar('medicao_itens', dados)
+    }
+    const medIt = await buscar('medicao_itens', '?order=created_at')
+    setMedItens(medIt)
+    alert('Medição salva!')
+  }
+
+  async function gerarPDFMedicao(medicao: any, linhas: any[], obra: any) {
+    const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
+    const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const totalPeriodo = linhas.reduce((a, l) => a + l.valorPeriodo, 0)
+    const totalRetencao = linhas.reduce((a, l) => a + l.retencao, 0)
+    const totalLiquido = linhas.reduce((a, l) => a + l.liquido, 0)
+
+    const linhasHtml = linhas.map(l => `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${l.item.servico}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${parseFloat(l.p.percentual || '0').toFixed(1)}%</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right">${moeda(l.valorPeriodo)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;color:#ffb4ab">${moeda(l.retencao)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;font-weight:700;color:#6ee9e0">${moeda(l.liquido)}</td>
+      </tr>`).join('')
+
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>${medicao.numero} — ${nomeEmpresa}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
+      h1,h2 { font-family:'Manrope',sans-serif; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    </style></head><body>
+    <div style="max-width:900px;margin:0 auto;padding:40px 36px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
+        <div>
+          <h1 style="font-size:24px;font-weight:700;color:#6ee9e0;text-transform:uppercase">Boletim de Medição</h1>
+          <p style="color:#bcc9c7">${medicao.tipo === 'fornecedor' ? 'Pagamento a Fornecedor' : 'Cobrança ao Cliente'}</p>
+        </div>
+        <div style="text-align:right">
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:32px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          <p style="font-size:10px;color:#869391">Nº ${medicao.numero}</p>
+          <p style="font-size:10px;color:#869391">Data: ${new Date(medicao.data).toLocaleDateString('pt-BR')}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Obra</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${obra?.nome || ''}</p>
+          <p style="font-size:12px;color:#bcc9c7">${obra?.cliente || ''}</p>
+        </div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#869391;text-transform:uppercase">${medicao.tipo === 'fornecedor' ? 'Fornecedor' : 'Cliente'}</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${medicao.tipo === 'fornecedor' ? (medicao.fornecedor || '—') : (obra?.cliente || '—')}</p>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <thead>
+          <tr style="background:#252a32">
+            <th style="padding:8px 10px;text-align:left;font-size:10px;color:#869391;text-transform:uppercase">Serviço</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#869391;text-transform:uppercase">% Acum.</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;color:#869391;text-transform:uppercase">Valor Período</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;color:#869391;text-transform:uppercase">Retenção</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;color:#869391;text-transform:uppercase">Líquido</th>
+          </tr>
+        </thead>
+        <tbody>${linhasHtml}</tbody>
+        <tfoot>
+          <tr style="background:#1b2027">
+            <td colspan="2" style="padding:10px;font-weight:700">TOTAL</td>
+            <td style="padding:10px;text-align:right;font-weight:700;color:#6ee9e0">${moeda(totalPeriodo)}</td>
+            <td style="padding:10px;text-align:right;font-weight:700;color:#ffb4ab">${moeda(totalRetencao)}</td>
+            <td style="padding:10px;text-align:right;font-weight:900;color:#6ee9e0;font-size:15px">${moeda(totalLiquido)}</td>
+          </tr>
+        </tfoot>
+      </table>
+      ${medicao.observacao ? `<div style="margin-bottom:20px;padding:14px;background:#1b2027;border:1px solid #3d4948;border-radius:8px"><span style="font-size:10px;color:#869391;text-transform:uppercase">Observações</span><p style="margin-top:4px;color:#bcc9c7">${medicao.observacao}</p></div>` : ''}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:60px;padding-top:20px">
+        <div style="text-align:center">
+          <div style="width:100%;height:1px;background:#3d4948;margin-bottom:8px"></div>
+          <p style="font-size:11px;font-weight:700">${nomeEmpresa}</p>
+        </div>
+        <div style="text-align:center">
+          <div style="width:100%;height:1px;background:#3d4948;margin-bottom:8px"></div>
+          <p style="font-size:11px;font-weight:700">${medicao.tipo === 'fornecedor' ? (medicao.fornecedor || 'Fornecedor') : (obra?.cliente || 'Cliente')}</p>
+        </div>
+      </div>
+    </div>
+    <script>window.onload = () => { window.print() }</script>
+    </body></html>`
+
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
   }
 
   // ── cálculos ──────────────────────────────────────────────
@@ -324,13 +487,16 @@ export default function Obras() {
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
     const etapasObra = etapas.filter(e => e.obra_id === detalhe.id)
     const hoje = new Date(); hoje.setHours(0,0,0,0)
+    const itensDoOrcamento = orcamentoObra ? orcItens.filter(i => i.orcamento_id === orcamentoObra.id) : []
+    const medicoesObra = medicoes.filter(m => m.obra_id === detalhe.id)
+    const fornecedoresDisponiveis = Array.from(new Set(itensDoOrcamento.map(i => i.fornecedor).filter(Boolean))) as string[]
 
     return (
       <Layout userEmail={userEmail} onLogout={sair}>
         {/* header da obra */}
         <div className="flex items-start justify-between gap-4 flex-wrap mb-lg">
           <div>
-            <button onClick={() => { setDetalhe(null); setAbaDetalhe('resumo') }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
+            <button onClick={() => { setDetalhe(null); setAbaDetalhe('resumo'); setMedicaoAtiva(null) }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-body-sm text-on-surface-variant font-semibold">{detalhe.codigo}</span>
               <Bdg status={detalhe.status} />
@@ -399,7 +565,7 @@ export default function Obras() {
 
         {/* abas */}
         <div className="flex gap-2 mb-lg flex-wrap">
-          {([['resumo', '📋 Resumo'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ...(orcamentoObra ? [['cronograma', '📅 Cronograma']] as [string, string][] : [])] as [string, string][]).map(([id, nome]) => (
+          {([['resumo', '📋 Resumo'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ...(orcamentoObra ? [['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições']] as [string, string][] : [])] as [string, string][]).map(([id, nome]) => (
             <button key={id} className={abaDetalhe === id ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe(id)}>{nome}</button>
           ))}
         </div>
@@ -651,6 +817,164 @@ export default function Obras() {
           </div>
         )}
 
+        {/* aba medições — lista */}
+        {abaDetalhe === 'medicoes' && orcamentoObra && !medicaoAtiva && (
+          <div className={sectionCls}>
+            <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
+              <div>
+                <div className="text-sm font-bold text-on-surface">📐 Medições</div>
+                <div className="text-body-sm text-on-surface-variant mt-0.5">Avanço físico-financeiro para pagar fornecedores ou cobrar o cliente</div>
+              </div>
+              <button className={btnPrimaryCls} onClick={() => { setFMedicao({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '' }); setJanela('nova_medicao') }}>+ Nova Medição</button>
+            </div>
+            {medicoesObra.length === 0 ? (
+              <div className="text-center py-8 text-on-surface-variant">Nenhuma medição ainda</div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {medicoesObra.map(med => {
+                  const itensFiltrados = itensDoOrcamento.filter(i => med.tipo !== 'fornecedor' || !med.fornecedor || i.fornecedor === med.fornecedor)
+                  const itensMed = medItens.filter(mi => mi.medicao_id === med.id)
+                  const totalPeriodo = itensMed.reduce((acc, mi) => {
+                    const ultimo = ultimoRegistro(mi.orcamento_item_id, med.id)
+                    const acumAnt = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
+                    const acumAtual = mi.valor_base * mi.percentual_acumulado
+                    return acc + (acumAtual - acumAnt)
+                  }, 0)
+                  return (
+                    <div key={med.id} className="flex justify-between items-center px-4 py-3 bg-surface-container-low rounded-lg border border-outline-variant flex-wrap gap-2">
+                      <div>
+                        <div className="font-semibold text-sm text-on-surface">{med.numero} · {med.tipo === 'fornecedor' ? `Fornecedor: ${med.fornecedor || '—'}` : 'Cliente'}</div>
+                        <div className="text-[11px] text-on-surface-variant">{med.data} · {itensFiltrados.length} item(ns) · {moeda(totalPeriodo)} no período</div>
+                      </div>
+                      <div className="flex gap-2">
+                        <button className={btnEditSmCls} onClick={() => abrirPreenchimentoMedicao(med, itensFiltrados)}>Abrir</button>
+                        <button className={btnDangerSmCls} onClick={async () => { if (confirm('Excluir esta medição?')) { await remover('medicoes', med.id); carregar() } }}>×</button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* aba medições — preenchimento */}
+        {abaDetalhe === 'medicoes' && medicaoAtiva && (() => {
+          const itensFiltrados = itensDoOrcamento.filter(i => medicaoAtiva.tipo !== 'fornecedor' || !medicaoAtiva.fornecedor || i.fornecedor === medicaoAtiva.fornecedor)
+          const retPct = parseFloat(orcamentoObra?.retencao_percentual || 0)
+          let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
+          const linhas = itensFiltrados.map(item => {
+            const p = preenchimento[item.id] || { valor_base: String(parseFloat(item.total_item || 0)), percentual: '0' }
+            const ultimo = ultimoRegistro(item.id, medicaoAtiva.id)
+            const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
+            const valorBase = parseFloat(p.valor_base || '0')
+            const percAtual = parseFloat(p.percentual || '0') / 100
+            const acumAtual = valorBase * percAtual
+            const valorPeriodo = acumAtual - acumAnterior
+            const retencao = valorPeriodo * retPct
+            const liquido = valorPeriodo - retencao
+            totalPeriodo += valorPeriodo; totalRetencao += retencao; totalLiquido += liquido
+            return { item, p, acumAnterior, acumAtual, valorPeriodo, retencao, liquido }
+          })
+          return (
+            <div className={sectionCls}>
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div>
+                  <button className={btnSecondaryCls + ' mb-2'} onClick={() => setMedicaoAtiva(null)}>← Voltar às Medições</button>
+                  <div className="text-sm font-bold text-on-surface">{medicaoAtiva.numero} — {medicaoAtiva.tipo === 'fornecedor' ? `Fornecedor: ${medicaoAtiva.fornecedor || '—'}` : 'Cliente'}</div>
+                  <div className="text-[11px] text-on-surface-variant">{medicaoAtiva.data} · Retenção {(retPct * 100).toFixed(1)}%</div>
+                </div>
+                <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPDFMedicao(medicaoAtiva, linhas, detalhe)}>🖨️ Gerar Boletim PDF</button>
+              </div>
+              {linhas.length === 0 ? (
+                <div className="text-center py-8 text-on-surface-variant">Nenhum item para medir (verifique o fornecedor filtrado)</div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-outline-variant">
+                        {['Serviço', 'Valor Base', '% Acumulado', 'Valor Acum.', 'Valor Período', 'Retenção', 'Líquido'].map(h => (
+                          <th key={h} className="text-left px-2.5 py-2 text-[10px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {linhas.map(({ item, p, acumAtual, valorPeriodo, retencao, liquido }) => (
+                        <tr key={item.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
+                          <td className="px-2.5 py-2.5 font-semibold text-on-surface">
+                            {item.servico}
+                            {item.fornecedor && <div className="text-[10px] text-on-surface-variant font-normal">{item.fornecedor}</div>}
+                          </td>
+                          <td className="px-2.5 py-2.5">
+                            <input className={inputCls + ' text-xs py-1.5 w-28'} type="number" value={p.valor_base}
+                              onChange={e => setPreenchimento({ ...preenchimento, [item.id]: { ...p, valor_base: e.target.value } })} />
+                          </td>
+                          <td className="px-2.5 py-2.5">
+                            <input className={inputCls + ' text-xs py-1.5 w-20'} type="number" min="0" max="100" value={p.percentual}
+                              onChange={e => setPreenchimento({ ...preenchimento, [item.id]: { ...p, percentual: e.target.value } })} />
+                          </td>
+                          <td className="px-2.5 py-2.5 text-on-surface-variant">{moeda(acumAtual)}</td>
+                          <td className="px-2.5 py-2.5 font-semibold text-primary">{moeda(valorPeriodo)}</td>
+                          <td className="px-2.5 py-2.5 text-error">{moeda(retencao)}</td>
+                          <td className="px-2.5 py-2.5 font-bold text-primary-container">{moeda(liquido)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-surface-container-low">
+                        <td colSpan={4} className="px-2.5 py-2.5 font-bold text-on-surface">Total desta medição</td>
+                        <td className="px-2.5 py-2.5 font-black text-primary">{moeda(totalPeriodo)}</td>
+                        <td className="px-2.5 py-2.5 font-bold text-error">{moeda(totalRetencao)}</td>
+                        <td className="px-2.5 py-2.5 font-black text-primary-container">{moeda(totalLiquido)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              )}
+              <div className="flex gap-2 justify-end mt-4">
+                <button className={btnPrimaryCls} onClick={() => salvarPreenchimentoMedicao(itensFiltrados)}>Salvar Medição</button>
+              </div>
+            </div>
+          )
+        })()}
+
+        {/* modal nova medição */}
+        {janela === 'nova_medicao' && orcamentoObra && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
+              <div className="text-base font-bold text-on-surface mb-5">📐 Nova Medição</div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Tipo</label>
+                <select className={inputCls} value={fMedicao.tipo} onChange={e => setFMedicao({ ...fMedicao, tipo: e.target.value, fornecedor: '' })}>
+                  <option value="cliente">Cobrar Cliente</option>
+                  <option value="fornecedor">Pagar Fornecedor</option>
+                </select>
+              </div>
+              {fMedicao.tipo === 'fornecedor' && (
+                <div className="mb-3.5">
+                  <label className={labelCls}>Fornecedor / Equipe</label>
+                  <select className={inputCls} value={fMedicao.fornecedor} onChange={e => setFMedicao({ ...fMedicao, fornecedor: e.target.value })}>
+                    <option value="">Todos os itens sem fornecedor específico</option>
+                    {fornecedoresDisponiveis.map(f => <option key={f} value={f}>{f}</option>)}
+                  </select>
+                </div>
+              )}
+              <div className="mb-3.5">
+                <label className={labelCls}>Data</label>
+                <input className={inputCls} type="date" value={fMedicao.data} onChange={e => setFMedicao({ ...fMedicao, data: e.target.value })} />
+              </div>
+              <div className="mb-5">
+                <label className={labelCls}>Observação</label>
+                <input className={inputCls} value={fMedicao.observacao} onChange={e => setFMedicao({ ...fMedicao, observacao: e.target.value })} />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={() => criarMedicao(orcamentoObra.id)}>Criar e Preencher</button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* modal editar obra */}
         {janela === 'editar_obra' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
@@ -803,7 +1127,7 @@ export default function Obras() {
             const margem = rr - cc
             return (
               <div key={o.id}
-                onClick={() => { setDetalhe(o); setAbaDetalhe('resumo') }}
+                onClick={() => { setDetalhe(o); setAbaDetalhe('resumo'); setMedicaoAtiva(null) }}
                 className="bg-surface-container/70 backdrop-blur-md border border-outline-variant hover:border-primary transition-all duration-300 rounded-xl overflow-hidden flex flex-col cursor-pointer">
                 <div className="p-lg space-y-3 border-b border-outline-variant bg-surface-container-low/50">
                   <div className="flex justify-between items-start gap-2 flex-wrap">

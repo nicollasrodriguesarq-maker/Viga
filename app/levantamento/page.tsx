@@ -8,6 +8,7 @@ const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const H = { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': 'Bearer ' + ANON }
 
 const moeda = (v: number) => Number(v||0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const num = (v: string) => parseFloat(String(v || '0').replace(',', '.')) || 0
 
 async function buscar(tabela: string, q = '') {
   try {
@@ -147,16 +148,16 @@ export default function Levantamento() {
 
   async function salvarItem() {
     if (!ambienteAtivo || !fItem.servico) return alert('Preencha o serviço')
-    const area = fItem.area || (parseFloat(fItem.comprimento||'0') * parseFloat(fItem.largura||'0')).toFixed(2)
+    const area = fItem.area ? num(fItem.area) : (num(fItem.comprimento) * num(fItem.largura))
     const dados = {
-      ambiente_id: ambienteAtivo.id,
+      ambiente: ambienteAtivo.id,
       levantamento_id: detalhe.id,
       servico: fItem.servico,
       descricao: fItem.descricao,
-      comprimento: parseFloat(fItem.comprimento||'0')||null,
-      largura: parseFloat(fItem.largura||'0')||null,
-      altura: parseFloat(fItem.altura||'0')||null,
-      area: parseFloat(area)||null,
+      comprimento: num(fItem.comprimento) || null,
+      largura: num(fItem.largura) || null,
+      altura: num(fItem.altura) || null,
+      area: area || null,
       unidade: fItem.unidade,
       observacao: fItem.observacao,
     }
@@ -185,7 +186,7 @@ export default function Levantamento() {
       for (const amb of ambsLev) {
         const oa = await criar('orcamento_ambientes', { orcamento_id: orc.id, nome: amb.nome, ordem: amb.ordem })
         if (oa?.id) {
-          const itensAmb = itens.filter(i => i.ambiente_id === amb.id)
+          const itensAmb = itens.filter(i => i.ambiente === amb.id)
           for (const item of itensAmb) {
             await criar('orcamento_itens', {
               orcamento_id: orc.id,
@@ -279,7 +280,7 @@ export default function Levantamento() {
             ) : (
               <div className="flex flex-col gap-3">
                 {ambsDetalhe.map(amb => {
-                  const itensAmb = itens.filter(i => i.ambiente_id === amb.id)
+                  const itensAmb = itens.filter(i => i.ambiente === amb.id)
                   const isAtivo = ambienteAtivo?.id === amb.id
                   return (
                     <div key={amb.id} className={`rounded-xl overflow-hidden border ${isAtivo ? 'border-primary bg-primary/5' : 'border-outline-variant bg-background'}`}>
@@ -361,7 +362,7 @@ export default function Levantamento() {
             {ambsDetalhe.length === 0 ? (
               <div className="text-center py-8 text-on-surface-variant">Nenhum ambiente cadastrado</div>
             ) : ambsDetalhe.map(amb => {
-              const itensAmb = itens.filter(i => i.ambiente_id === amb.id)
+              const itensAmb = itens.filter(i => i.ambiente === amb.id)
               return (
                 <div key={amb.id} className="mb-5 pb-5 border-b border-outline-variant last:border-0">
                   <div className="text-sm font-bold text-primary mb-2.5">🏠 {amb.nome}</div>
@@ -442,25 +443,25 @@ export default function Levantamento() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3.5">
                 <div>
                   <label className={labelCls}>Comprim. (m)</label>
-                  <input className={inputCls} type="number" placeholder="0,00" value={fItem.comprimento}
+                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.comprimento}
                     onChange={e => {
                       const c = e.target.value; const l = fItem.largura
-                      const area = c && l ? (parseFloat(c) * parseFloat(l)).toFixed(2) : ''
+                      const area = c && l ? (num(c) * num(l)).toFixed(2) : ''
                       setFItem({ ...fItem, comprimento: c, area })
                     }} />
                 </div>
                 <div>
                   <label className={labelCls}>Largura (m)</label>
-                  <input className={inputCls} type="number" placeholder="0,00" value={fItem.largura}
+                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.largura}
                     onChange={e => {
                       const l = e.target.value; const c = fItem.comprimento
-                      const area = c && l ? (parseFloat(c) * parseFloat(l)).toFixed(2) : ''
+                      const area = c && l ? (num(c) * num(l)).toFixed(2) : ''
                       setFItem({ ...fItem, largura: l, area })
                     }} />
                 </div>
                 <div>
                   <label className={labelCls}>Altura (m)</label>
-                  <input className={inputCls} type="number" placeholder="0,00" value={fItem.altura} onChange={e => setFItem({ ...fItem, altura: e.target.value })} />
+                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.altura} onChange={e => setFItem({ ...fItem, altura: e.target.value })} />
                 </div>
                 <div>
                   <label className={labelCls}>Unidade</label>
@@ -472,7 +473,7 @@ export default function Levantamento() {
               <div className="mb-3.5">
                 <label className={labelCls}>Área / Quantidade calculada</label>
                 <input className={inputCls + ' text-primary font-bold'} placeholder="Calculado automaticamente ou digite" value={fItem.area} onChange={e => setFItem({ ...fItem, area: e.target.value })} />
-                {fItem.comprimento && fItem.largura && <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {(parseFloat(fItem.comprimento) * parseFloat(fItem.largura)).toFixed(2)} m²</div>}
+                {fItem.comprimento && fItem.largura && <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {(num(fItem.comprimento) * num(fItem.largura)).toFixed(2)} m²</div>}
               </div>
               <div className="mb-5">
                 <label className={labelCls}>Observação técnica</label>

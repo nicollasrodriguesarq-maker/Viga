@@ -717,7 +717,9 @@ export default function Levantamento() {
           </div>
         )}
 
-        {janela === 'item' && (
+        {janela === 'item' && (() => {
+          const usaMedidas = fItem.unidade === 'm²' || fItem.unidade === 'm³'
+          return (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
             <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[560px] max-h-[92vh] overflow-y-auto">
               <div className="text-base font-bold text-on-surface mb-1.5">{editItem ? '✏️ Editar Serviço' : '🔧 Novo Serviço'}</div>
@@ -751,52 +753,73 @@ export default function Levantamento() {
                   />
                 </div>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3.5">
-                <div>
-                  <label className={labelCls}>Comprim. (m)</label>
-                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.comprimento}
-                    onChange={e => {
-                      const c = e.target.value
-                      setFItem({ ...fItem, comprimento: c, area: calcularArea(fItem.unidade, c, fItem.largura, fItem.altura) })
-                    }} />
+              {usaMedidas ? (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3.5">
+                  <div>
+                    <label className={labelCls}>Comprim. (m)</label>
+                    <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.comprimento}
+                      onChange={e => {
+                        const c = e.target.value
+                        setFItem({ ...fItem, comprimento: c, area: calcularArea(fItem.unidade, c, fItem.largura, fItem.altura) })
+                      }} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Largura (m)</label>
+                    <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.largura}
+                      onChange={e => {
+                        const l = e.target.value
+                        setFItem({ ...fItem, largura: l, area: calcularArea(fItem.unidade, fItem.comprimento, l, fItem.altura) })
+                      }} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Altura (m)</label>
+                    <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.altura}
+                      onChange={e => {
+                        const a = e.target.value
+                        setFItem({ ...fItem, altura: a, area: calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, a) })
+                      }} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Unidade</label>
+                    <select className={inputCls} value={fItem.unidade}
+                      onChange={e => {
+                        const u = e.target.value
+                        setFItem({ ...fItem, unidade: u, area: calcularArea(u, fItem.comprimento, fItem.largura, fItem.altura) })
+                      }}>
+                      {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className={labelCls}>Largura (m)</label>
-                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.largura}
-                    onChange={e => {
-                      const l = e.target.value
-                      setFItem({ ...fItem, largura: l, area: calcularArea(fItem.unidade, fItem.comprimento, l, fItem.altura) })
-                    }} />
+              ) : (
+                <div className="grid grid-cols-2 gap-2.5 mb-3.5">
+                  <div>
+                    <label className={labelCls}>Quantidade</label>
+                    <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.area} onChange={e => setFItem({ ...fItem, area: e.target.value })} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Unidade</label>
+                    <select className={inputCls} value={fItem.unidade}
+                      onChange={e => {
+                        const u = e.target.value
+                        setFItem({ ...fItem, unidade: u, comprimento: '', largura: '', altura: '' })
+                      }}>
+                      {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
                 </div>
-                <div>
-                  <label className={labelCls}>Altura (m)</label>
-                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.altura}
-                    onChange={e => {
-                      const a = e.target.value
-                      setFItem({ ...fItem, altura: a, area: calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, a) })
-                    }} />
+              )}
+              {usaMedidas && (
+                <div className="mb-3.5">
+                  <label className={labelCls}>Área / Quantidade calculada</label>
+                  <input className={inputCls + ' text-primary font-bold'} placeholder="Calculado automaticamente ou digite" value={fItem.area} onChange={e => setFItem({ ...fItem, area: e.target.value })} />
+                  {fItem.unidade === 'm²' && fItem.comprimento && (fItem.altura || fItem.largura) && (
+                    <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {fItem.comprimento}m × {fItem.altura || fItem.largura}m{fItem.altura ? ' (altura)' : ' (largura)'} = {calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura)} m²</div>
+                  )}
+                  {fItem.unidade === 'm³' && fItem.comprimento && fItem.largura && fItem.altura && (
+                    <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {fItem.comprimento}m × {fItem.largura}m × {fItem.altura}m = {calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura)} m³</div>
+                  )}
                 </div>
-                <div>
-                  <label className={labelCls}>Unidade</label>
-                  <select className={inputCls} value={fItem.unidade}
-                    onChange={e => {
-                      const u = e.target.value
-                      setFItem({ ...fItem, unidade: u, area: calcularArea(u, fItem.comprimento, fItem.largura, fItem.altura) })
-                    }}>
-                    {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
-                </div>
-              </div>
-              <div className="mb-3.5">
-                <label className={labelCls}>Área / Quantidade calculada</label>
-                <input className={inputCls + ' text-primary font-bold'} placeholder="Calculado automaticamente ou digite" value={fItem.area} onChange={e => setFItem({ ...fItem, area: e.target.value })} />
-                {fItem.unidade === 'm²' && fItem.comprimento && (fItem.altura || fItem.largura) && (
-                  <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {fItem.comprimento}m × {fItem.altura || fItem.largura}m{fItem.altura ? ' (altura)' : ' (largura)'} = {calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura)} m²</div>
-                )}
-                {fItem.unidade === 'm³' && fItem.comprimento && fItem.largura && fItem.altura && (
-                  <div className="text-[11px] text-on-surface-variant mt-1">Calculado: {fItem.comprimento}m × {fItem.largura}m × {fItem.altura}m = {calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura)} m³</div>
-                )}
-              </div>
+              )}
               <div className="mb-5">
                 <label className={labelCls}>Observação técnica</label>
                 <input className={inputCls + (fItem.observacao ? ' border-tertiary/40' : '')} placeholder="Ex: Infiltração detectada, verificar antes de iniciar" value={fItem.observacao} onChange={e => setFItem({ ...fItem, observacao: e.target.value })} />
@@ -807,7 +830,7 @@ export default function Levantamento() {
               </div>
             </div>
           </div>
-        )}
+        )})()}
       </Layout>
     )
   }

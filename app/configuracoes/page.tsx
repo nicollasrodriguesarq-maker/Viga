@@ -35,6 +35,30 @@ async function atualizarPorSetor(setor: string, dados: object) {
   } catch {}
 }
 
+// Renova o access_token usando o refresh_token salvo no login, já que o app
+// não faz isso automaticamente e o token expira em ~1h. Se não houver
+// refresh_token (sessão antiga, de antes dessa correção) ou a renovação
+// falhar, devolve o token atual mesmo (pode já estar expirado).
+async function obterTokenValido(): Promise<string> {
+  const tokenAtual = localStorage.getItem('viga_token') || ''
+  const refreshToken = localStorage.getItem('viga_refresh_token')
+  if (!refreshToken) return tokenAtual
+  try {
+    const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    })
+    const data = await r.json()
+    if (data.access_token) {
+      localStorage.setItem('viga_token', data.access_token)
+      if (data.refresh_token) localStorage.setItem('viga_refresh_token', data.refresh_token)
+      return data.access_token
+    }
+  } catch {}
+  return tokenAtual
+}
+
 async function uploadLogo(file: File): Promise<string | null> {
   const ext = file.name.split('.').pop()
   const nome = `logo_${Date.now()}.${ext}`
@@ -73,9 +97,9 @@ export default function Configuracoes() {
     setLoading(true)
     let linha: any = null
 
-    // 1) tenta resolver pelo id, a partir do token de sessão
+    // 1) tenta resolver pelo id, a partir do token de sessão (renovando antes, se possível)
     try {
-      const token = localStorage.getItem('viga_token')
+      const token = await obterTokenValido()
       const meRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
         headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` },
       })
@@ -108,6 +132,7 @@ export default function Configuracoes() {
 
   function sair() {
     localStorage.removeItem('viga_token')
+    localStorage.removeItem('viga_refresh_token')
     localStorage.removeItem('viga_email')
     window.location.href = '/'
   }
@@ -314,7 +339,7 @@ function UsuariosTab() {
     if (novo.senha.length < 6) { setErro('A senha deve ter pelo menos 6 caracteres'); return }
     setSalvando(true); setErro('')
     try {
-      const token = localStorage.getItem('viga_token')
+      const token = await obterTokenValido()
       const r = await fetch('/api/usuarios', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },

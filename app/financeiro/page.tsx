@@ -138,6 +138,7 @@ export default function Financeiro() {
 
   function sair() {
     localStorage.removeItem('viga_token')
+    localStorage.removeItem('viga_refresh_token')
     localStorage.removeItem('viga_email')
     window.location.href = '/'
   }

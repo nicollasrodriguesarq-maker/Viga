@@ -113,6 +113,7 @@ export default function Home() {
     const data = await loginAPI(email.trim(), senha)
     if (data.access_token) {
       localStorage.setItem('viga_token', data.access_token)
+      localStorage.setItem('viga_refresh_token', data.refresh_token || '')
       localStorage.setItem('viga_email', email.trim())
       setUserEmail(email.trim())
       setLogado(true)
@@ -131,6 +132,7 @@ export default function Home() {
     if (data.id || data.user) {
       if (data.access_token) {
         localStorage.setItem('viga_token', data.access_token)
+        localStorage.setItem('viga_refresh_token', data.refresh_token || '')
         localStorage.setItem('viga_email', email.trim())
         setUserEmail(email.trim())
         setLogado(true)
@@ -149,6 +151,7 @@ export default function Home() {
 
   function sair() {
     localStorage.removeItem('viga_token')
+    localStorage.removeItem('viga_refresh_token')
     localStorage.removeItem('viga_email')
     setLogado(false); setEmail(''); setSenha(''); setUserEmail('')
   }

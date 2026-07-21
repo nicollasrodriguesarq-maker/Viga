@@ -178,7 +178,7 @@ const MODULOS_SISTEMA = [
 // ── Perfil da Empresa ──────────────────────────────────────────
 function PerfilEmpresa() {
   const [configId, setConfigId] = useState('')
-  const [form, setForm] = useState({ nome_empresa: '', cnpj: '', registro_profissional: '', registro_crea: '', emails_gerais: '', logo_url: '' })
+  const [form, setForm] = useState({ nome_empresa: '', cnpj: '', registro_profissional: '', registro_crea: '', emails_gerais: '', telefone: '', site: '', logo_url: '' })
   const [arquivoLogo, setArquivoLogo] = useState<File | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [salvo, setSalvo] = useState(false)
@@ -195,6 +195,8 @@ function PerfilEmpresa() {
         registro_profissional: rows[0].registro_profissional || '',
         registro_crea: rows[0].registro_crea || '',
         emails_gerais: rows[0].emails_gerais || '',
+        telefone: rows[0].telefone || '',
+        site: rows[0].site || '',
         logo_url: rows[0].logo_url || '',
       })
     }
@@ -267,6 +269,16 @@ function PerfilEmpresa() {
         <div>
           <label className={labelCls}>E-mails Gerais</label>
           <input className={inputCls} value={form.emails_gerais} onChange={e => setForm({ ...form, emails_gerais: e.target.value })} placeholder="contato@inversoconstrucao.com.br" />
+        </div>
+        <div>
+          <label className={labelCls}>Telefone</label>
+          <input className={inputCls} value={form.telefone} onChange={e => setForm({ ...form, telefone: e.target.value })} placeholder="(11) 4000-0000" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
+        <div>
+          <label className={labelCls}>Site</label>
+          <input className={inputCls} value={form.site} onChange={e => setForm({ ...form, site: e.target.value })} placeholder="www.inversoconstrucao.com.br" />
         </div>
       </div>
 

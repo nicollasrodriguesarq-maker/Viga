@@ -1,13 +1,14 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import { obterMinhasPermissoes } from '../lib/permissoes'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
 const H = { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
 
 type Alerta = {
-  categoria: 'obra' | 'financeiro'
+  categoria: 'obra' | 'financeiro' | 'levantamento'
   titulo: string
   descricao: string
   href: string
@@ -22,12 +23,41 @@ export default function AlertsBell() {
   useEffect(() => {
     async function carregar() {
       try {
-        const [obrasRes, lancRes] = await Promise.all([
+        const [obrasRes, lancRes, perm] = await Promise.all([
           fetch(`${SUPABASE_URL}/rest/v1/obras?status=eq.em_execucao&select=id,nome,data_previsao`, { headers: H }),
           fetch(`${SUPABASE_URL}/rest/v1/lancamentos?tipo=eq.saida&status=eq.pendente&select=id,descricao,valor,data,data_vencimento`, { headers: H }),
+          obterMinhasPermissoes(),
         ])
         const obras = await obrasRes.json()
         const lancs = await lancRes.json()
+
+        let levAlertas: Alerta[] = []
+        if (perm) {
+          try {
+            const solicRes = await fetch(`${SUPABASE_URL}/rest/v1/levantamento_solicitacoes?status=eq.pendente&select=id,levantamento_id,solicitante_nome`, { headers: H })
+            const solics = await solicRes.json()
+            if (Array.isArray(solics) && solics.length > 0) {
+              const ids = solics.map((s: any) => s.levantamento_id).join(',')
+              const levsRes = await fetch(`${SUPABASE_URL}/rest/v1/levantamentos?id=in.(${ids})&select=id,nome,cliente,criado_por`, { headers: H })
+              const levs = await levsRes.json()
+              const levsMap = new Map((Array.isArray(levs) ? levs : []).map((l: any) => [l.id, l]))
+              levAlertas = solics
+                .filter((s: any) => {
+                  const lev = levsMap.get(s.levantamento_id)
+                  return perm.role === 'admin' || (lev && lev.criado_por === perm.id)
+                })
+                .map((s: any) => {
+                  const lev = levsMap.get(s.levantamento_id) as any
+                  return {
+                    categoria: 'levantamento' as const,
+                    titulo: `${s.solicitante_nome || 'Alguém'} pediu acesso`,
+                    descricao: `Levantamento: ${lev?.nome || lev?.cliente || s.levantamento_id}`,
+                    href: '/levantamento',
+                  }
+                })
+            }
+          } catch {}
+        }
         const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
         const em7 = new Date(hoje); em7.setDate(hoje.getDate() + 7)
 
@@ -55,7 +85,7 @@ export default function AlertsBell() {
             }
           })
 
-        setAlertas([...obraAlertas, ...lancAlertas])
+        setAlertas([...obraAlertas, ...lancAlertas, ...levAlertas])
       } catch {
         setAlertas([])
       }
@@ -73,6 +103,7 @@ export default function AlertsBell() {
 
   const obraAlertas = alertas.filter(a => a.categoria === 'obra')
   const financeiroAlertas = alertas.filter(a => a.categoria === 'financeiro')
+  const levantamentoAlertas = alertas.filter(a => a.categoria === 'levantamento')
 
   function irPara(href: string) {
     setAberto(false)
@@ -121,6 +152,23 @@ export default function AlertsBell() {
                     💰 Contas a pagar
                   </div>
                   {financeiroAlertas.map((a, i) => (
+                    <button
+                      key={i}
+                      onClick={() => irPara(a.href)}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-variant/40 transition-all"
+                    >
+                      <div className="text-sm text-on-surface font-semibold">{a.titulo}</div>
+                      <div className="text-xs text-on-surface-variant">{a.descricao}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {levantamentoAlertas.length > 0 && (
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-primary px-2 py-1.5">
+                    📐 Solicitações de edição
+                  </div>
+                  {levantamentoAlertas.map((a, i) => (
                     <button
                       key={i}
                       onClick={() => irPara(a.href)}

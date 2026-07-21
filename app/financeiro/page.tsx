@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
+import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -133,6 +134,7 @@ export default function Financeiro() {
     const token = localStorage.getItem('viga_token')
     if (!token) { window.location.href = '/'; return }
     setUserEmail(localStorage.getItem('viga_email') || '')
+    obterMinhasPermissoes().then(perm => { if (!temAcessoModulo(perm, 'financeiro')) window.location.href = '/' })
     carregar()
   }, [])
 

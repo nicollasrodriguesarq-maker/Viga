@@ -1,5 +1,4 @@
-const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
-const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
+import { SUPABASE_URL, MODULOS_VALIDOS, resolveCaller, getUsuarioRole } from './_shared'
 
 export async function POST(req: Request) {
   const auth = req.headers.get('authorization')
@@ -11,34 +10,15 @@ export async function POST(req: Request) {
   }
 
   // 1. Resolve quem está chamando, a partir do token dele
-  const meRes = await fetch(`${SUPABASE_URL}/auth/v1/user`, {
-    headers: { apikey: ANON_KEY, Authorization: auth },
-  })
-  if (!meRes.ok) return Response.json({ error: 'Token inválido' }, { status: 401 })
-  const me = await meRes.json()
-  if (!me?.id) return Response.json({ error: 'Token inválido' }, { status: 401 })
+  const me = await resolveCaller(auth)
+  if (!me) return Response.json({ error: 'Token inválido' }, { status: 401 })
 
   // 2. Confere se quem chamou é admin
-  const roleRes = await fetch(`${SUPABASE_URL}/rest/v1/usuarios?id=eq.${me.id}&select=role`, {
-    headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
-  })
-  if (!roleRes.ok) {
-    const errText = await roleRes.text()
+  const roleCheck = await getUsuarioRole(serviceKey, me.id)
+  if (!roleCheck.ok) return Response.json({ error: roleCheck.error }, { status: roleCheck.status })
+  if (roleCheck.role !== 'admin') {
     return Response.json(
-      { error: `Erro ao verificar permissão (status ${roleRes.status}): ${errText.slice(0, 300)}` },
-      { status: 500 }
-    )
-  }
-  const roleRows = await roleRes.json()
-  if (!Array.isArray(roleRows) || roleRows.length === 0) {
-    return Response.json(
-      { error: `Seu usuário (id ${me.id}) não tem perfil na tabela "usuarios". Rode o SQL de bootstrap novamente.` },
-      { status: 403 }
-    )
-  }
-  if (roleRows[0]?.role !== 'admin') {
-    return Response.json(
-      { error: `Apenas administradores podem criar usuários (seu papel atual: "${roleRows[0]?.role}")` },
+      { error: `Apenas administradores podem criar usuários (seu papel atual: "${roleCheck.role}")` },
       { status: 403 }
     )
   }
@@ -50,7 +30,7 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: 'Corpo inválido' }, { status: 400 })
   }
-  const { email, senha, nome, role } = body || {}
+  const { email, senha, nome, role, setor, modulos_permitidos } = body || {}
   if (!email || !senha || !nome) {
     return Response.json({ error: 'Preencha e-mail, senha e nome' }, { status: 400 })
   }
@@ -58,6 +38,9 @@ export async function POST(req: Request) {
     return Response.json({ error: 'A senha deve ter pelo menos 6 caracteres' }, { status: 400 })
   }
   const roleFinal = role === 'admin' ? 'admin' : 'usuario'
+  const modulosFinal = Array.isArray(modulos_permitidos)
+    ? modulos_permitidos.filter((m: string) => MODULOS_VALIDOS.includes(m))
+    : MODULOS_VALIDOS
 
   // 4. Cria o usuário via Admin API do Supabase (service role)
   const createRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
@@ -86,7 +69,14 @@ export async function POST(req: Request) {
       Authorization: `Bearer ${serviceKey}`,
       Prefer: 'resolution=merge-duplicates,return=representation',
     },
-    body: JSON.stringify({ id: created.id, email: created.email, nome, role: roleFinal }),
+    body: JSON.stringify({
+      id: created.id,
+      email: created.email,
+      nome,
+      role: roleFinal,
+      setor: setor || null,
+      modulos_permitidos: modulosFinal,
+    }),
   })
 
   return Response.json({ id: created.id, email: created.email, nome, role: roleFinal }, { status: 201 })

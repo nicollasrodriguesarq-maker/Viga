@@ -1,22 +1,24 @@
 'use client'
-import { ReactNode } from 'react'
+import { ReactNode, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import AlertsBell from './AlertsBell'
+import { obterMinhasPermissoes, temAcessoModulo, type Permissoes } from '../lib/permissoes'
 
 interface NavItem {
   icon: string
   label: string
   href: string
   disabled?: boolean
+  modulo?: string
 }
 
 const NAV: NavItem[] = [
   { icon: 'dashboard', label: 'Dashboard', href: '/' },
-  { icon: 'construction', label: 'Obras & Projetos', href: '/obras' },
-  { icon: 'account_balance_wallet', label: 'Financeiro', href: '/financeiro' },
-  { icon: 'architecture', label: 'Levantamento', href: '/levantamento' },
-  { icon: 'work', label: 'Orçamento', href: '/orcamento' },
+  { icon: 'construction', label: 'Obras & Projetos', href: '/obras', modulo: 'obras' },
+  { icon: 'account_balance_wallet', label: 'Financeiro', href: '/financeiro', modulo: 'financeiro' },
+  { icon: 'architecture', label: 'Levantamento', href: '/levantamento', modulo: 'levantamento' },
+  { icon: 'work', label: 'Orçamento', href: '/orcamento', modulo: 'orcamento' },
   { icon: 'inventory_2', label: 'Suprimentos', href: '/suprimentos', disabled: true },
   { icon: 'group', label: 'Clientes & CRM', href: '/crm', disabled: true },
   { icon: 'assignment', label: 'Equipes & Tarefas', href: '/equipes', disabled: true },
@@ -36,6 +38,11 @@ export default function Layout({ children, userEmail, onLogout, topbarSlot, sear
   const pathname = usePathname()
   const nomeUsuario = userEmail.split('@')[0] || 'usuário'
   const inicial = nomeUsuario.charAt(0).toUpperCase()
+  const [permissoes, setPermissoes] = useState<Permissoes | null>(null)
+
+  useEffect(() => { obterMinhasPermissoes().then(setPermissoes) }, [])
+
+  const navVisivel = NAV.filter(item => !item.modulo || temAcessoModulo(permissoes, item.modulo))
 
   return (
     <div className="min-h-screen bg-background text-on-background font-body-md">
@@ -46,7 +53,7 @@ export default function Layout({ children, userEmail, onLogout, topbarSlot, sear
         </div>
         <nav className="flex-1 overflow-y-auto custom-scrollbar px-sm py-md">
           <ul className="flex flex-col gap-1">
-            {NAV.map((item) => {
+            {navVisivel.map((item) => {
               const ativo = item.href === pathname
               if (item.disabled) {
                 return (

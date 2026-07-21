@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Layout from '../components/Layout'
+import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -141,6 +142,7 @@ export default function Obras() {
       return
     }
     setUserEmail(localStorage.getItem('viga_email') || '')
+    obterMinhasPermissoes().then(perm => { if (!temAcessoModulo(perm, 'obras')) window.location.href = '/' })
     carregar()
   }, [])
 

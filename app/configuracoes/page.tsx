@@ -83,7 +83,7 @@ const tabInactiveCls = 'px-4 py-2 rounded-lg border border-outline-variant bg-su
 export default function Configuracoes() {
   const [userEmail, setUserEmail] = useState('')
   const [loading, setLoading] = useState(true)
-  const [aba, setAba] = useState<'perfil' | 'contatos' | 'usuarios'>('perfil')
+  const [aba, setAba] = useState<'perfil' | 'contatos' | 'usuarios' | 'meusdados'>('perfil')
   const [meuId, setMeuId] = useState('')
   const [minhaRole, setMinhaRole] = useState<'admin' | 'usuario' | null>(null)
 
@@ -156,19 +156,29 @@ export default function Configuracoes() {
         <button className={aba === 'perfil' ? tabActiveCls : tabInactiveCls} onClick={() => setAba('perfil')}>🏢 Perfil da Empresa</button>
         <button className={aba === 'contatos' ? tabActiveCls : tabInactiveCls} onClick={() => setAba('contatos')}>📇 Contatos por Setor</button>
         {souAdmin && <button className={aba === 'usuarios' ? tabActiveCls : tabInactiveCls} onClick={() => setAba('usuarios')}>👥 Usuários</button>}
+        <button className={aba === 'meusdados' ? tabActiveCls : tabInactiveCls} onClick={() => setAba('meusdados')}>🔑 Meus Dados</button>
       </div>
 
       {aba === 'perfil' && <PerfilEmpresa />}
       {aba === 'contatos' && <ContatosSetor />}
-      {aba === 'usuarios' && souAdmin && <UsuariosTab />}
+      {aba === 'usuarios' && souAdmin && <UsuariosTab meuId={meuId} />}
+      {aba === 'meusdados' && <MeusDados userEmail={userEmail} onEmailAtualizado={setUserEmail} />}
     </Layout>
   )
 }
 
+const SETORES_USUARIO = ['Diretoria', 'Engenharia', 'Financeiro', 'Compras', 'Comercial', 'Obras', 'Suporte', 'Administrativo', 'Outro']
+const MODULOS_SISTEMA = [
+  { chave: 'obras', label: 'Obras' },
+  { chave: 'financeiro', label: 'Financeiro' },
+  { chave: 'levantamento', label: 'Levantamento' },
+  { chave: 'orcamento', label: 'Orçamento' },
+]
+
 // ── Perfil da Empresa ──────────────────────────────────────────
 function PerfilEmpresa() {
   const [configId, setConfigId] = useState('')
-  const [form, setForm] = useState({ nome_empresa: '', cnpj: '', registro_profissional: '', emails_gerais: '', logo_url: '' })
+  const [form, setForm] = useState({ nome_empresa: '', cnpj: '', registro_profissional: '', registro_crea: '', emails_gerais: '', logo_url: '' })
   const [arquivoLogo, setArquivoLogo] = useState<File | null>(null)
   const [salvando, setSalvando] = useState(false)
   const [salvo, setSalvo] = useState(false)
@@ -183,6 +193,7 @@ function PerfilEmpresa() {
         nome_empresa: rows[0].nome_empresa || '',
         cnpj: rows[0].cnpj || '',
         registro_profissional: rows[0].registro_profissional || '',
+        registro_crea: rows[0].registro_crea || '',
         emails_gerais: rows[0].emails_gerais || '',
         logo_url: rows[0].logo_url || '',
       })
@@ -244,9 +255,15 @@ function PerfilEmpresa() {
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
         <div>
-          <label className={labelCls}>Registro Profissional (CREA/CAU)</label>
+          <label className={labelCls}>Registro CAU</label>
           <input className={inputCls} value={form.registro_profissional} onChange={e => setForm({ ...form, registro_profissional: e.target.value })} placeholder="CAU A000000-0" />
         </div>
+        <div>
+          <label className={labelCls}>Registro CREA</label>
+          <input className={inputCls} value={form.registro_crea} onChange={e => setForm({ ...form, registro_crea: e.target.value })} placeholder="CREA 000000/D" />
+        </div>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
         <div>
           <label className={labelCls}>E-mails Gerais</label>
           <input className={inputCls} value={form.emails_gerais} onChange={e => setForm({ ...form, emails_gerais: e.target.value })} placeholder="contato@inversoconstrucao.com.br" />
@@ -314,12 +331,16 @@ function ContatosSetor() {
 }
 
 // ── Usuários ────────────────────────────────────────────────────
-function UsuariosTab() {
+const FORM_VAZIO = { nome: '', email: '', senha: '', role: 'usuario', setor: '', modulos_permitidos: [...MODULOS_SISTEMA.map(m => m.chave)] }
+
+function UsuariosTab({ meuId }: { meuId: string }) {
   const [usuarios, setUsuarios] = useState<any[]>([])
   const [modalAberto, setModalAberto] = useState(false)
-  const [novo, setNovo] = useState({ nome: '', email: '', senha: '', role: 'usuario' })
+  const [editandoId, setEditandoId] = useState('')
+  const [novo, setNovo] = useState<any>(FORM_VAZIO)
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState('')
+  const [excluindoId, setExcluindoId] = useState('')
 
   useEffect(() => { carregar() }, [])
 
@@ -328,26 +349,52 @@ function UsuariosTab() {
     setUsuarios(rows)
   }
 
-  function abrirModal() {
-    setNovo({ nome: '', email: '', senha: '', role: 'usuario' })
+  function abrirModalNovo() {
+    setEditandoId('')
+    setNovo(FORM_VAZIO)
     setErro('')
     setModalAberto(true)
   }
 
-  async function criarUsuario() {
-    if (!novo.nome || !novo.email || !novo.senha) { setErro('Preencha nome, e-mail e senha'); return }
-    if (novo.senha.length < 6) { setErro('A senha deve ter pelo menos 6 caracteres'); return }
+  function abrirModalEditar(u: any) {
+    setEditandoId(u.id)
+    setNovo({
+      nome: u.nome || '',
+      email: u.email || '',
+      senha: '',
+      role: u.role || 'usuario',
+      setor: u.setor || '',
+      modulos_permitidos: Array.isArray(u.modulos_permitidos) ? u.modulos_permitidos : MODULOS_SISTEMA.map(m => m.chave),
+    })
+    setErro('')
+    setModalAberto(true)
+  }
+
+  function alternarModulo(chave: string) {
+    setNovo((n: any) => ({
+      ...n,
+      modulos_permitidos: n.modulos_permitidos.includes(chave)
+        ? n.modulos_permitidos.filter((m: string) => m !== chave)
+        : [...n.modulos_permitidos, chave],
+    }))
+  }
+
+  async function salvarUsuario() {
+    if (!editandoId && (!novo.nome || !novo.email || !novo.senha)) { setErro('Preencha nome, e-mail e senha'); return }
+    if (editandoId && !novo.nome) { setErro('Preencha o nome'); return }
+    if (novo.senha && novo.senha.length < 6) { setErro('A senha deve ter pelo menos 6 caracteres'); return }
     setSalvando(true); setErro('')
     try {
       const token = await obterTokenValido()
-      const r = await fetch('/api/usuarios', {
-        method: 'POST',
+      const url = editandoId ? `/api/usuarios/${editandoId}` : '/api/usuarios'
+      const r = await fetch(url, {
+        method: editandoId ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify(novo),
       })
       const data = await r.json()
       if (!r.ok) {
-        setErro(data.error || 'Não foi possível criar o usuário')
+        setErro(data.error || 'Não foi possível salvar o usuário')
       } else {
         setModalAberto(false)
         carregar()
@@ -358,11 +405,32 @@ function UsuariosTab() {
     setSalvando(false)
   }
 
+  async function excluirUsuario(u: any) {
+    if (!window.confirm(`Excluir o usuário "${u.nome || u.email}"? Essa ação não pode ser desfeita.`)) return
+    setExcluindoId(u.id)
+    try {
+      const token = await obterTokenValido()
+      const r = await fetch(`/api/usuarios/${u.id}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await r.json()
+      if (!r.ok) {
+        alert(data.error || 'Não foi possível excluir o usuário')
+      } else {
+        carregar()
+      }
+    } catch {
+      alert('Erro de conexão')
+    }
+    setExcluindoId('')
+  }
+
   return (
     <div className={sectionCls}>
       <div className="flex justify-between items-center mb-4">
         <div className="text-sm font-bold text-on-surface">👥 Usuários do Sistema</div>
-        <button className={btnPrimaryCls} onClick={abrirModal}>+ Adicionar Usuário</button>
+        <button className={btnPrimaryCls} onClick={abrirModalNovo}>+ Adicionar Usuário</button>
       </div>
 
       {usuarios.length === 0 ? (
@@ -370,14 +438,22 @@ function UsuariosTab() {
       ) : (
         <div className="flex flex-col gap-2">
           {usuarios.map(u => (
-            <div key={u.id} className="flex justify-between items-center px-3.5 py-3 bg-surface-container-low rounded-lg border border-outline-variant">
-              <div>
-                <div className="font-semibold text-on-surface text-sm">{u.nome || u.email}</div>
-                <div className="text-[11px] text-on-surface-variant">{u.email}</div>
+            <div key={u.id} className="flex justify-between items-center px-3.5 py-3 bg-surface-container-low rounded-lg border border-outline-variant gap-3">
+              <div className="min-w-0">
+                <div className="font-semibold text-on-surface text-sm truncate">{u.nome || u.email}</div>
+                <div className="text-[11px] text-on-surface-variant truncate">{u.email}{u.setor ? ` · ${u.setor}` : ''}</div>
               </div>
-              <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${u.role === 'admin' ? 'bg-primary/10 text-primary border-primary/20' : 'bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20'}`}>
-                {u.role === 'admin' ? 'Admin' : 'Usuário'}
-              </span>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${u.role === 'admin' ? 'bg-primary/10 text-primary border-primary/20' : 'bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20'}`}>
+                  {u.role === 'admin' ? 'Admin' : 'Usuário'}
+                </span>
+                <button className="text-on-surface-variant hover:text-primary text-xs font-semibold px-2 py-1" onClick={() => abrirModalEditar(u)}>Editar</button>
+                {u.id !== meuId && (
+                  <button className="text-on-surface-variant hover:text-error text-xs font-semibold px-2 py-1" onClick={() => excluirUsuario(u)} disabled={excluindoId === u.id}>
+                    {excluindoId === u.id ? '...' : 'Excluir'}
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>
@@ -385,8 +461,8 @@ function UsuariosTab() {
 
       {modalAberto && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setModalAberto(false)}>
-          <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[440px]">
-            <div className="text-base font-bold text-on-surface mb-5">+ Adicionar Usuário</div>
+          <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[440px] max-h-[90vh] overflow-y-auto">
+            <div className="text-base font-bold text-on-surface mb-5">{editandoId ? 'Editar Usuário' : '+ Adicionar Usuário'}</div>
             <div className="mb-3.5">
               <label className={labelCls}>Nome *</label>
               <input className={inputCls} value={novo.nome} onChange={e => setNovo({ ...novo, nome: e.target.value })} placeholder="Nome completo" />
@@ -396,24 +472,127 @@ function UsuariosTab() {
               <input className={inputCls} type="email" value={novo.email} onChange={e => setNovo({ ...novo, email: e.target.value })} placeholder="pessoa@empresa.com" />
             </div>
             <div className="mb-3.5">
-              <label className={labelCls}>Senha Provisória *</label>
+              <label className={labelCls}>{editandoId ? 'Nova Senha (deixe em branco para manter)' : 'Senha Provisória *'}</label>
               <input className={inputCls} type="password" value={novo.senha} onChange={e => setNovo({ ...novo, senha: e.target.value })} placeholder="mínimo 6 caracteres" />
             </div>
-            <div className="mb-5">
+            <div className="mb-3.5">
+              <label className={labelCls}>Setor</label>
+              <select className={inputCls} value={novo.setor} onChange={e => setNovo({ ...novo, setor: e.target.value })}>
+                <option value="">Selecione...</option>
+                {SETORES_USUARIO.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div className="mb-3.5">
               <label className={labelCls}>Papel</label>
               <select className={inputCls} value={novo.role} onChange={e => setNovo({ ...novo, role: e.target.value })}>
                 <option value="usuario">Usuário comum</option>
                 <option value="admin">Admin</option>
               </select>
             </div>
+            <div className="mb-5">
+              <label className={labelCls}>Acesso aos módulos {novo.role === 'admin' && '(admin tem acesso a tudo)'}</label>
+              <div className="flex flex-col gap-1.5 mt-1">
+                {MODULOS_SISTEMA.map(m => (
+                  <label key={m.chave} className="flex items-center gap-2 text-sm text-on-surface cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={novo.modulos_permitidos.includes(m.chave)}
+                      onChange={() => alternarModulo(m.chave)}
+                      disabled={novo.role === 'admin'}
+                    />
+                    {m.label}
+                  </label>
+                ))}
+              </div>
+            </div>
             {erro && <div className="bg-error/10 border border-error/30 rounded-lg px-4 py-2 text-error text-body-sm mb-4">{erro}</div>}
             <div className="flex gap-2 justify-end">
               <button className={btnSecondaryCls} onClick={() => setModalAberto(false)}>Cancelar</button>
-              <button className={btnPrimaryCls} onClick={criarUsuario} disabled={salvando}>{salvando ? 'Criando...' : 'Criar Usuário'}</button>
+              <button className={btnPrimaryCls} onClick={salvarUsuario} disabled={salvando}>
+                {salvando ? 'Salvando...' : editandoId ? 'Salvar' : 'Criar Usuário'}
+              </button>
             </div>
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── Meus Dados ──────────────────────────────────────────────────
+function MeusDados({ userEmail, onEmailAtualizado }: { userEmail: string; onEmailAtualizado: (email: string) => void }) {
+  const [nome, setNome] = useState('')
+  const [email, setEmail] = useState(userEmail)
+  const [senha, setSenha] = useState('')
+  const [salvando, setSalvando] = useState(false)
+  const [erro, setErro] = useState('')
+  const [salvo, setSalvo] = useState(false)
+  const [meuId, setMeuId] = useState('')
+
+  useEffect(() => { carregar() }, [])
+
+  async function carregar() {
+    const emailSalvo = localStorage.getItem('viga_email') || ''
+    const rows = await get('usuarios', `?email=ilike.${encodeURIComponent(emailSalvo)}&select=id,nome,email`)
+    if (rows[0]) {
+      setMeuId(rows[0].id)
+      setNome(rows[0].nome || '')
+      setEmail(rows[0].email || emailSalvo)
+    } else {
+      setEmail(emailSalvo)
+    }
+  }
+
+  async function salvar() {
+    if (!nome || !email) { setErro('Preencha nome e e-mail'); return }
+    if (senha && senha.length < 6) { setErro('A senha deve ter pelo menos 6 caracteres'); return }
+    if (!meuId) { setErro('Não foi possível identificar seu usuário. Saia e entre novamente.'); return }
+    setSalvando(true); setErro(''); setSalvo(false)
+    try {
+      const token = await obterTokenValido()
+      const body: any = { nome, email }
+      if (senha) body.senha = senha
+      const r = await fetch(`/api/usuarios/${meuId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
+      })
+      const data = await r.json()
+      if (!r.ok) {
+        setErro(data.error || 'Não foi possível salvar')
+      } else {
+        localStorage.setItem('viga_email', email)
+        onEmailAtualizado(email)
+        setSenha('')
+        setSalvo(true)
+        setTimeout(() => setSalvo(false), 3000)
+      }
+    } catch {
+      setErro('Erro de conexão')
+    }
+    setSalvando(false)
+  }
+
+  return (
+    <div className={sectionCls + ' max-w-[520px]'}>
+      <div className="text-sm font-bold text-on-surface mb-4">🔑 Meus Dados de Acesso</div>
+      <div className="mb-3.5">
+        <label className={labelCls}>Nome</label>
+        <input className={inputCls} value={nome} onChange={e => setNome(e.target.value)} placeholder="Seu nome" />
+      </div>
+      <div className="mb-3.5">
+        <label className={labelCls}>E-mail de acesso</label>
+        <input className={inputCls} type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="voce@empresa.com" />
+      </div>
+      <div className="mb-5">
+        <label className={labelCls}>Nova Senha (deixe em branco para manter)</label>
+        <input className={inputCls} type="password" value={senha} onChange={e => setSenha(e.target.value)} placeholder="mínimo 6 caracteres" />
+      </div>
+      {erro && <div className="bg-error/10 border border-error/30 rounded-lg px-4 py-2 text-error text-body-sm mb-4">{erro}</div>}
+      <div className="flex items-center gap-3">
+        <button className={btnPrimaryCls} onClick={salvar} disabled={salvando}>{salvando ? 'Salvando...' : 'Salvar'}</button>
+        {salvo && <span className="text-primary-container text-body-sm font-semibold">✓ Salvo com sucesso</span>}
+      </div>
     </div>
   )
 }

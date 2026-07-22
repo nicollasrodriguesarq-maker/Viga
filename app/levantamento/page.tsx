@@ -126,6 +126,7 @@ export default function Levantamento() {
   const [ambienteAtivo, setAmbienteAtivo] = useState<any>(null)
   const [janela, setJanela] = useState<string | null>(null)
   const [busca, setBusca] = useState('')
+  const [filtro, setFiltro] = useState('todos')
   const [userEmail, setUserEmail] = useState('')
   const [meuId, setMeuId] = useState('')
   const [souAdmin, setSouAdmin] = useState(false)
@@ -654,6 +655,7 @@ export default function Levantamento() {
   }
 
   const lista = levantamentos.filter(l => {
+    if (filtro !== 'todos' && l.status !== filtro) return false
     if (!busca) return true
     const termo = busca.toLowerCase().trim()
     const obraNome = obras.find(o => o.id === l.obra_id)?.nome
@@ -1161,9 +1163,18 @@ export default function Levantamento() {
         </>
       }
     >
-      <div className="mb-lg">
-        <h2 className="font-headline text-headline-lg text-on-surface">Levantamento Técnico</h2>
-        <p className="text-body-md text-on-surface-variant max-w-2xl">Gerencie e visualize as vistorias de campo, medições e registros técnicos de todas as suas obras ativas.</p>
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-lg">
+        <div>
+          <h2 className="font-headline text-headline-lg text-on-surface">Levantamento Técnico</h2>
+          <p className="text-body-md text-on-surface-variant max-w-2xl">Gerencie e visualize as vistorias de campo, medições e registros técnicos de todas as suas obras ativas.</p>
+        </div>
+        <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
+          {([['todos', 'Todos'], ...Object.entries(STATUS_LEVA)] as [string, string][]).map(([v, n]) => (
+            <button key={v}
+              className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtro === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+              onClick={() => setFiltro(v)}>{n}</button>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-lg">

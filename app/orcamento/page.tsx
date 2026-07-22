@@ -84,6 +84,7 @@ export default function Orcamento() {
   const [busca, setBusca] = useState('')
   const [buscaBanco, setBuscaBanco] = useState('')
   const [userEmail, setUserEmail] = useState('')
+  const [filtro, setFiltro] = useState('todos')
   const [meuId, setMeuId] = useState('')
   const [souAdmin, setSouAdmin] = useState(false)
   const [solicitacoes, setSolicitacoes] = useState<any[]>([])
@@ -473,7 +474,8 @@ export default function Orcamento() {
   }
 
   const lista = orcamentos.filter(o =>
-    !busca || [o.cliente_nome, o.codigo, o.endereco].some(v => v?.toLowerCase().includes(busca.toLowerCase()))
+    (filtro === 'todos' || o.status === filtro) &&
+    (!busca || [o.cliente_nome, o.codigo, o.endereco].some(v => v?.toLowerCase().includes(busca.toLowerCase())))
   )
 
   if (loading) return (
@@ -1088,9 +1090,18 @@ export default function Orcamento() {
         </>
       }
     >
-      <div className="mb-lg">
-        <h2 className="font-headline text-headline-lg text-on-surface">Orçamento & Propostas</h2>
-        <p className="text-body-md text-on-surface-variant">Gerenciamento centralizado de ofertas comerciais e faturamento previsto.</p>
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-lg">
+        <div>
+          <h2 className="font-headline text-headline-lg text-on-surface">Orçamento & Propostas</h2>
+          <p className="text-body-md text-on-surface-variant">Gerenciamento centralizado de ofertas comerciais e faturamento previsto.</p>
+        </div>
+        <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
+          {([['todos', 'Todos'], ...Object.entries(STATUS_ORC)] as [string, string][]).map(([v, n]) => (
+            <button key={v}
+              className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtro === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+              onClick={() => setFiltro(v)}>{n}</button>
+          ))}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-lg">

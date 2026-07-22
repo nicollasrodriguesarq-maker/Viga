@@ -8,7 +8,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const H = { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
 
 type Alerta = {
-  categoria: 'obra' | 'financeiro' | 'levantamento'
+  categoria: 'obra' | 'financeiro' | 'levantamento' | 'orcamento'
   titulo: string
   descricao: string
   href: string
@@ -58,6 +58,33 @@ export default function AlertsBell() {
             }
           } catch {}
         }
+        let orcAlertas: Alerta[] = []
+        if (perm) {
+          try {
+            const solicRes = await fetch(`${SUPABASE_URL}/rest/v1/orcamento_solicitacoes?status=eq.pendente&select=id,orcamento_id,solicitante_nome`, { headers: H })
+            const solics = await solicRes.json()
+            if (Array.isArray(solics) && solics.length > 0) {
+              const ids = solics.map((s: any) => s.orcamento_id).join(',')
+              const orcsRes = await fetch(`${SUPABASE_URL}/rest/v1/orcamentos?id=in.(${ids})&select=id,codigo,cliente_nome,criado_por`, { headers: H })
+              const orcs = await orcsRes.json()
+              const orcsMap = new Map((Array.isArray(orcs) ? orcs : []).map((o: any) => [o.id, o]))
+              orcAlertas = solics
+                .filter((s: any) => {
+                  const orc = orcsMap.get(s.orcamento_id)
+                  return perm.role === 'admin' || (orc && orc.criado_por === perm.id)
+                })
+                .map((s: any) => {
+                  const orc = orcsMap.get(s.orcamento_id) as any
+                  return {
+                    categoria: 'orcamento' as const,
+                    titulo: `${s.solicitante_nome || 'Alguém'} pediu acesso`,
+                    descricao: `Orçamento: ${orc?.codigo || ''} — ${orc?.cliente_nome || s.orcamento_id}`,
+                    href: '/orcamento',
+                  }
+                })
+            }
+          } catch {}
+        }
         const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
         const em7 = new Date(hoje); em7.setDate(hoje.getDate() + 7)
 
@@ -85,7 +112,7 @@ export default function AlertsBell() {
             }
           })
 
-        setAlertas([...obraAlertas, ...lancAlertas, ...levAlertas])
+        setAlertas([...obraAlertas, ...lancAlertas, ...levAlertas, ...orcAlertas])
       } catch {
         setAlertas([])
       }
@@ -104,6 +131,7 @@ export default function AlertsBell() {
   const obraAlertas = alertas.filter(a => a.categoria === 'obra')
   const financeiroAlertas = alertas.filter(a => a.categoria === 'financeiro')
   const levantamentoAlertas = alertas.filter(a => a.categoria === 'levantamento')
+  const orcamentoAlertas = alertas.filter(a => a.categoria === 'orcamento')
 
   function irPara(href: string) {
     setAberto(false)
@@ -166,9 +194,26 @@ export default function AlertsBell() {
               {levantamentoAlertas.length > 0 && (
                 <div>
                   <div className="text-[11px] font-bold uppercase tracking-wide text-primary px-2 py-1.5">
-                    📐 Solicitações de edição
+                    📐 Solicitações de edição (Levantamento)
                   </div>
                   {levantamentoAlertas.map((a, i) => (
+                    <button
+                      key={i}
+                      onClick={() => irPara(a.href)}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-variant/40 transition-all"
+                    >
+                      <div className="text-sm text-on-surface font-semibold">{a.titulo}</div>
+                      <div className="text-xs text-on-surface-variant">{a.descricao}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {orcamentoAlertas.length > 0 && (
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-primary px-2 py-1.5">
+                    💼 Solicitações de edição (Orçamento)
+                  </div>
+                  {orcamentoAlertas.map((a, i) => (
                     <button
                       key={i}
                       onClick={() => irPara(a.href)}

@@ -84,6 +84,9 @@ export default function Orcamento() {
   const [busca, setBusca] = useState('')
   const [buscaBanco, setBuscaBanco] = useState('')
   const [userEmail, setUserEmail] = useState('')
+  const [meuId, setMeuId] = useState('')
+  const [souAdmin, setSouAdmin] = useState(false)
+  const [solicitacoes, setSolicitacoes] = useState<any[]>([])
 
   const [telaBanco, setTelaBanco] = useState(false)
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
@@ -101,7 +104,10 @@ export default function Orcamento() {
   useEffect(() => {
     if (!localStorage.getItem('viga_token')) { window.location.href = '/'; return }
     setUserEmail(localStorage.getItem('viga_email') || '')
-    obterMinhasPermissoes().then(perm => { if (!temAcessoModulo(perm, 'orcamento')) window.location.href = '/' })
+    obterMinhasPermissoes().then(perm => {
+      if (!temAcessoModulo(perm, 'orcamento')) { window.location.href = '/'; return }
+      if (perm) { setMeuId(perm.id); setSouAdmin(perm.role === 'admin') }
+    })
     carregar()
     const abrirId = localStorage.getItem('viga_orcamento_abrir')
     if (abrirId) {
@@ -121,14 +127,15 @@ export default function Orcamento() {
 
   async function carregar() {
     setLoading(true)
-    const [o, a, it, b, ob] = await Promise.all([
+    const [o, a, it, b, ob, s] = await Promise.all([
       buscar('orcamentos', '?order=created_at.desc'),
       buscar('orcamento_ambientes', '?order=ordem'),
       buscar('orcamento_itens', '?order=created_at'),
       buscar('banco_itens', '?order=nome'),
       buscar('obras', '?select=id,nome&order=nome'),
+      buscar('orcamento_solicitacoes', '?order=created_at.desc'),
     ])
-    setOrcamentos(o); setAmbientes(a); setItens(it); setBancoItens(b); setObras(ob)
+    setOrcamentos(o); setAmbientes(a); setItens(it); setBancoItens(b); setObras(ob); setSolicitacoes(s)
     setLoading(false)
   }
 
@@ -153,6 +160,7 @@ export default function Orcamento() {
       total_mao_obra: 0,
       total_geral: 0,
       desconto: 0,
+      criado_por: meuId || null,
     }
     const orc = await criar('orcamentos', dados)
     let orcId = orc?.id
@@ -176,6 +184,37 @@ export default function Orcamento() {
         setDetalhe(encontrado); setAmbienteAtivo(null); setAbaDetalhe('itens')
       }
     }
+  }
+
+  // ── Permissão de edição ──────────────────────────────────────
+  function solicitacoesDoOrcamento(orcId: string) {
+    return solicitacoes.filter(s => s.orcamento_id === orcId)
+  }
+  function podeEditarOrcamento(orc: any) {
+    if (!meuId || souAdmin || orc.criado_por == null || orc.criado_por === meuId) return true
+    return solicitacoesDoOrcamento(orc.id).some(s => s.solicitante_id === meuId && s.status === 'aprovado')
+  }
+  async function solicitarPermissao() {
+    if (!detalhe || !meuId) return
+    const jaTemPedido = solicitacoesDoOrcamento(detalhe.id).some(s => s.solicitante_id === meuId && s.status !== 'negado')
+    if (jaTemPedido) return alert('Você já tem uma solicitação pendente ou aprovada para este orçamento.')
+    await criar('orcamento_solicitacoes', {
+      orcamento_id: detalhe.id,
+      solicitante_id: meuId,
+      solicitante_nome: userEmail.split('@')[0],
+      status: 'pendente',
+    })
+    alert('Solicitação enviada! O criador ou um admin vai aprovar.')
+    carregar()
+  }
+  async function responderSolicitacao(id: string, status: 'aprovado' | 'negado') {
+    await editar('orcamento_solicitacoes', id, { status, respondido_em: new Date().toISOString() })
+    carregar()
+  }
+  async function excluirOrcamento(orc: any) {
+    if (!confirm(`Excluir o orçamento ${orc.codigo} (${orc.cliente_nome})? Esta ação não pode ser desfeita.`)) return
+    await remover('orcamentos', orc.id)
+    carregar()
   }
 
   async function salvarItem() {
@@ -558,25 +597,50 @@ export default function Orcamento() {
     const desconto = parseFloat(detalhe.desconto || 0)
     const totalFinal = totalGeral - desconto
     const bancoBusca = bancoItens.filter(b => !buscaBanco || b.nome.toLowerCase().includes(buscaBanco.toLowerCase()))
+    const podeEditar = podeEditarOrcamento(detalhe)
+    const souCriadorOuAdmin = souAdmin || detalhe.criado_por === meuId
+    const pendentesDoOrcamento = souCriadorOuAdmin ? solicitacoesDoOrcamento(detalhe.id).filter(s => s.status === 'pendente') : []
+    const jaTemSolicitacaoMinha = !!meuId && solicitacoesDoOrcamento(detalhe.id).some(s => s.solicitante_id === meuId && s.status !== 'negado')
 
     return (
       <Layout userEmail={userEmail} onLogout={sair}>
+        {pendentesDoOrcamento.length > 0 && (
+          <div className="bg-tertiary/10 border border-tertiary/30 rounded-xl p-4 mb-lg">
+            <div className="text-sm font-bold text-tertiary mb-2">🔔 Solicitações de edição pendentes</div>
+            {pendentesDoOrcamento.map(s => (
+              <div key={s.id} className="flex justify-between items-center py-1.5">
+                <span className="text-sm text-on-surface">{s.solicitante_nome || 'Alguém'} pediu para editar este orçamento</span>
+                <div className="flex gap-2">
+                  <button className={btnEditSmCls} onClick={() => responderSolicitacao(s.id, 'aprovado')}>Aprovar</button>
+                  <button className={btnDangerSmCls} onClick={() => responderSolicitacao(s.id, 'negado')}>Negar</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
         <div className="flex items-start justify-between gap-4 flex-wrap mb-lg">
           <div>
             <button onClick={() => { setDetalhe(null); setAmbienteAtivo(null) }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-body-sm text-on-surface-variant font-semibold">{detalhe.codigo}</span>
               <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_BADGE[detalhe.status] || STATUS_BADGE.rascunho}`}>{STATUS_ORC[detalhe.status] || detalhe.status}</span>
+              {!podeEditar && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20">🔒 Somente leitura</span>}
             </div>
             <h1 className="text-headline-md font-headline text-on-surface">{detalhe.cliente_nome}</h1>
             {detalhe.endereco && <p className="text-body-sm text-on-surface-variant">📍 {detalhe.endereco}</p>}
           </div>
           <div className="flex gap-2 flex-wrap items-start">
-            <select value={detalhe.status}
-              onChange={async e => { await editar('orcamentos', detalhe.id, { status: e.target.value }); setDetalhe({ ...detalhe, status: e.target.value }); carregar() }}
-              className={inputCls + ' w-auto text-xs py-1.5'}>
-              {Object.entries(STATUS_ORC).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
-            </select>
+            {podeEditar ? (
+              <select value={detalhe.status}
+                onChange={async e => { await editar('orcamentos', detalhe.id, { status: e.target.value }); setDetalhe({ ...detalhe, status: e.target.value }); carregar() }}
+                className={inputCls + ' w-auto text-xs py-1.5'}>
+                {Object.entries(STATUS_ORC).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+              </select>
+            ) : !jaTemSolicitacaoMinha ? (
+              <button className={btnSecondaryCls} onClick={solicitarPermissao}>🔒 Solicitar permissão de edição</button>
+            ) : (
+              <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
+            )}
             <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPDF}>🖨️ Gerar Proposta PDF</button>
           </div>
         </div>
@@ -607,8 +671,8 @@ export default function Orcamento() {
             <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
               <div className="text-sm font-bold text-on-surface">📋 Itens por Ambiente</div>
               <div className="flex gap-2">
-                <button className={btnSecondaryCls} onClick={() => { setFAmb(''); setJanela('ambiente') }}>+ Ambiente</button>
-                {ambienteAtivo && <button className={btnPrimaryCls} onClick={() => { setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' }); setEditItem(null); setMostrarSugestoes(false); setJanela('item') }}>+ Item</button>}
+                {podeEditar && <button className={btnSecondaryCls} onClick={() => { setFAmb(''); setJanela('ambiente') }}>+ Ambiente</button>}
+                {podeEditar && ambienteAtivo && <button className={btnPrimaryCls} onClick={() => { setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' }); setEditItem(null); setMostrarSugestoes(false); setJanela('item') }}>+ Item</button>}
               </div>
             </div>
 
@@ -616,7 +680,7 @@ export default function Orcamento() {
               <div className="text-center py-12">
                 <div className="text-4xl mb-3">🏠</div>
                 <div className="text-on-surface-variant text-sm mb-4">Nenhum ambiente. Crie ambientes para organizar os itens.</div>
-                <button className={btnPrimaryCls} onClick={() => { setFAmb(''); setJanela('ambiente') }}>+ Criar Ambiente</button>
+                {podeEditar && <button className={btnPrimaryCls} onClick={() => { setFAmb(''); setJanela('ambiente') }}>+ Criar Ambiente</button>}
               </div>
             ) : (
               <>
@@ -644,7 +708,7 @@ export default function Orcamento() {
                             <div className="text-secondary font-semibold">M.O: {fmt(maoAmb)}</div>
                           </div>
                           <span className="text-[11px] text-on-surface-variant">{isAtivo ? '▲' : '▼'}</span>
-                          <button className={btnDangerSmCls} onClick={e => { e.stopPropagation(); if (confirm('Excluir ambiente e itens?')) remover('orcamento_ambientes', amb.id).then(carregar) }}>×</button>
+                          {podeEditar && <button className={btnDangerSmCls} onClick={e => { e.stopPropagation(); if (confirm('Excluir ambiente e itens?')) remover('orcamento_ambientes', amb.id).then(carregar) }}>×</button>}
                         </div>
                       </div>
                       {isAtivo && (
@@ -679,13 +743,15 @@ export default function Orcamento() {
                                         <td className="px-2.5 py-2.5 text-secondary font-semibold">{fmt(mao)}</td>
                                         <td className="px-2.5 py-2.5 font-bold text-tertiary">{fmt(calcularTotalItem(item))}</td>
                                         <td className="px-2.5 py-2.5">
-                                          <div className="flex gap-1">
-                                            <button className={btnEditSmCls} onClick={() => {
-                                              setFItem({ servico: item.servico, descricao: item.descricao||'', categoria: item.categoria || '', banco_item_id: item.banco_item_id || '', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), fornecedor: item.fornecedor || '' })
-                                              setEditItem(item); setMostrarSugestoes(false); setJanela('item')
-                                            }}>✏️</button>
-                                            <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); carregar() }}>×</button>
-                                          </div>
+                                          {podeEditar && (
+                                            <div className="flex gap-1">
+                                              <button className={btnEditSmCls} onClick={() => {
+                                                setFItem({ servico: item.servico, descricao: item.descricao||'', categoria: item.categoria || '', banco_item_id: item.banco_item_id || '', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), fornecedor: item.fornecedor || '' })
+                                                setEditItem(item); setMostrarSugestoes(false); setJanela('item')
+                                              }}>✏️</button>
+                                              <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); carregar() }}>×</button>
+                                            </div>
+                                          )}
                                         </td>
                                       </tr>
                                     )
@@ -713,8 +779,8 @@ export default function Orcamento() {
                     <div><div className="text-[10px] text-on-surface-variant">TOTAL MATERIAL</div><div className="text-lg font-bold text-primary">{fmt(totalMat)}</div></div>
                     <div><div className="text-[10px] text-on-surface-variant">TOTAL MÃO DE OBRA</div><div className="text-lg font-bold text-secondary">{fmt(totalMao)}</div></div>
                     <div><div className="text-[10px] text-on-surface-variant">DESCONTO</div>
-                      <input type="number" placeholder="0" value={detalhe.desconto || ''} onChange={async e => { const v = parseFloat(e.target.value||'0'); await editar('orcamentos', detalhe.id, { desconto: v }); setDetalhe({ ...detalhe, desconto: v }) }}
-                        className={inputCls + ' mt-1 text-base font-bold text-error w-32'} />
+                      <input type="number" placeholder="0" value={detalhe.desconto || ''} disabled={!podeEditar} onChange={async e => { const v = parseFloat(e.target.value||'0'); await editar('orcamentos', detalhe.id, { desconto: v }); setDetalhe({ ...detalhe, desconto: v }) }}
+                        className={inputCls + ' mt-1 text-base font-bold text-error w-32 disabled:opacity-50'} />
                     </div>
                     <div><div className="text-[10px] text-on-surface-variant">TOTAL FINAL</div><div className="text-xl font-black text-primary-container">{fmt(totalFinal)}</div></div>
                   </div>
@@ -754,7 +820,7 @@ export default function Orcamento() {
                       <div className="text-[11px] font-bold text-tertiary mt-0.5">Valor final: {fmt(valorUnit)} / {item.unidade}</div>
                     </div>
                     <div className="flex gap-1.5 items-center">
-                      {ambienteAtivo && <button className={btnPrimaryCls} onClick={() => usarItemBanco(item)}>+ Usar</button>}
+                      {podeEditar && ambienteAtivo && <button className={btnPrimaryCls} onClick={() => usarItemBanco(item)}>+ Usar</button>}
                       <button className={btnEditSmCls} onClick={() => abrirEditarBanco(item)}>✏️</button>
                       <button className={btnDangerSmCls} onClick={() => { if (confirm('Excluir do banco?')) remover('banco_itens', item.id).then(carregar) }}>×</button>
                     </div>
@@ -772,21 +838,21 @@ export default function Orcamento() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
               <div>
                 <label className={labelCls}>Cliente</label>
-                <input className={inputCls} value={detalhe.cliente_nome} onChange={e => setDetalhe({ ...detalhe, cliente_nome: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { cliente_nome: detalhe.cliente_nome })} />
+                <input className={inputCls + ' disabled:opacity-50'} disabled={!podeEditar} value={detalhe.cliente_nome} onChange={e => setDetalhe({ ...detalhe, cliente_nome: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { cliente_nome: detalhe.cliente_nome })} />
               </div>
               <div>
                 <label className={labelCls}>Validade (dias)</label>
-                <input className={inputCls} type="number" value={detalhe.validade_dias || 30} onChange={e => setDetalhe({ ...detalhe, validade_dias: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { validade_dias: detalhe.validade_dias })} />
+                <input className={inputCls + ' disabled:opacity-50'} disabled={!podeEditar} type="number" value={detalhe.validade_dias || 30} onChange={e => setDetalhe({ ...detalhe, validade_dias: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { validade_dias: detalhe.validade_dias })} />
               </div>
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Endereço</label>
-              <input className={inputCls} value={detalhe.endereco || ''} onChange={e => setDetalhe({ ...detalhe, endereco: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { endereco: detalhe.endereco })} />
+              <input className={inputCls + ' disabled:opacity-50'} disabled={!podeEditar} value={detalhe.endereco || ''} onChange={e => setDetalhe({ ...detalhe, endereco: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { endereco: detalhe.endereco })} />
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
               <div>
                 <label className={labelCls}>Obra Vinculada</label>
-                <select className={inputCls} value={detalhe.obra_id || ''} onChange={e => vincularObra(e.target.value)}>
+                <select className={inputCls + ' disabled:opacity-50'} disabled={!podeEditar} value={detalhe.obra_id || ''} onChange={e => vincularObra(e.target.value)}>
                   <option value="">Nenhuma / prospecção</option>
                   {obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
                 </select>
@@ -794,18 +860,18 @@ export default function Orcamento() {
               </div>
               <div>
                 <label className={labelCls}>Retenção de Garantia (%)</label>
-                <input className={inputCls} type="number" step="0.1" placeholder="0" value={detalhe.retencao_percentual != null ? detalhe.retencao_percentual * 100 : ''}
+                <input className={inputCls + ' disabled:opacity-50'} disabled={!podeEditar} type="number" step="0.1" placeholder="0" value={detalhe.retencao_percentual != null ? detalhe.retencao_percentual * 100 : ''}
                   onChange={e => setDetalhe({ ...detalhe, retencao_percentual: parseFloat(e.target.value || '0') / 100 })}
                   onBlur={() => editar('orcamentos', detalhe.id, { retencao_percentual: detalhe.retencao_percentual || 0 })} />
               </div>
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Forma de Pagamento</label>
-              <textarea className={inputCls + ' min-h-[70px] resize-y'} placeholder="Ex: 40% na assinatura do contrato, 30% no meio da obra, 30% na entrega." value={detalhe.condicao_pagamento || ''} onChange={e => setDetalhe({ ...detalhe, condicao_pagamento: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { condicao_pagamento: detalhe.condicao_pagamento })} />
+              <textarea className={inputCls + ' min-h-[70px] resize-y disabled:opacity-50'} disabled={!podeEditar} placeholder="Ex: 40% na assinatura do contrato, 30% no meio da obra, 30% na entrega." value={detalhe.condicao_pagamento || ''} onChange={e => setDetalhe({ ...detalhe, condicao_pagamento: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { condicao_pagamento: detalhe.condicao_pagamento })} />
             </div>
             <div className="mb-5">
               <label className={labelCls}>Observações (aparece na proposta)</label>
-              <textarea className={inputCls + ' min-h-[80px] resize-y'} value={detalhe.observacao || ''} onChange={e => setDetalhe({ ...detalhe, observacao: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { observacao: detalhe.observacao })} placeholder="Ex: Serviço com garantia de 1 ano. Materiais de primeira linha." />
+              <textarea className={inputCls + ' min-h-[80px] resize-y disabled:opacity-50'} disabled={!podeEditar} value={detalhe.observacao || ''} onChange={e => setDetalhe({ ...detalhe, observacao: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { observacao: detalhe.observacao })} placeholder="Ex: Serviço com garantia de 1 ano. Materiais de primeira linha." />
             </div>
             <button className="w-full bg-primary-container text-on-primary-container rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPDF}>🖨️ Gerar Proposta em PDF</button>
           </div>
@@ -1061,13 +1127,19 @@ export default function Orcamento() {
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-body-sm text-on-surface-variant font-semibold">{orc.codigo}</span>
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_BADGE[orc.status] || STATUS_BADGE.rascunho}`}>{STATUS_ORC[orc.status] || orc.status}</span>
+                      {!podeEditarOrcamento(orc) && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20">🔒</span>}
                     </div>
                     <div className="text-base font-bold text-on-surface">{orc.cliente_nome}</div>
                     {orc.endereco && <div className="text-body-sm text-on-surface-variant mt-0.5">📍 {orc.endereco}</div>}
                   </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-xl font-bold text-primary-container">{fmt(parseFloat(orc.total_geral||0))}</div>
-                    <div className="text-[10px] text-on-surface-variant mt-0.5">total geral</div>
+                  <div className="flex flex-col items-end gap-1.5 shrink-0">
+                    <div className="text-right">
+                      <div className="text-xl font-bold text-primary-container">{fmt(parseFloat(orc.total_geral||0))}</div>
+                      <div className="text-[10px] text-on-surface-variant mt-0.5">total geral</div>
+                    </div>
+                    {podeEditarOrcamento(orc) && (
+                      <button className={btnDangerSmCls} onClick={e => { e.stopPropagation(); excluirOrcamento(orc) }}>× Excluir</button>
+                    )}
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-2 mb-3">

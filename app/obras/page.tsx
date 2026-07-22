@@ -851,9 +851,9 @@ export default function Obras() {
             ['Prev. Serviços', moeda(prevTotal), 'text-tertiary'],
             ['Gasto Serviços', moeda(custos), custos > prevTotal && prevTotal > 0 ? 'text-error' : custos > 0 ? 'text-primary' : 'text-on-surface-variant'],
           ] as [string, string, string][]).map(([lbl, val, cor]) => (
-            <div key={lbl} className="bg-surface-container-high border border-outline-variant rounded-lg p-3">
+            <div key={lbl} className="bg-surface-container-high border border-outline-variant rounded-lg p-3 min-w-0">
               <div className="text-[10px] text-on-surface-variant uppercase tracking-widest mb-2">{lbl}</div>
-              <div className={`text-body-lg font-bold ${cor}`}>{val}</div>
+              <div className={`text-sm font-bold leading-tight break-words ${cor}`}>{val}</div>
             </div>
           ))}
         </div>
@@ -1493,9 +1493,9 @@ export default function Obras() {
                 <div className="p-lg space-y-4 flex-1 flex flex-col">
                   <div className="grid grid-cols-3 gap-2">
                     {([['CONTRATO', moeda(cct), 'text-primary'], ['CUSTOS', moeda(cc), 'text-error'], ['MARGEM', moeda(margem), margem >= 0 ? 'text-primary-container' : 'text-error']] as [string, string, string][]).map(([l, v, c]) => (
-                      <div key={l} className="p-2.5 rounded-lg bg-surface-container-high border border-outline-variant">
+                      <div key={l} className="p-2.5 rounded-lg bg-surface-container-high border border-outline-variant min-w-0">
                         <p className="text-label-sm text-outline-variant uppercase">{l}</p>
-                        <p className={`text-body-md font-bold ${c}`}>{v}</p>
+                        <p className={`text-sm font-bold leading-tight break-words ${c}`}>{v}</p>
                       </div>
                     ))}
                   </div>

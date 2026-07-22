@@ -1081,7 +1081,7 @@ export default function Obras() {
           <div className={sectionCls + ' text-center py-12'}>
             <div className="text-4xl mb-3">📅</div>
             <div className="text-sm font-bold text-on-surface mb-2">Nenhum orçamento vinculado a esta obra</div>
-            <div className="text-body-sm text-on-surface-variant mb-5 max-w-md mx-auto">O cronograma nasce automaticamente dos itens de um orçamento. Crie ou abra um orçamento e vincule esta obra na aba "⚙️ Configurações" dele.</div>
+            <div className="text-body-sm text-on-surface-variant mb-5 max-w-[28rem] mx-auto">O cronograma nasce automaticamente dos itens de um orçamento. Crie ou abra um orçamento e vincule esta obra na aba "⚙️ Configurações" dele.</div>
             <Link href="/orcamento" className={btnPrimaryCls}>Ir para Orçamento</Link>
           </div>
         )}
@@ -1156,7 +1156,7 @@ export default function Obras() {
           <div className={sectionCls + ' text-center py-12'}>
             <div className="text-4xl mb-3">📐</div>
             <div className="text-sm font-bold text-on-surface mb-2">Nenhum orçamento vinculado a esta obra</div>
-            <div className="text-body-sm text-on-surface-variant mb-5 max-w-md mx-auto">As medições são feitas em cima dos itens de serviço de um orçamento. Crie ou abra um orçamento e vincule esta obra na aba "⚙️ Configurações" dele.</div>
+            <div className="text-body-sm text-on-surface-variant mb-5 max-w-[28rem] mx-auto">As medições são feitas em cima dos itens de serviço de um orçamento. Crie ou abra um orçamento e vincule esta obra na aba "⚙️ Configurações" dele.</div>
             <Link href="/orcamento" className={btnPrimaryCls}>Ir para Orçamento</Link>
           </div>
         )}

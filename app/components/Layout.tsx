@@ -104,7 +104,7 @@ export default function Layout({ children, userEmail, onLogout, topbarSlot, sear
       </aside>
 
       <header className="ml-64 h-20 w-[calc(100%-16rem)] sticky top-0 z-40 bg-background/95 backdrop-blur-sm px-lg flex items-center justify-between">
-        <div className="flex items-center flex-1 max-w-xl">
+        <div className="flex items-center flex-1 max-w-[36rem]">
           {searchSlot ?? (headerTitle && <h2 className="font-headline text-headline-sm text-on-surface">{headerTitle}</h2>)}
         </div>
         <div className="flex items-center gap-md">

@@ -173,6 +173,7 @@ const MODULOS_SISTEMA = [
   { chave: 'financeiro', label: 'Financeiro' },
   { chave: 'levantamento', label: 'Levantamento' },
   { chave: 'orcamento', label: 'Orçamento' },
+  { chave: 'agenda', label: 'Agenda' },
 ]
 
 // ── Perfil da Empresa ──────────────────────────────────────────

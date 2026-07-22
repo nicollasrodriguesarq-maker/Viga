@@ -22,7 +22,7 @@ const NAV: NavItem[] = [
   { icon: 'inventory_2', label: 'Suprimentos', href: '/suprimentos', disabled: true },
   { icon: 'group', label: 'Clientes & CRM', href: '/crm', disabled: true },
   { icon: 'assignment', label: 'Equipes & Tarefas', href: '/equipes', disabled: true },
-  { icon: 'calendar_today', label: 'Agenda', href: '/agenda', disabled: true },
+  { icon: 'calendar_today', label: 'Agenda', href: '/agenda', modulo: 'agenda' },
 ]
 
 interface LayoutProps {

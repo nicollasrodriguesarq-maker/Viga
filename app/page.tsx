@@ -39,7 +39,7 @@ const MODULOS = [
   { icon: '📦', nome: 'Suprimentos', desc: 'Compras e estoque', href: '/suprimentos', ativo: false },
   { icon: '🤝', nome: 'CRM', desc: 'Clientes e vendas', href: '/crm', ativo: false },
   { icon: '👥', nome: 'Equipes', desc: 'Tarefas e alocação', href: '/equipes', ativo: false },
-  { icon: '📅', nome: 'Agenda', desc: 'Compromissos', href: '/agenda', ativo: false },
+  { icon: '📅', nome: 'Agenda', desc: 'Compromissos', href: '/agenda', ativo: true },
 ]
 
 const STATUS_CLASSES: Record<string, string> = {
@@ -71,6 +71,7 @@ export default function Home() {
   const [aReceber, setAReceber] = useState(0)
   const [aPagar, setAPagar] = useState(0)
   const [obrasRecentes, setObrasRecentes] = useState<any[]>([])
+  const [compromissosHoje, setCompromissosHoje] = useState<any[]>([])
   const [loadingDash, setLoadingDash] = useState(false)
 
   useEffect(() => {
@@ -91,13 +92,16 @@ export default function Home() {
     setLoadingDash(true)
     try {
       const mesAtual = new Date().toISOString().slice(0, 7)
-      const [obras, lancamentos] = await Promise.all([
+      const hojeStr = new Date().toISOString().slice(0, 10)
+      const [obras, lancamentos, compromissos] = await Promise.all([
         get('obras', '?order=created_at.desc'),
-        get('lancamentos', '?order=data.desc')
+        get('lancamentos', '?order=data.desc'),
+        get('agenda_compromissos', '?data=eq.' + hojeStr + '&order=hora_inicio.asc')
       ])
 
       setObrasAtivas(obras.filter((o: any) => o.status === 'em_execucao').length)
       setObrasRecentes(obras.slice(0, 4))
+      setCompromissosHoje(compromissos)
 
       const lancMes = lancamentos.filter((l: any) => l.data?.slice(0, 7) === mesAtual)
       setFaturamentoMes(lancMes.filter((l: any) => l.tipo === 'entrada').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
@@ -255,6 +259,40 @@ export default function Home() {
             <div className="text-label-md text-on-surface-variant mt-1">pendente</div>
           </Link>
         </div>
+
+        {/* Compromissos de hoje */}
+        <section className="bg-surface-container rounded-2xl card-border overflow-hidden flex flex-col mb-xl">
+          <div className="px-lg py-lg flex items-center justify-between border-b border-outline-variant bg-surface-container-high/50">
+            <h3 className="font-headline text-headline-sm text-on-surface">📅 Compromissos de Hoje</h3>
+            <Link href="/agenda" className="text-primary font-label-md hover:underline flex items-center gap-1">
+              Ver agenda
+              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+            </Link>
+          </div>
+          {compromissosHoje.length === 0 ? (
+            <div className="px-lg py-lg text-on-surface-variant text-body-sm">Nenhum compromisso para hoje.</div>
+          ) : (
+            <div className="flex flex-col">
+              {compromissosHoje.map((c: any, i: number) => (
+                <Link
+                  href="/agenda"
+                  key={c.id}
+                  className={`px-lg py-md hover:bg-surface-variant/30 transition-colors flex items-center gap-lg ${i < compromissosHoje.length - 1 ? 'border-b border-outline-variant/30' : ''}`}
+                >
+                  {(c.hora_inicio || c.hora_fim) && (
+                    <span className="text-[11px] font-bold text-primary bg-primary/10 px-2 py-1 rounded-full shrink-0">
+                      {c.hora_inicio?.slice(0, 5) || '—'}{c.hora_fim ? ' – ' + c.hora_fim.slice(0, 5) : ''}
+                    </span>
+                  )}
+                  <div className="min-w-0">
+                    <div className="font-label-md text-on-surface truncate">{c.titulo}</div>
+                    {c.endereco && <div className="text-on-surface-variant text-body-sm truncate">📍 {c.endereco}</div>}
+                  </div>
+                </Link>
+              ))}
+            </div>
+          )}
+        </section>
 
         {/* Obras recentes */}
         {obrasRecentes.length > 0 && (

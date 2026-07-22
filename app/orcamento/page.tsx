@@ -358,7 +358,8 @@ export default function Orcamento() {
     const totalMat = itensDoOrc.reduce((a, i) => a + valoresProposta(i).material, 0)
     const totalMao = itensDoOrc.reduce((a, i) => a + valoresProposta(i).maoObra, 0)
     const totalGeral = itensDoOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
-    const desconto = parseFloat(detalhe.desconto || 0)
+    const descontoPct = parseFloat(detalhe.desconto_percentual || 0)
+    const desconto = totalGeral * descontoPct / 100
     const totalFinal = totalGeral - desconto
 
     const ambContent = ambsOrc.map(amb => {
@@ -440,7 +441,7 @@ export default function Orcamento() {
         <table style="width:100%;border-collapse:collapse">
           <tr><td style="padding:10px 16px">Total Material</td><td style="padding:10px 16px;text-align:right;font-weight:600">${fmt(totalMat)}</td></tr>
           <tr style="background:#f9f9f9"><td style="padding:10px 16px">Total Mão de Obra</td><td style="padding:10px 16px;text-align:right;font-weight:600">${fmt(totalMao)}</td></tr>
-          ${desconto > 0 ? '<tr><td style="padding:10px 16px">Desconto</td><td style="padding:10px 16px;text-align:right;color:#e74c3c;font-weight:600">- ' + fmt(desconto) + '</td></tr>' : ''}
+          ${desconto > 0 ? '<tr><td style="padding:10px 16px">Desconto (' + fmtN(descontoPct) + '%)</td><td style="padding:10px 16px;text-align:right;color:#e74c3c;font-weight:600">- ' + fmt(desconto) + '</td></tr>' : ''}
           <tr style="background:#1B3A5C;color:white">
             <td style="padding:14px 16px;font-size:16px;font-weight:700">TOTAL GERAL</td>
             <td style="padding:14px 16px;text-align:right;font-size:20px;font-weight:900">${fmt(totalFinal)}</td>
@@ -596,7 +597,8 @@ export default function Orcamento() {
     const totalMat = itensOrc.reduce((a, i) => a + parseFloat(i.preco_material||0) * parseFloat(i.quantidade||1), 0)
     const totalMao = itensOrc.reduce((a, i) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)
     const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
-    const desconto = parseFloat(detalhe.desconto || 0)
+    const descontoPct = parseFloat(detalhe.desconto_percentual || 0)
+    const desconto = totalGeral * descontoPct / 100
     const totalFinal = totalGeral - desconto
     const bancoBusca = bancoItens.filter(b => !buscaBanco || b.nome.toLowerCase().includes(buscaBanco.toLowerCase()))
     const podeEditar = podeEditarOrcamento(detalhe)
@@ -780,9 +782,13 @@ export default function Orcamento() {
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
                     <div><div className="text-[10px] text-on-surface-variant">TOTAL MATERIAL</div><div className="text-lg font-bold text-primary">{fmt(totalMat)}</div></div>
                     <div><div className="text-[10px] text-on-surface-variant">TOTAL MÃO DE OBRA</div><div className="text-lg font-bold text-secondary">{fmt(totalMao)}</div></div>
-                    <div><div className="text-[10px] text-on-surface-variant">DESCONTO</div>
-                      <input type="number" placeholder="0" value={detalhe.desconto || ''} disabled={!podeEditar} onChange={async e => { const v = parseFloat(e.target.value||'0'); await editar('orcamentos', detalhe.id, { desconto: v }); setDetalhe({ ...detalhe, desconto: v }) }}
-                        className={inputCls + ' mt-1 text-base font-bold text-error w-32 disabled:opacity-50'} />
+                    <div><div className="text-[10px] text-on-surface-variant">DESCONTO (%)</div>
+                      <div className="flex items-center gap-1.5">
+                        <input type="number" step="0.1" placeholder="0" value={detalhe.desconto_percentual || ''} disabled={!podeEditar}
+                          onChange={async e => { const v = parseFloat(e.target.value||'0'); await editar('orcamentos', detalhe.id, { desconto_percentual: v }); setDetalhe({ ...detalhe, desconto_percentual: v }) }}
+                          className={inputCls + ' mt-1 text-base font-bold text-error w-20 disabled:opacity-50'} />
+                        <span className="text-[11px] text-error font-semibold mt-1">- {fmt(desconto)}</span>
+                      </div>
                     </div>
                     <div><div className="text-[10px] text-on-surface-variant">TOTAL FINAL</div><div className="text-xl font-black text-primary-container">{fmt(totalFinal)}</div></div>
                   </div>

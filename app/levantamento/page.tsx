@@ -572,7 +572,8 @@ export default function Levantamento() {
       const valorUnit = (item: any) => (parseFloat(item.preco_material||0) + parseFloat(item.preco_mao_obra||0)) * (1 + parseFloat(item.lucro_percentual||0)/100) * (1 + parseFloat(item.imposto_percentual||0)/100)
       const totalItem = (item: any) => valorUnit(item) * parseFloat(item.quantidade||1)
       const totalGeral = orcItens.reduce((a: number, i: any) => a + totalItem(i), 0)
-      const desconto = parseFloat(orc.desconto || 0)
+      const descontoPct = parseFloat(orc.desconto_percentual || 0)
+      const desconto = totalGeral * descontoPct / 100
       const totalFinal = totalGeral - desconto
 
       const ambContent = orcAmbs.map((oa: any) => {
@@ -620,7 +621,7 @@ export default function Levantamento() {
           <div style="background:#1b2027;padding:10px 14px;font-weight:700;color:#6ee9e0;font-size:13px">Resumo Financeiro</div>
           <table style="width:100%;border-collapse:collapse;font-size:13px">
             <tr><td style="padding:9px 14px">Subtotal</td><td style="padding:9px 14px;text-align:right;font-weight:600">${moeda(totalGeral)}</td></tr>
-            ${desconto > 0 ? `<tr><td style="padding:9px 14px">Desconto</td><td style="padding:9px 14px;text-align:right;color:#ffb4ab;font-weight:600">- ${moeda(desconto)}</td></tr>` : ''}
+            ${desconto > 0 ? `<tr><td style="padding:9px 14px">Desconto (${descontoPct.toLocaleString('pt-BR')}%)</td><td style="padding:9px 14px;text-align:right;color:#ffb4ab;font-weight:600">- ${moeda(desconto)}</td></tr>` : ''}
             <tr style="background:#6ee9e01a">
               <td style="padding:12px 14px;font-size:14px;font-weight:700;color:#6ee9e0">TOTAL GERAL</td>
               <td style="padding:12px 14px;text-align:right;font-size:18px;font-weight:900;color:#6ee9e0">${moeda(totalFinal)}</td>

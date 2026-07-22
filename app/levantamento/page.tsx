@@ -78,6 +78,7 @@ const STATUS_BADGE: Record<string, string> = {
 
 const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
 const AMBIENTES_COMUNS = ['Sala de Estar', 'Sala de Jantar', 'Cozinha', 'Quarto 1', 'Quarto 2', 'Quarto 3', 'Banheiro Social', 'Banheiro Suíte', 'Área de Serviço', 'Varanda', 'Fachada', 'Área Externa', 'Corredor', 'Hall', 'Escritório', 'Garagem']
+const CATEGORIAS = ['Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Climatização (AC)', 'Forro', 'Revestimento de Parede', 'Revestimento de Piso', 'Pintura', 'Esquadrias', 'Marcenaria', 'Serralheria', 'Vidraçaria', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
 
 function gerarCodigo(lista: any[]) {
   const a = new Date().getFullYear()
@@ -103,6 +104,7 @@ export default function Levantamento() {
   const [itens, setItens] = useState<any[]>([])
   const [obras, setObras] = useState<any[]>([])
   const [solicitacoes, setSolicitacoes] = useState<any[]>([])
+  const [bancoItens, setBancoItens] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [detalhe, setDetalhe] = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('ambientes')
@@ -115,7 +117,7 @@ export default function Levantamento() {
 
   const [fLev, setFLev] = useState({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '' })
   const [fAmb, setFAmb] = useState({ nome: '', nomeCustom: '' })
-  const [fItem, setFItem] = useState({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '' })
+  const [fItem, setFItem] = useState({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
   const [editItem, setEditItem] = useState<any>(null)
   const [arquivoFoto, setArquivoFoto] = useState<File | null>(null)
   const [enviandoFoto, setEnviandoFoto] = useState(false)
@@ -139,14 +141,15 @@ export default function Levantamento() {
 
   async function carregar() {
     setLoading(true)
-    const [l, a, it, o, s] = await Promise.all([
+    const [l, a, it, o, s, b] = await Promise.all([
       buscar('levantamentos', '?order=created_at.desc'),
       buscar('levantamento_ambientes', '?order=ordem'),
       buscar('levantamento_itens', '?order=created_at'),
       buscar('obras', '?select=id,nome&order=nome'),
       buscar('levantamento_solicitacoes', '?order=created_at.desc'),
+      buscar('banco_itens', '?order=nome'),
     ])
-    setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setSolicitacoes(s)
+    setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setSolicitacoes(s); setBancoItens(b)
     setLoading(false)
   }
 
@@ -215,11 +218,13 @@ export default function Levantamento() {
       unidade: fItem.unidade,
       observacao: fItem.observacao,
       foto_url: fotoUrl || null,
+      banco_item_id: fItem.banco_item_id || null,
+      categoria: fItem.categoria || null,
     }
     if (editItem) { await editar('levantamento_itens', editItem.id, dados) }
     else { await criar('levantamento_itens', dados) }
     setJanela(null); setEditItem(null); setArquivoFoto(null)
-    setFItem({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '' })
+    setFItem({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
     carregar()
   }
 
@@ -578,7 +583,7 @@ export default function Levantamento() {
                           {podeEditar && (
                             <div className="flex justify-end mb-3">
                               <button className={btnPrimaryCls} onClick={() => {
-                                setFItem({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '' })
+                                setFItem({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
                                 setArquivoFoto(null); setEditItem(null); setJanela('item')
                               }}>+ Adicionar Serviço</button>
                             </div>
@@ -619,7 +624,7 @@ export default function Levantamento() {
                                         {podeEditar && (
                                           <div className="flex gap-1">
                                             <button className={btnEditSmCls} onClick={() => {
-                                              setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento || '', largura: item.largura || '', altura: item.altura || '', area: item.area || '', unidade: item.unidade || 'm²', observacao: item.observacao || '', foto_url: item.foto_url || '' })
+                                              setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento || '', largura: item.largura || '', altura: item.altura || '', area: item.area || '', unidade: item.unidade || 'm²', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
                                               setArquivoFoto(null); setEditItem(item); setJanela('item')
                                             }}>✏️</button>
                                             <button className={btnDangerSmCls} onClick={() => remover('levantamento_itens', item.id).then(carregar)}>×</button>
@@ -726,7 +731,34 @@ export default function Levantamento() {
               <div className="text-body-sm text-primary mb-5">Ambiente: {ambienteAtivo?.nome}</div>
               <div className="mb-3.5">
                 <label className={labelCls}>Serviço *</label>
-                <input className={inputCls} placeholder="Ex: Pintura das paredes, Troca do piso..." value={fItem.servico} onChange={e => setFItem({ ...fItem, servico: e.target.value })} />
+                <select className={inputCls} value={fItem.banco_item_id || (fItem.servico ? '__custom__' : '')}
+                  onChange={e => {
+                    const v = e.target.value
+                    if (v === '' || v === '__custom__') {
+                      setFItem({ ...fItem, banco_item_id: '', servico: v === '__custom__' ? '' : fItem.servico })
+                    } else {
+                      const bi = bancoItens.find(b => b.id === v)
+                      if (bi) setFItem({ ...fItem, banco_item_id: bi.id, servico: bi.nome, categoria: bi.categoria || '', unidade: bi.unidade || fItem.unidade })
+                    }
+                  }}>
+                  <option value="">Selecione do banco de itens ou "Outro"</option>
+                  {bancoItens.map(b => <option key={b.id} value={b.id}>{b.nome}{b.categoria ? ' — ' + b.categoria : ''}</option>)}
+                  <option value="__custom__">+ Outro (digitar)</option>
+                </select>
+              </div>
+              {!fItem.banco_item_id && (
+                <div className="mb-3.5">
+                  <label className={labelCls}>Nome do serviço (personalizado)</label>
+                  <input className={inputCls} placeholder="Ex: Pintura das paredes, Troca do piso..." value={fItem.servico} onChange={e => setFItem({ ...fItem, servico: e.target.value })} />
+                </div>
+              )}
+              <div className="mb-3.5">
+                <label className={labelCls}>Categoria {fItem.banco_item_id ? '(definida pelo banco de itens)' : ''}</label>
+                <select className={inputCls} value={fItem.categoria} disabled={!!fItem.banco_item_id}
+                  onChange={e => setFItem({ ...fItem, categoria: e.target.value })}>
+                  <option value="">Selecione</option>
+                  {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
               </div>
               <div className="mb-3.5">
                 <label className={labelCls}>Descrição</label>

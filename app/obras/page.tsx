@@ -891,7 +891,7 @@ export default function Obras() {
 
         {/* abas */}
         <div className="flex gap-2 mb-lg flex-wrap">
-          {([['resumo', '📋 Resumo'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ...(orcamentoObra ? [['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições']] as [string, string][] : [])] as [string, string][]).map(([id, nome]) => (
+          {([['resumo', '📋 Resumo'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições']] as [string, string][]).map(([id, nome]) => (
             <button key={id} className={abaDetalhe === id ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe(id)}>{nome}</button>
           ))}
         </div>
@@ -1077,6 +1077,14 @@ export default function Obras() {
         )}
 
         {/* aba cronograma */}
+        {abaDetalhe === 'cronograma' && !orcamentoObra && (
+          <div className={sectionCls + ' text-center py-12'}>
+            <div className="text-4xl mb-3">📅</div>
+            <div className="text-sm font-bold text-on-surface mb-2">Nenhum orçamento vinculado a esta obra</div>
+            <div className="text-body-sm text-on-surface-variant mb-5 max-w-md mx-auto">O cronograma nasce automaticamente dos itens de um orçamento. Crie ou abra um orçamento e vincule esta obra na aba "⚙️ Configurações" dele.</div>
+            <Link href="/orcamento" className={btnPrimaryCls}>Ir para Orçamento</Link>
+          </div>
+        )}
         {abaDetalhe === 'cronograma' && orcamentoObra && (
           <div className={sectionCls}>
             <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
@@ -1140,6 +1148,16 @@ export default function Obras() {
                 </table>
               </div>
             )}
+          </div>
+        )}
+
+        {/* aba medições — sem orçamento vinculado */}
+        {abaDetalhe === 'medicoes' && !orcamentoObra && (
+          <div className={sectionCls + ' text-center py-12'}>
+            <div className="text-4xl mb-3">📐</div>
+            <div className="text-sm font-bold text-on-surface mb-2">Nenhum orçamento vinculado a esta obra</div>
+            <div className="text-body-sm text-on-surface-variant mb-5 max-w-md mx-auto">As medições são feitas em cima dos itens de serviço de um orçamento. Crie ou abra um orçamento e vincule esta obra na aba "⚙️ Configurações" dele.</div>
+            <Link href="/orcamento" className={btnPrimaryCls}>Ir para Orçamento</Link>
           </div>
         )}
 

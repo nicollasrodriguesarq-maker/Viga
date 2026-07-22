@@ -176,6 +176,13 @@ export default function Obras() {
     setUserEmail(localStorage.getItem('viga_email') || '')
     obterMinhasPermissoes().then(perm => { if (!temAcessoModulo(perm, 'obras')) window.location.href = '/' })
     carregar()
+    const abrirId = localStorage.getItem('viga_obra_abrir')
+    if (abrirId) {
+      localStorage.removeItem('viga_obra_abrir')
+      buscar('obras', '?id=eq.' + abrirId).then(r => {
+        if (r[0]) { setDetalhe(r[0]); setAbaDetalhe('resumo') }
+      })
+    }
   }, [])
 
   function sair() {

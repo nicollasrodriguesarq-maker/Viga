@@ -109,6 +109,7 @@ export default function Orcamento() {
   const [usarComposicao, setUsarComposicao] = useState(false)
   const [editBanco, setEditBanco] = useState<any>(null)
   const [fAmb, setFAmb] = useState('')
+  const [fTransformar, setFTransformar] = useState({ data_inicio: '', dias_trabalho: 'seg_sex', periodo_trabalho: 'comercial' })
 
   useEffect(() => {
     if (!localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -351,6 +352,103 @@ export default function Orcamento() {
       }
     }
     carregar()
+  }
+
+  // ── Transformar orçamento aprovado em Obra + cronograma automático ──
+  function tempoExecucaoItem(item: any): number {
+    const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
+    const t = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
+    return t > 0 ? t : 1
+  }
+  function diaValido(d: Date, pattern: string): boolean {
+    const dow = d.getDay()
+    if (pattern === 'todos_dias') return true
+    if (pattern === 'seg_sab') return dow >= 1 && dow <= 6
+    return dow >= 1 && dow <= 5
+  }
+  function proximoDiaUtil(d: Date, pattern: string): Date {
+    const nd = new Date(d)
+    while (!diaValido(nd, pattern)) nd.setDate(nd.getDate() + 1)
+    return nd
+  }
+  function somarDiasUteis(inicio: Date, dias: number, pattern: string): Date {
+    let atual = proximoDiaUtil(inicio, pattern)
+    let restante = Math.max(1, dias) - 1
+    while (restante > 0) {
+      atual = new Date(atual)
+      atual.setDate(atual.getDate() + 1)
+      atual = proximoDiaUtil(atual, pattern)
+      restante--
+    }
+    return atual
+  }
+  function formatarDataISO(d: Date): string {
+    return d.toISOString().slice(0, 10)
+  }
+
+  async function transformarEmObra() {
+    if (!detalhe || !fTransformar.data_inicio) return alert('Selecione a data de início')
+    const anoAtual = new Date().getFullYear()
+    const todasObras = await buscar('obras', '?select=codigo')
+    const qtd = todasObras.filter((o: any) => o.codigo?.startsWith('OBR-' + anoAtual)).length
+    const codigo = 'OBR-' + anoAtual + '-' + String(qtd + 1).padStart(3, '0')
+
+    const itensOrc = ordenarPorCategoria(itens.filter(i => i.orcamento_id === detalhe.id))
+    const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
+    const descontoPct = parseFloat(detalhe.desconto_percentual || 0)
+    const valorContrato = totalGeral * (1 - descontoPct / 100)
+
+    let cursor = new Date(fTransformar.data_inicio + 'T00:00:00')
+    let dataFimFinal = cursor
+    const etapasCalculadas: { item: any, inicio: Date, fim: Date }[] = []
+    for (const item of itensOrc) {
+      const inicio = proximoDiaUtil(cursor, fTransformar.dias_trabalho)
+      const dur = tempoExecucaoItem(item)
+      const fim = somarDiasUteis(inicio, dur, fTransformar.dias_trabalho)
+      etapasCalculadas.push({ item, inicio, fim })
+      dataFimFinal = fim
+      const prox = new Date(fim); prox.setDate(prox.getDate() + 1)
+      cursor = prox
+    }
+
+    const novaObra = await criar('obras', {
+      codigo,
+      nome: detalhe.cliente_nome + (detalhe.endereco ? ' — ' + detalhe.endereco : ''),
+      tipo: 'Reforma',
+      cliente: detalhe.cliente_nome,
+      endereco: detalhe.endereco || '',
+      responsavel: '',
+      status: 'em_execucao',
+      data_inicio: fTransformar.data_inicio,
+      data_previsao: itensOrc.length > 0 ? formatarDataISO(dataFimFinal) : fTransformar.data_inicio,
+      valor_contrato: valorContrato,
+      dias_trabalho: fTransformar.dias_trabalho,
+      periodo_trabalho: fTransformar.periodo_trabalho,
+    })
+    if (!novaObra?.id) return alert('Falha ao criar a obra. Tente novamente.')
+
+    await editar('orcamentos', detalhe.id, { obra_id: novaObra.id })
+    setDetalhe({ ...detalhe, obra_id: novaObra.id })
+
+    for (const { item, inicio, fim } of etapasCalculadas) {
+      await criar('cronograma_etapas', {
+        orcamento_item_id: item.id,
+        obra_id: novaObra.id,
+        status: 'pendente',
+        data_inicio_prevista: formatarDataISO(inicio),
+        data_fim_prevista: formatarDataISO(fim),
+      })
+    }
+
+    setJanela(null)
+    alert('Obra ' + codigo + ' criada com sucesso! Cronograma gerado automaticamente com ' + etapasCalculadas.length + ' etapa(s).')
+    carregar()
+  }
+
+  function verObraVinculada() {
+    if (!detalhe?.obra_id) return
+    localStorage.setItem('viga_obra_abrir', detalhe.obra_id)
+    window.location.href = '/obras'
   }
 
   async function usarItemBanco(item: any) {
@@ -654,6 +752,13 @@ export default function Orcamento() {
               <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
             )}
             <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPDF}>🖨️ Gerar Proposta PDF</button>
+            {detalhe.status === 'aprovado' && podeEditar && (
+              detalhe.obra_id ? (
+                <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verObraVinculada}>🔗 Ver Obra Vinculada</button>
+              ) : (
+                <button className="bg-tertiary text-on-tertiary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => { setFTransformar({ data_inicio: '', dias_trabalho: 'seg_sex', periodo_trabalho: 'comercial' }); setJanela('transformarObra') }}>🏗️ Transformar em Obra</button>
+              )
+            )}
           </div>
         </div>
 
@@ -1006,6 +1111,38 @@ export default function Orcamento() {
               <div className="flex gap-2 justify-end">
                 <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
                 <button className={btnPrimaryCls} onClick={salvarAmbiente}>Criar Ambiente</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {janela === 'transformarObra' && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
+              <div className="text-base font-bold text-on-surface mb-1.5">🏗️ Transformar em Obra</div>
+              <div className="text-body-sm text-on-surface-variant mb-5">O cronograma será gerado automaticamente a partir do tempo de execução de cada item, na ordem das etapas.</div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Data de Início *</label>
+                <input className={inputCls} type="date" value={fTransformar.data_inicio} onChange={e => setFTransformar({ ...fTransformar, data_inicio: e.target.value })} />
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Dias de Trabalho</label>
+                <select className={inputCls} value={fTransformar.dias_trabalho} onChange={e => setFTransformar({ ...fTransformar, dias_trabalho: e.target.value })}>
+                  <option value="seg_sex">Segunda a Sexta</option>
+                  <option value="seg_sab">Segunda a Sábado</option>
+                  <option value="todos_dias">Todos os dias (inclusive domingo)</option>
+                </select>
+              </div>
+              <div className="mb-5">
+                <label className={labelCls}>Período</label>
+                <select className={inputCls} value={fTransformar.periodo_trabalho} onChange={e => setFTransformar({ ...fTransformar, periodo_trabalho: e.target.value })}>
+                  <option value="comercial">Comercial</option>
+                  <option value="noturno">Noturno</option>
+                </select>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={transformarEmObra}>Gerar Obra e Cronograma</button>
               </div>
             </div>
           </div>

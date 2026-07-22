@@ -853,7 +853,7 @@ export default function Obras() {
           ] as [string, string, string][]).map(([lbl, val, cor]) => (
             <div key={lbl} className="bg-surface-container-high border border-outline-variant rounded-lg p-3 min-w-0">
               <div className="text-[10px] text-on-surface-variant uppercase tracking-widest mb-2">{lbl}</div>
-              <div className={`text-sm font-bold leading-tight break-words ${cor}`}>{val}</div>
+              <div className={`text-[11px] sm:text-xs font-bold leading-tight whitespace-nowrap ${cor}`}>{val}</div>
             </div>
           ))}
         </div>
@@ -1495,7 +1495,7 @@ export default function Obras() {
                     {([['CONTRATO', moeda(cct), 'text-primary'], ['CUSTOS', moeda(cc), 'text-error'], ['MARGEM', moeda(margem), margem >= 0 ? 'text-primary-container' : 'text-error']] as [string, string, string][]).map(([l, v, c]) => (
                       <div key={l} className="p-2.5 rounded-lg bg-surface-container-high border border-outline-variant min-w-0">
                         <p className="text-label-sm text-outline-variant uppercase">{l}</p>
-                        <p className={`text-sm font-bold leading-tight break-words ${c}`}>{v}</p>
+                        <p className={`text-[11px] sm:text-xs font-bold leading-tight whitespace-nowrap ${c}`}>{v}</p>
                       </div>
                     ))}
                   </div>

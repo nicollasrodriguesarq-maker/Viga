@@ -38,7 +38,15 @@ const STATUS_BADGE: Record<string, string> = {
   expirado: 'bg-tertiary/10 text-tertiary border-tertiary/20',
 }
 const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
-const FORMAS_PAG = ['50% entrada + 50% na entrega', '30% entrada + 70% na entrega', '40% entrada + 60% na entrega', 'À vista', '3x sem juros', '50% início + 25% meio + 25% fim', 'A combinar']
+const CATEGORIAS = ['Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Climatização (AC)', 'Forro', 'Revestimento de Parede', 'Revestimento de Piso', 'Pintura', 'Esquadrias', 'Marcenaria', 'Serralheria', 'Vidraçaria', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
+
+function calcularValorUnitario(precoMaterial: number, precoMaoObra: number, lucroPct: number, impostoPct: number) {
+  return (precoMaterial + precoMaoObra) * (1 + (lucroPct || 0) / 100) * (1 + (impostoPct || 0) / 100)
+}
+function calcularTotalItem(item: any) {
+  const valorUnit = calcularValorUnitario(parseFloat(item.preco_material || 0), parseFloat(item.preco_mao_obra || 0), parseFloat(item.lucro_percentual || 0), parseFloat(item.imposto_percentual || 0))
+  return valorUnit * parseFloat(item.quantidade || 1)
+}
 
 // classes reutilizáveis
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -68,9 +76,13 @@ export default function Orcamento() {
   const [userEmail, setUserEmail] = useState('')
 
   const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '' })
-  const [fItem, setFItem] = useState({ servico: '', descricao: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', fornecedor: '' })
+  const [fItem, setFItem] = useState({ servico: '', descricao: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' })
   const [editItem, setEditItem] = useState<any>(null)
-  const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', categoria: '' })
+  const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '' })
+  const [composicao, setComposicao] = useState<any[]>([])
+  const [fComp, setFComp] = useState({ material_nome: '', quantidade: '1', unidade: 'un', preco_unitario: '' })
+  const [usarComposicao, setUsarComposicao] = useState(false)
+  const [editBanco, setEditBanco] = useState<any>(null)
   const [fAmb, setFAmb] = useState('')
 
   useEffect(() => {
@@ -151,7 +163,9 @@ export default function Orcamento() {
     const mat = parseFloat(fItem.preco_material || '0')
     const mao = parseFloat(fItem.preco_mao_obra || '0')
     const qtd = parseFloat(fItem.quantidade || '1')
-    const total = (mat + mao) * qtd
+    const lucro = parseFloat(fItem.lucro_percentual || '0')
+    const imposto = parseFloat(fItem.imposto_percentual || '0')
+    const total = calcularValorUnitario(mat, mao, lucro, imposto) * qtd
     const dados = {
       orcamento_id: detalhe.id,
       ambiente_id: ambienteAtivo.id,
@@ -161,6 +175,8 @@ export default function Orcamento() {
       unidade: fItem.unidade,
       preco_material: mat,
       preco_mao_obra: mao,
+      lucro_percentual: lucro,
+      imposto_percentual: imposto,
       total_item: total,
       fornecedor: fItem.fornecedor || null,
     }
@@ -169,12 +185,12 @@ export default function Orcamento() {
       await criar('orcamento_itens', dados)
       const existe = bancoItens.find(b => b.nome.toLowerCase() === fItem.servico.toLowerCase())
       if (!existe && fItem.servico) {
-        await criar('banco_itens', { nome: fItem.servico, unidade: fItem.unidade, preco_material: mat, preco_mao_obra: mao, categoria: '' })
+        await criar('banco_itens', { nome: fItem.servico, unidade: fItem.unidade, preco_material: mat, preco_mao_obra: mao, lucro_percentual: lucro, imposto_percentual: imposto, categoria: '' })
       }
     }
     await atualizarTotais(detalhe.id)
     setJanela(null); setEditItem(null)
-    setFItem({ servico: '', descricao: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', fornecedor: '' })
+    setFItem({ servico: '', descricao: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' })
     carregar()
   }
 
@@ -182,13 +198,67 @@ export default function Orcamento() {
     const todosItens = await buscar('orcamento_itens', '?orcamento_id=eq.' + orcId)
     const tMat = todosItens.reduce((a: number, i: any) => a + parseFloat(i.preco_material||0) * parseFloat(i.quantidade||1), 0)
     const tMao = todosItens.reduce((a: number, i: any) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)
-    await editar('orcamentos', orcId, { total_material: tMat, total_mao_obra: tMao, total_geral: tMat + tMao })
+    const tGeral = todosItens.reduce((a: number, i: any) => a + calcularTotalItem(i), 0)
+    await editar('orcamentos', orcId, { total_material: tMat, total_mao_obra: tMao, total_geral: tGeral })
+  }
+
+  function somaComposicao() {
+    return composicao.reduce((a, c) => a + parseFloat(c.quantidade || 0) * parseFloat(c.preco_unitario || 0), 0)
+  }
+  function adicionarComposicao() {
+    if (!fComp.material_nome) return
+    setComposicao([...composicao, { ...fComp, id: 'tmp_' + Date.now() }])
+    setFComp({ material_nome: '', quantidade: '1', unidade: 'un', preco_unitario: '' })
+  }
+  function removerComposicao(idx: number) {
+    setComposicao(composicao.filter((_, i) => i !== idx))
+  }
+  function abrirNovoBanco() {
+    setEditBanco(null)
+    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '' })
+    setComposicao([]); setUsarComposicao(false)
+    setFComp({ material_nome: '', quantidade: '1', unidade: 'un', preco_unitario: '' })
+    setJanela('banco')
+  }
+  async function abrirEditarBanco(item: any) {
+    setEditBanco(item)
+    setFBanco({ nome: item.nome, unidade: item.unidade, categoria: item.categoria || '', preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '' })
+    const comp = await buscar('banco_itens_composicao', '?banco_item_id=eq.' + item.id + '&order=created_at')
+    setComposicao(comp)
+    setUsarComposicao(comp.length > 0)
+    setFComp({ material_nome: '', quantidade: '1', unidade: 'un', preco_unitario: '' })
+    setJanela('banco')
   }
 
   async function salvarBancoItem() {
     if (!fBanco.nome) return alert('Preencha o nome')
-    await criar('banco_itens', { ...fBanco, preco_material: parseFloat(fBanco.preco_material||'0'), preco_mao_obra: parseFloat(fBanco.preco_mao_obra||'0') })
-    setJanela(null); setFBanco({ nome: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', categoria: '' }); carregar()
+    if (!fBanco.categoria) return alert('Selecione a categoria')
+    const precoMaterial = usarComposicao ? somaComposicao() : parseFloat(fBanco.preco_material || '0')
+    const dados = {
+      nome: fBanco.nome,
+      unidade: fBanco.unidade,
+      categoria: fBanco.categoria,
+      preco_material: precoMaterial,
+      preco_mao_obra: parseFloat(fBanco.preco_mao_obra || '0'),
+      lucro_percentual: parseFloat(fBanco.lucro_percentual || '0'),
+      imposto_percentual: parseFloat(fBanco.imposto_percentual || '0'),
+      tempo_execucao: fBanco.tempo_execucao ? parseFloat(fBanco.tempo_execucao) : null,
+    }
+    let bancoId = editBanco?.id
+    if (editBanco) { await editar('banco_itens', editBanco.id, dados) }
+    else { const novo = await criar('banco_itens', dados); bancoId = novo?.id }
+    if (bancoId) {
+      const existentes = await buscar('banco_itens_composicao', '?banco_item_id=eq.' + bancoId)
+      for (const e of existentes) await remover('banco_itens_composicao', e.id)
+      if (usarComposicao) {
+        for (const c of composicao) {
+          await criar('banco_itens_composicao', { banco_item_id: bancoId, material_nome: c.material_nome, quantidade: parseFloat(c.quantidade||0), unidade: c.unidade, preco_unitario: parseFloat(c.preco_unitario||0) })
+        }
+      }
+    }
+    setJanela(null); setEditBanco(null); setComposicao([]); setUsarComposicao(false)
+    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '' })
+    carregar()
   }
 
   async function salvarAmbiente() {
@@ -215,7 +285,7 @@ export default function Orcamento() {
 
   async function usarItemBanco(item: any) {
     if (!ambienteAtivo) return alert('Selecione um ambiente primeiro')
-    setFItem({ servico: item.nome, descricao: '', quantidade: '1', unidade: item.unidade, preco_material: String(item.preco_material), preco_mao_obra: String(item.preco_mao_obra), fornecedor: '' })
+    setFItem({ servico: item.nome, descricao: '', quantidade: '1', unidade: item.unidade, preco_material: String(item.preco_material), preco_mao_obra: String(item.preco_mao_obra), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), fornecedor: '' })
     setJanela('item')
   }
 
@@ -224,7 +294,7 @@ export default function Orcamento() {
     const ambsOrc = ambientes.filter(a => a.orcamento_id === detalhe.id).sort((a, b) => a.ordem - b.ordem)
     const totalMat = itens.filter(i => i.orcamento_id === detalhe.id).reduce((a, i) => a + parseFloat(i.preco_material||0) * parseFloat(i.quantidade||1), 0)
     const totalMao = itens.filter(i => i.orcamento_id === detalhe.id).reduce((a, i) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)
-    const totalGeral = totalMat + totalMao
+    const totalGeral = itens.filter(i => i.orcamento_id === detalhe.id).reduce((a, i) => a + calcularTotalItem(i), 0)
     const desconto = parseFloat(detalhe.desconto || 0)
     const totalFinal = totalGeral - desconto
 
@@ -233,6 +303,7 @@ export default function Orcamento() {
       if (itensAmb.length === 0) return ''
       const matAmb = itensAmb.reduce((a, i) => a + parseFloat(i.preco_material||0) * parseFloat(i.quantidade||1), 0)
       const maoAmb = itensAmb.reduce((a, i) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)
+      const totalAmb = itensAmb.reduce((a, i) => a + calcularTotalItem(i), 0)
       const rows = itensAmb.map(item => {
         const mat = parseFloat(item.preco_material||0) * parseFloat(item.quantidade||1)
         const mao = parseFloat(item.preco_mao_obra||0) * parseFloat(item.quantidade||1)
@@ -241,7 +312,7 @@ export default function Orcamento() {
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center">${fmtN(parseFloat(item.quantidade||1))} ${item.unidade}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">${fmt(mat)}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">${fmt(mao)}</td>
-          <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(mat + mao)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(calcularTotalItem(item))}</td>
         </tr>`
       }).join('')
       return `
@@ -263,7 +334,7 @@ export default function Orcamento() {
                 <td colspan="2" style="padding:8px 10px;font-weight:600;color:#1B3A5C">Subtotal ${amb.nome}</td>
                 <td style="padding:8px 10px;text-align:right;font-weight:600">${fmt(matAmb)}</td>
                 <td style="padding:8px 10px;text-align:right;font-weight:600">${fmt(maoAmb)}</td>
-                <td style="padding:8px 10px;text-align:right;font-weight:700;color:#1B3A5C">${fmt(matAmb + maoAmb)}</td>
+                <td style="padding:8px 10px;text-align:right;font-weight:700;color:#1B3A5C">${fmt(totalAmb)}</td>
               </tr>
             </tfoot>
           </table>
@@ -356,7 +427,7 @@ export default function Orcamento() {
     const itensOrc = itens.filter(i => i.orcamento_id === detalhe.id)
     const totalMat = itensOrc.reduce((a, i) => a + parseFloat(i.preco_material||0) * parseFloat(i.quantidade||1), 0)
     const totalMao = itensOrc.reduce((a, i) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)
-    const totalGeral = totalMat + totalMao
+    const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
     const desconto = parseFloat(detalhe.desconto || 0)
     const totalFinal = totalGeral - desconto
     const bancoBusca = bancoItens.filter(b => !buscaBanco || b.nome.toLowerCase().includes(buscaBanco.toLowerCase()))
@@ -410,7 +481,7 @@ export default function Orcamento() {
               <div className="text-sm font-bold text-on-surface">📋 Itens por Ambiente</div>
               <div className="flex gap-2">
                 <button className={btnSecondaryCls} onClick={() => { setFAmb(''); setJanela('ambiente') }}>+ Ambiente</button>
-                {ambienteAtivo && <button className={btnPrimaryCls} onClick={() => { setFItem({ servico: '', descricao: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', fornecedor: '' }); setEditItem(null); setJanela('item') }}>+ Item</button>}
+                {ambienteAtivo && <button className={btnPrimaryCls} onClick={() => { setFItem({ servico: '', descricao: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' }); setEditItem(null); setJanela('item') }}>+ Item</button>}
               </div>
             </div>
 
@@ -428,6 +499,7 @@ export default function Orcamento() {
                   const isAtivo = ambienteAtivo?.id === amb.id
                   const matAmb = itensAmb.reduce((a, i) => a + parseFloat(i.preco_material||0) * parseFloat(i.quantidade||1), 0)
                   const maoAmb = itensAmb.reduce((a, i) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)
+                  const totalAmb = itensAmb.reduce((a, i) => a + calcularTotalItem(i), 0)
                   return (
                     <div key={amb.id} className={`rounded-xl mb-3 overflow-hidden border ${isAtivo ? 'border-primary' : 'border-outline-variant'}`}>
                       <div className={`flex justify-between items-center px-4 py-3 cursor-pointer ${isAtivo ? 'bg-primary/10' : 'bg-surface-container'}`}
@@ -436,7 +508,7 @@ export default function Orcamento() {
                           <span>🏠</span>
                           <div>
                             <div className={`font-bold text-sm ${isAtivo ? 'text-primary' : 'text-on-surface'}`}>{amb.nome}</div>
-                            <div className="text-[11px] text-on-surface-variant">{itensAmb.length} item(ns) · {fmt(matAmb + maoAmb)}</div>
+                            <div className="text-[11px] text-on-surface-variant">{itensAmb.length} item(ns) · {fmt(totalAmb)}</div>
                           </div>
                         </div>
                         <div className="flex gap-2 items-center">
@@ -478,11 +550,11 @@ export default function Orcamento() {
                                         <td className="px-2.5 py-2.5 text-on-surface-variant text-xs">{item.unidade}</td>
                                         <td className="px-2.5 py-2.5 text-primary font-semibold">{fmt(mat)}</td>
                                         <td className="px-2.5 py-2.5 text-secondary font-semibold">{fmt(mao)}</td>
-                                        <td className="px-2.5 py-2.5 font-bold text-tertiary">{fmt(mat + mao)}</td>
+                                        <td className="px-2.5 py-2.5 font-bold text-tertiary">{fmt(calcularTotalItem(item))}</td>
                                         <td className="px-2.5 py-2.5">
                                           <div className="flex gap-1">
                                             <button className={btnEditSmCls} onClick={() => {
-                                              setFItem({ servico: item.servico, descricao: item.descricao||'', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), fornecedor: item.fornecedor || '' })
+                                              setFItem({ servico: item.servico, descricao: item.descricao||'', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), fornecedor: item.fornecedor || '' })
                                               setEditItem(item); setJanela('item')
                                             }}>✏️</button>
                                             <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); carregar() }}>×</button>
@@ -497,7 +569,7 @@ export default function Orcamento() {
                                     <td colSpan={3} className="px-2.5 py-2.5 font-bold text-on-surface">Subtotal {amb.nome}</td>
                                     <td className="px-2.5 py-2.5 text-primary font-bold">{fmt(matAmb)}</td>
                                     <td className="px-2.5 py-2.5 text-secondary font-bold">{fmt(maoAmb)}</td>
-                                    <td className="px-2.5 py-2.5 text-tertiary font-black">{fmt(matAmb + maoAmb)}</td>
+                                    <td className="px-2.5 py-2.5 text-tertiary font-black">{fmt(totalAmb)}</td>
                                     <td></td>
                                   </tr>
                                 </tfoot>
@@ -532,7 +604,7 @@ export default function Orcamento() {
                 <div className="text-sm font-bold text-on-surface">📦 Banco de Itens</div>
                 <div className="text-[11px] text-on-surface-variant mt-0.5">Clique em um item para adicionar ao ambiente selecionado</div>
               </div>
-              <button className={btnPrimaryCls} onClick={() => { setFBanco({ nome: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', categoria: '' }); setJanela('banco') }}>+ Novo Item</button>
+              <button className={btnPrimaryCls} onClick={abrirNovoBanco}>+ Novo Item</button>
             </div>
             {!ambienteAtivo && <div className="px-3.5 py-2.5 bg-tertiary/5 rounded-lg text-body-sm text-tertiary mb-4">⚠️ Selecione um ambiente na aba "Itens por Ambiente" para poder adicionar itens do banco</div>}
             <input placeholder="🔍 Buscar item..." value={buscaBanco} onChange={e => setBuscaBanco(e.target.value)} className={inputCls + ' mb-4'} />
@@ -542,21 +614,26 @@ export default function Orcamento() {
               </div>
             ) : (
               <div className="flex flex-col gap-2">
-                {bancoBusca.map(item => (
+                {bancoBusca.map(item => {
+                  const valorUnit = calcularValorUnitario(parseFloat(item.preco_material||0), parseFloat(item.preco_mao_obra||0), parseFloat(item.lucro_percentual||0), parseFloat(item.imposto_percentual||0))
+                  return (
                   <div key={item.id} className="flex justify-between items-center px-3.5 py-3 bg-surface-container-low rounded-lg border border-outline-variant">
                     <div>
                       <div className="font-semibold text-on-surface">{item.nome}</div>
                       <div className="text-[11px] text-on-surface-variant mt-0.5">
-                        Mat: {fmt(item.preco_material)} · M.O: {fmt(item.preco_mao_obra)} / {item.unidade}
+                        Mat: {fmt(item.preco_material)} · M.O: {fmt(item.preco_mao_obra)} · Lucro {fmtN(item.lucro_percentual||0)}% · Imp {fmtN(item.imposto_percentual||0)}%
                         {item.categoria && <span className="ml-2 text-primary">{item.categoria}</span>}
                       </div>
+                      <div className="text-[11px] font-bold text-tertiary mt-0.5">Valor final: {fmt(valorUnit)} / {item.unidade}</div>
                     </div>
-                    <div className="flex gap-1.5">
+                    <div className="flex gap-1.5 items-center">
                       {ambienteAtivo && <button className={btnPrimaryCls} onClick={() => usarItemBanco(item)}>+ Usar</button>}
+                      <button className={btnEditSmCls} onClick={() => abrirEditarBanco(item)}>✏️</button>
                       <button className={btnDangerSmCls} onClick={() => { if (confirm('Excluir do banco?')) remover('banco_itens', item.id).then(carregar) }}>×</button>
                     </div>
                   </div>
-                ))}
+                  )
+                })}
               </div>
             )}
           </div>
@@ -597,10 +674,7 @@ export default function Orcamento() {
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Forma de Pagamento</label>
-              <select className={inputCls} value={detalhe.condicao_pagamento || ''} onChange={e => { setDetalhe({ ...detalhe, condicao_pagamento: e.target.value }); editar('orcamentos', detalhe.id, { condicao_pagamento: e.target.value }) }}>
-                <option value="">Selecione</option>
-                {FORMAS_PAG.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
+              <textarea className={inputCls + ' min-h-[70px] resize-y'} placeholder="Ex: 40% na assinatura do contrato, 30% no meio da obra, 30% na entrega." value={detalhe.condicao_pagamento || ''} onChange={e => setDetalhe({ ...detalhe, condicao_pagamento: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { condicao_pagamento: detalhe.condicao_pagamento })} />
             </div>
             <div className="mb-5">
               <label className={labelCls}>Observações (aparece na proposta)</label>
@@ -645,6 +719,16 @@ export default function Orcamento() {
                   <input className={inputCls + ' text-secondary'} type="number" placeholder="0,00" value={fItem.preco_mao_obra} onChange={e => setFItem({ ...fItem, preco_mao_obra: e.target.value })} />
                 </div>
               </div>
+              <div className="grid grid-cols-2 gap-3 mb-3.5">
+                <div>
+                  <label className={labelCls}>Lucro (%)</label>
+                  <input className={inputCls} type="number" placeholder="20" value={fItem.lucro_percentual} onChange={e => setFItem({ ...fItem, lucro_percentual: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Imposto (%)</label>
+                  <input className={inputCls} type="number" placeholder="0" value={fItem.imposto_percentual} onChange={e => setFItem({ ...fItem, imposto_percentual: e.target.value })} />
+                </div>
+              </div>
               <div className="mb-4">
                 <label className={labelCls}>Fornecedor / Equipe Responsável (opcional)</label>
                 <input className={inputCls} placeholder="Ex: Pedreiro João, Instaladora XPTO Ar-Condicionado" value={fItem.fornecedor} onChange={e => setFItem({ ...fItem, fornecedor: e.target.value })} />
@@ -652,10 +736,11 @@ export default function Orcamento() {
               {(fItem.quantidade && (fItem.preco_material || fItem.preco_mao_obra)) ? (
                 <div className="bg-surface-container-low rounded-lg p-3.5 mb-4">
                   <div className="text-[11px] text-on-surface-variant mb-2">PREVIEW DO TOTAL</div>
-                  <div className="flex gap-5">
+                  <div className="flex gap-5 flex-wrap">
                     <div><div className="text-[10px] text-on-surface-variant">MATERIAL</div><div className="font-bold text-primary">{fmt(parseFloat(fItem.preco_material||'0') * parseFloat(fItem.quantidade||'1'))}</div></div>
                     <div><div className="text-[10px] text-on-surface-variant">MÃO DE OBRA</div><div className="font-bold text-secondary">{fmt(parseFloat(fItem.preco_mao_obra||'0') * parseFloat(fItem.quantidade||'1'))}</div></div>
-                    <div><div className="text-[10px] text-on-surface-variant">TOTAL</div><div className="font-black text-tertiary text-base">{fmt((parseFloat(fItem.preco_material||'0') + parseFloat(fItem.preco_mao_obra||'0')) * parseFloat(fItem.quantidade||'1'))}</div></div>
+                    <div><div className="text-[10px] text-on-surface-variant">VALOR UNITÁRIO</div><div className="font-bold text-on-surface">{fmt(calcularValorUnitario(parseFloat(fItem.preco_material||'0'), parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')))}</div></div>
+                    <div><div className="text-[10px] text-on-surface-variant">TOTAL</div><div className="font-black text-tertiary text-base">{fmt(calcularValorUnitario(parseFloat(fItem.preco_material||'0'), parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')) * parseFloat(fItem.quantidade||'1'))}</div></div>
                   </div>
                 </div>
               ) : null}
@@ -685,13 +770,13 @@ export default function Orcamento() {
 
         {janela === 'banco' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
-            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[580px] max-h-[92vh] overflow-y-auto">
-              <div className="text-base font-bold text-on-surface mb-5">📦 Novo Item no Banco</div>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[640px] max-h-[92vh] overflow-y-auto">
+              <div className="text-base font-bold text-on-surface mb-5">📦 {editBanco ? 'Editar Item do Banco' : 'Novo Item no Banco'}</div>
               <div className="mb-3.5">
                 <label className={labelCls}>Nome do Serviço/Item *</label>
                 <input className={inputCls} placeholder="Ex: Pintura interna, Instalação elétrica..." value={fBanco.nome} onChange={e => setFBanco({ ...fBanco, nome: e.target.value })} />
               </div>
-              <div className="grid grid-cols-2 gap-3 mb-3.5">
+              <div className="grid grid-cols-3 gap-3 mb-3.5">
                 <div>
                   <label className={labelCls}>Unidade</label>
                   <select className={inputCls} value={fBanco.unidade} onChange={e => setFBanco({ ...fBanco, unidade: e.target.value })}>
@@ -699,22 +784,89 @@ export default function Orcamento() {
                   </select>
                 </div>
                 <div>
-                  <label className={labelCls}>Categoria</label>
-                  <input className={inputCls} placeholder="Ex: Pintura, Elétrica..." value={fBanco.categoria} onChange={e => setFBanco({ ...fBanco, categoria: e.target.value })} />
+                  <label className={labelCls}>Categoria *</label>
+                  <select className={inputCls} value={fBanco.categoria} onChange={e => setFBanco({ ...fBanco, categoria: e.target.value })}>
+                    <option value="">Selecione</option>
+                    {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Tempo Execução (dias)</label>
+                  <input className={inputCls} type="number" placeholder="0" value={fBanco.tempo_execucao} onChange={e => setFBanco({ ...fBanco, tempo_execucao: e.target.value })} />
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3 mb-5">
-                <div>
-                  <label className={labelCls}>Preço Material (R$ / unidade)</label>
+
+              <div className="flex items-center justify-between mb-2 mt-4">
+                <label className={labelCls + ' mb-0'}>Custo de Material</label>
+                <div className="flex gap-1 bg-surface-container-low rounded-lg p-1">
+                  <button type="button" className={`px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer ${!usarComposicao ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`} onClick={() => setUsarComposicao(false)}>Valor direto</button>
+                  <button type="button" className={`px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer ${usarComposicao ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`} onClick={() => setUsarComposicao(true)}>Composição</button>
+                </div>
+              </div>
+
+              {!usarComposicao ? (
+                <div className="mb-3.5">
                   <input className={inputCls + ' text-primary'} type="number" placeholder="0,00" value={fBanco.preco_material} onChange={e => setFBanco({ ...fBanco, preco_material: e.target.value })} />
                 </div>
+              ) : (
+                <div className="bg-surface-container-low rounded-lg p-3.5 mb-3.5">
+                  <div className="text-[11px] text-on-surface-variant mb-2">Ex: 1m² de forro drywall — tabica 1m, perfil U de 3m, tirante de 30cm...</div>
+                  {composicao.length > 0 && (
+                    <div className="flex flex-col gap-1.5 mb-3">
+                      {composicao.map((c, idx) => (
+                        <div key={c.id || idx} className="flex justify-between items-center bg-surface-container px-3 py-2 rounded-md text-xs">
+                          <span className="text-on-surface">{c.material_nome} — {fmtN(parseFloat(c.quantidade||0))} {c.unidade} × {fmt(parseFloat(c.preco_unitario||0))}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-primary">{fmt(parseFloat(c.quantidade||0) * parseFloat(c.preco_unitario||0))}</span>
+                            <button className={btnDangerSmCls} onClick={() => removerComposicao(idx)}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-[1fr_70px_70px_90px_auto] gap-1.5 items-end">
+                    <div>
+                      <label className={labelCls}>Material</label>
+                      <input className={inputCls} placeholder="Ex: Tabica 1m" value={fComp.material_nome} onChange={e => setFComp({ ...fComp, material_nome: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Qtd</label>
+                      <input className={inputCls} type="number" value={fComp.quantidade} onChange={e => setFComp({ ...fComp, quantidade: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Un</label>
+                      <input className={inputCls} placeholder="un" value={fComp.unidade} onChange={e => setFComp({ ...fComp, unidade: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Preço unit.</label>
+                      <input className={inputCls} type="number" placeholder="0,00" value={fComp.preco_unitario} onChange={e => setFComp({ ...fComp, preco_unitario: e.target.value })} onKeyDown={e => e.key === 'Enter' && adicionarComposicao()} />
+                    </div>
+                    <button className={btnSecondaryCls} onClick={adicionarComposicao}>+</button>
+                  </div>
+                  <div className="text-right text-sm font-bold text-primary mt-3">Total material: {fmt(somaComposicao())}</div>
+                </div>
+              )}
+
+              <div className="mb-5">
+                <label className={labelCls}>Custo de Mão de Obra (R$ / unidade)</label>
+                <input className={inputCls + ' text-secondary'} type="number" placeholder="0,00" value={fBanco.preco_mao_obra} onChange={e => setFBanco({ ...fBanco, preco_mao_obra: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-3.5">
                 <div>
-                  <label className={labelCls}>Preço Mão de Obra (R$ / unidade)</label>
-                  <input className={inputCls + ' text-secondary'} type="number" placeholder="0,00" value={fBanco.preco_mao_obra} onChange={e => setFBanco({ ...fBanco, preco_mao_obra: e.target.value })} />
+                  <label className={labelCls}>Lucro (%)</label>
+                  <input className={inputCls} type="number" placeholder="20" value={fBanco.lucro_percentual} onChange={e => setFBanco({ ...fBanco, lucro_percentual: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Imposto (%)</label>
+                  <input className={inputCls} type="number" placeholder="0" value={fBanco.imposto_percentual} onChange={e => setFBanco({ ...fBanco, imposto_percentual: e.target.value })} />
                 </div>
               </div>
+              <div className="bg-surface-container-low rounded-lg p-3.5 mb-5">
+                <div className="text-[11px] text-on-surface-variant mb-1">VALOR FINAL POR {fBanco.unidade}</div>
+                <div className="text-xl font-black text-tertiary">{fmt(calcularValorUnitario(usarComposicao ? somaComposicao() : parseFloat(fBanco.preco_material||'0'), parseFloat(fBanco.preco_mao_obra||'0'), parseFloat(fBanco.lucro_percentual||'0'), parseFloat(fBanco.imposto_percentual||'0')))}</div>
+              </div>
               <div className="flex gap-2 justify-end">
-                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
+                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setEditBanco(null) }}>Cancelar</button>
                 <button className={btnPrimaryCls} onClick={salvarBancoItem}>Salvar no Banco</button>
               </div>
             </div>
@@ -850,10 +1002,7 @@ export default function Orcamento() {
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Forma de Pagamento</label>
-              <select className={inputCls} value={fOrc.condicao_pagamento} onChange={e => setFOrc({ ...fOrc, condicao_pagamento: e.target.value })}>
-                <option value="">Selecione</option>
-                {FORMAS_PAG.map(f => <option key={f} value={f}>{f}</option>)}
-              </select>
+              <textarea className={inputCls + ' min-h-[70px] resize-y'} placeholder="Ex: 40% na assinatura do contrato, 30% no meio da obra, 30% na entrega." value={fOrc.condicao_pagamento} onChange={e => setFOrc({ ...fOrc, condicao_pagamento: e.target.value })} />
             </div>
             <div className="mb-5">
               <label className={labelCls}>Observações</label>

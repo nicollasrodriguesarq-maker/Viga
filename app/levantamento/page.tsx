@@ -383,9 +383,7 @@ export default function Levantamento() {
     }
   }
 
-  async function gerarPDFLevantamento(lev: any, ambs: any[], itensList: any[]) {
-    const configRows = await buscar('empresa_config', '?limit=1')
-    const cfg = configRows[0] || {}
+  function paginasLevantamento(lev: any, ambs: any[], itensList: any[], cfg: any) {
     const nomeEmpresa = cfg.nome_empresa || 'VIGA'
     const hoje = new Date()
     const dataEmissao = hoje.toLocaleDateString('pt-BR')
@@ -438,22 +436,7 @@ export default function Levantamento() {
       </div>`
     }).join('')
 
-    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-    <title>Levantamento ${lev.codigo} — ${nomeEmpresa}</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
-    <style>
-      * { margin:0; padding:0; box-sizing:border-box; }
-      body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
-      h1,h2,h3 { font-family:'Manrope',sans-serif; }
-      .page { max-width:900px; margin:0 auto; padding:40px 36px; }
-      .card { background:#1b2027; border:1px solid #3d4948; border-radius:12px; padding:20px; }
-      @media print {
-        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .page { break-after: page; }
-        .page:last-child { break-after: auto; }
-      }
-    </style></head><body>
-
+    return `
     <!-- PÁGINA 1 — CAPA -->
     <div class="page">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #3d4948">
@@ -530,11 +513,142 @@ export default function Levantamento() {
         <span>© ${hoje.getFullYear()} ${nomeEmpresa}</span>
         <span>Relatório de Levantamento</span>
       </div>
-    </div>
+    </div>`
+  }
 
+  function envolverPaginasPdf(titulo: string, paginas: string) {
+    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>${titulo}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
+      h1,h2,h3 { font-family:'Manrope',sans-serif; }
+      .page { max-width:900px; margin:0 auto; padding:40px 36px; }
+      .card { background:#1b2027; border:1px solid #3d4948; border-radius:12px; padding:20px; }
+      @media print {
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .page { break-after: page; }
+        .page:last-child { break-after: auto; }
+      }
+    </style></head><body>
+    ${paginas}
     <script>window.onload = () => { window.print() }</script>
     </body></html>`
+  }
 
+  async function gerarPDFLevantamento(lev: any, ambs: any[], itensList: any[]) {
+    const configRows = await buscar('empresa_config', '?limit=1')
+    const cfg = configRows[0] || {}
+    const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const paginas = paginasLevantamento(lev, ambs, itensList, cfg)
+    const html = envolverPaginasPdf(`Levantamento ${lev.codigo} — ${nomeEmpresa}`, paginas)
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
+  async function gerarPropostaCompleta(lev: any, ambs: any[], itensList: any[]) {
+    const configRows = await buscar('empresa_config', '?limit=1')
+    const cfg = configRows[0] || {}
+    const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const paginasBase = paginasLevantamento(lev, ambs, itensList, cfg)
+
+    const orcs = await buscar('orcamentos', `?levantamento_id=eq.${lev.id}&limit=1`)
+    const orc = orcs[0]
+
+    let paginaOrcamento: string
+    if (!orc) {
+      paginaOrcamento = `
+      <div class="page">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;border-bottom:1px solid #3d4948;padding-bottom:12px">
+          <span style="font-size:11px;color:#6ee9e0;font-weight:700;text-transform:uppercase;letter-spacing:0.08em">Orçamento &amp; Forma de Pagamento</span>
+        </div>
+        <p style="color:#869391;text-align:center;padding:40px 0">Nenhum orçamento vinculado a este levantamento ainda. Adicione serviços para gerar o orçamento automaticamente.</p>
+      </div>`
+    } else {
+      const orcAmbs = await buscar('orcamento_ambientes', `?orcamento_id=eq.${orc.id}&order=ordem`)
+      const orcItens = await buscar('orcamento_itens', `?orcamento_id=eq.${orc.id}`)
+      const valorUnit = (item: any) => (parseFloat(item.preco_material||0) + parseFloat(item.preco_mao_obra||0)) * (1 + parseFloat(item.lucro_percentual||0)/100) * (1 + parseFloat(item.imposto_percentual||0)/100)
+      const totalItem = (item: any) => valorUnit(item) * parseFloat(item.quantidade||1)
+      const totalGeral = orcItens.reduce((a: number, i: any) => a + totalItem(i), 0)
+      const desconto = parseFloat(orc.desconto || 0)
+      const totalFinal = totalGeral - desconto
+
+      const ambContent = orcAmbs.map((oa: any) => {
+        const itensAmb = orcItens.filter((i: any) => i.ambiente_id === oa.id)
+        if (itensAmb.length === 0) return ''
+        const totalAmb = itensAmb.reduce((a: number, i: any) => a + totalItem(i), 0)
+        const rows = itensAmb.map((item: any) => `
+          <tr>
+            <td style="padding:9px 12px;border-bottom:1px solid #3d4948">${item.servico}${item.descricao ? '<br><small style="color:#869391">' + item.descricao + '</small>' : ''}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid #3d4948;text-align:center">${Number(item.quantidade||0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} ${item.unidade}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid #3d4948;text-align:right">${moeda(valorUnit(item))}</td>
+            <td style="padding:9px 12px;border-bottom:1px solid #3d4948;text-align:right;font-weight:700;color:#6ee9e0">${moeda(totalItem(item))}</td>
+          </tr>`).join('')
+        return `
+        <div style="margin-bottom:20px;break-inside:avoid">
+          <div style="background:#1b2027;border:1px solid #3d4948;border-radius:8px;padding:10px 14px;font-weight:700;color:#6ee9e0;margin-bottom:8px">🏠 ${oa.nome}</div>
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:#171c23">
+                <th style="padding:8px 12px;text-align:left;color:#869391;font-size:10px;text-transform:uppercase">Serviço</th>
+                <th style="padding:8px 12px;text-align:center;color:#869391;font-size:10px;text-transform:uppercase">Qtd</th>
+                <th style="padding:8px 12px;text-align:right;color:#869391;font-size:10px;text-transform:uppercase">Valor Unit.</th>
+                <th style="padding:8px 12px;text-align:right;color:#869391;font-size:10px;text-transform:uppercase">Total</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+            <tfoot>
+              <tr style="background:#171c23">
+                <td colspan="3" style="padding:8px 12px;font-weight:700;color:#dee2ec">Subtotal ${oa.nome}</td>
+                <td style="padding:8px 12px;text-align:right;font-weight:900;color:#6ee9e0">${moeda(totalAmb)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>`
+      }).join('')
+
+      paginaOrcamento = `
+      <div class="page">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;border-bottom:1px solid #3d4948;padding-bottom:12px">
+          <span style="font-size:11px;color:#6ee9e0;font-weight:700;text-transform:uppercase;letter-spacing:0.08em">Orçamento &amp; Forma de Pagamento</span>
+          <span style="font-size:10px;color:#869391;text-transform:uppercase">${orc.codigo}</span>
+        </div>
+        ${ambContent || '<p style="color:#869391;text-align:center;padding:24px 0">Nenhum item precificado ainda.</p>'}
+        <div style="border:1px solid #6ee9e033;border-radius:8px;overflow:hidden;margin:20px 0">
+          <div style="background:#1b2027;padding:10px 14px;font-weight:700;color:#6ee9e0;font-size:13px">Resumo Financeiro</div>
+          <table style="width:100%;border-collapse:collapse;font-size:13px">
+            <tr><td style="padding:9px 14px">Subtotal</td><td style="padding:9px 14px;text-align:right;font-weight:600">${moeda(totalGeral)}</td></tr>
+            ${desconto > 0 ? `<tr><td style="padding:9px 14px">Desconto</td><td style="padding:9px 14px;text-align:right;color:#ffb4ab;font-weight:600">- ${moeda(desconto)}</td></tr>` : ''}
+            <tr style="background:#6ee9e01a">
+              <td style="padding:12px 14px;font-size:14px;font-weight:700;color:#6ee9e0">TOTAL GERAL</td>
+              <td style="padding:12px 14px;text-align:right;font-size:18px;font-weight:900;color:#6ee9e0">${moeda(totalFinal)}</td>
+            </tr>
+          </table>
+        </div>
+        ${orc.condicao_pagamento ? `
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:8px;padding:14px 16px;margin-bottom:20px">
+          <div style="font-size:10px;color:#869391;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px">Forma de Pagamento</div>
+          <div style="color:#dee2ec;white-space:pre-line">${orc.condicao_pagamento}</div>
+        </div>` : ''}
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:24px;margin-top:48px">
+          <div style="text-align:center">
+            <div style="border-top:1px solid #3d4948;padding-top:8px;color:#bcc9c7;font-size:12px">${lev.cliente}</div>
+            <div style="color:#869391;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-top:2px">Cliente</div>
+          </div>
+          <div style="text-align:center">
+            <div style="border-top:1px solid #3d4948;padding-top:8px;color:#bcc9c7;font-size:12px">${nomeEmpresa}</div>
+            <div style="color:#869391;font-size:10px;text-transform:uppercase;letter-spacing:0.08em;margin-top:2px">${lev.responsavel || 'Responsável Técnico'}</div>
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;font-size:10px;color:#869391;padding-top:16px;border-top:1px solid #3d4948;margin-top:24px">
+          <span>© ${new Date().getFullYear()} ${nomeEmpresa}</span>
+          <span>Proposta Comercial</span>
+        </div>
+      </div>`
+    }
+
+    const html = envolverPaginasPdf(`Proposta ${lev.codigo} — ${nomeEmpresa}`, paginasBase + paginaOrcamento)
     const win = window.open('', '_blank')
     if (win) { win.document.write(html); win.document.close() }
   }
@@ -609,7 +723,8 @@ export default function Levantamento() {
               <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
             )}
             <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>🔗 Ver Orçamento Vinculado</button>
-            <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPDFLevantamento(detalhe, ambsDetalhe, itensDetalhe)}>🖨️ Gerar Relatório PDF</button>
+            <button className="bg-surface-container-high border border-outline-variant text-on-surface rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-surface-variant transition-all cursor-pointer" onClick={() => gerarPDFLevantamento(detalhe, ambsDetalhe, itensDetalhe)}>🖨️ Gerar Relatório PDF</button>
+            <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPropostaCompleta(detalhe, ambsDetalhe, itensDetalhe)}>📄 Gerar Proposta Completa</button>
           </div>
         </div>
 
@@ -780,9 +895,12 @@ export default function Levantamento() {
                 <div><div className="text-[10px] text-on-surface-variant mb-1">TOTAL SERVIÇOS</div><div className="text-xl font-bold text-tertiary">{itensDetalhe.length}</div></div>
               </div>
             </div>
-            <div className="mt-4">
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>
                 🔗 Ver Orçamento Vinculado
+              </button>
+              <button className="w-full bg-primary-container text-on-primary-container rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPropostaCompleta(detalhe, ambsDetalhe, itensDetalhe)}>
+                📄 Gerar Proposta Completa
               </button>
             </div>
           </div>

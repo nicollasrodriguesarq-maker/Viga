@@ -41,6 +41,18 @@ async function uploadFotoServico(file: File): Promise<string | null> {
   return null
 }
 
+async function uploadArquivoLevantamento(file: File): Promise<string | null> {
+  const ext = file.name.split('.').pop()
+  const nome = `arq_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+  const r = await fetch(`${BASE.replace('/rest/v1','')}/storage/v1/object/levantamento-arquivos/${nome}`, {
+    method: 'POST',
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  })
+  if (r.ok) return `${BASE.replace('/rest/v1','')}/storage/v1/object/public/levantamento-arquivos/${nome}`
+  return null
+}
+
 async function buscar(tabela: string, q = '') {
   try {
     const r = await fetch(BASE + '/' + tabela + q, { headers: H })
@@ -105,6 +117,9 @@ export default function Levantamento() {
   const [obras, setObras] = useState<any[]>([])
   const [solicitacoes, setSolicitacoes] = useState<any[]>([])
   const [bancoItens, setBancoItens] = useState<any[]>([])
+  const [arquivos, setArquivos] = useState<any[]>([])
+  const [arquivoUpload, setArquivoUpload] = useState<File | null>(null)
+  const [enviandoArquivo, setEnviandoArquivo] = useState(false)
   const [loading, setLoading] = useState(true)
   const [detalhe, setDetalhe] = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('ambientes')
@@ -141,15 +156,16 @@ export default function Levantamento() {
 
   async function carregar() {
     setLoading(true)
-    const [l, a, it, o, s, b] = await Promise.all([
+    const [l, a, it, o, s, b, arq] = await Promise.all([
       buscar('levantamentos', '?order=created_at.desc'),
       buscar('levantamento_ambientes', '?order=ordem'),
       buscar('levantamento_itens', '?order=created_at'),
       buscar('obras', '?select=id,nome&order=nome'),
       buscar('levantamento_solicitacoes', '?order=created_at.desc'),
       buscar('banco_itens', '?order=nome'),
+      buscar('levantamento_arquivos', '?order=created_at.desc'),
     ])
-    setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setSolicitacoes(s); setBancoItens(b)
+    setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setSolicitacoes(s); setBancoItens(b); setArquivos(arq)
     setLoading(false)
   }
 
@@ -253,6 +269,28 @@ export default function Levantamento() {
   }
   async function responderSolicitacao(id: string, status: 'aprovado' | 'negado') {
     await editar('levantamento_solicitacoes', id, { status, respondido_em: new Date().toISOString() })
+    carregar()
+  }
+
+  // ── Arquivos anexados ao levantamento ────────────────────────
+  async function salvarArquivo() {
+    if (!arquivoUpload || !detalhe) return
+    setEnviandoArquivo(true)
+    const url = await uploadArquivoLevantamento(arquivoUpload)
+    setEnviandoArquivo(false)
+    if (!url) return alert('Falha ao enviar o arquivo. Tente novamente.')
+    await criar('levantamento_arquivos', {
+      levantamento_id: detalhe.id,
+      nome: arquivoUpload.name,
+      url,
+      tipo: arquivoUpload.type || null,
+    })
+    setArquivoUpload(null)
+    carregar()
+  }
+  async function removerArquivo(id: string) {
+    if (!confirm('Excluir este arquivo?')) return
+    await remover('levantamento_arquivos', id)
     carregar()
   }
 
@@ -591,6 +629,7 @@ export default function Levantamento() {
         <div className="flex gap-2 mb-lg flex-wrap">
           <button className={abaDetalhe === 'ambientes' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe('ambientes')}>🏠 Ambientes e Serviços</button>
           <button className={abaDetalhe === 'resumo' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe('resumo')}>📋 Resumo Geral</button>
+          <button className={abaDetalhe === 'arquivos' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe('arquivos')}>📎 Arquivos</button>
         </div>
 
         {abaDetalhe === 'ambientes' && (
@@ -748,6 +787,61 @@ export default function Levantamento() {
             </div>
           </div>
         )}
+
+        {abaDetalhe === 'arquivos' && (() => {
+          const arquivosDetalhe = arquivos.filter(a => a.levantamento_id === detalhe.id)
+          const iconeArquivo = (tipo: string) => {
+            if (!tipo) return '📄'
+            if (tipo.startsWith('image/')) return '🖼️'
+            if (tipo === 'application/pdf') return '📕'
+            if (tipo.includes('spreadsheet') || tipo.includes('excel')) return '📊'
+            if (tipo.includes('word') || tipo.includes('document')) return '📝'
+            return '📄'
+          }
+          return (
+          <div className={sectionCls}>
+            <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
+              <div>
+                <div className="text-sm font-bold text-on-surface">📎 Arquivos do Levantamento</div>
+                <div className="text-[11px] text-on-surface-variant mt-0.5">Plantas, documentos e outros arquivos relacionados</div>
+              </div>
+            </div>
+            {podeEditar && (
+              <div className="flex items-center gap-2.5 mb-5 p-3.5 bg-surface-container-low rounded-lg border border-outline-variant">
+                <input
+                  type="file"
+                  onChange={e => setArquivoUpload(e.target.files?.[0] || null)}
+                  className="flex-1 bg-surface-container border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer"
+                />
+                <button className={btnPrimaryCls} onClick={salvarArquivo} disabled={!arquivoUpload || enviandoArquivo}>
+                  {enviandoArquivo ? 'Enviando...' : '+ Enviar'}
+                </button>
+              </div>
+            )}
+            {arquivosDetalhe.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="text-4xl mb-3">📎</div>
+                <div className="text-body-sm text-on-surface-variant">Nenhum arquivo anexado ainda</div>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {arquivosDetalhe.map(arq => (
+                  <div key={arq.id} className="flex justify-between items-center px-3.5 py-3 bg-surface-container-low rounded-lg border border-outline-variant">
+                    <a href={arq.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 flex-1 min-w-0 hover:text-primary transition-colors">
+                      <span className="text-xl shrink-0">{iconeArquivo(arq.tipo)}</span>
+                      <div className="min-w-0">
+                        <div className="font-semibold text-sm text-on-surface truncate">{arq.nome}</div>
+                        <div className="text-[11px] text-on-surface-variant">{arq.created_at ? new Date(arq.created_at).toLocaleDateString('pt-BR') : ''}</div>
+                      </div>
+                    </a>
+                    {podeEditar && <button className={btnDangerSmCls} onClick={() => removerArquivo(arq.id)}>×</button>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          )
+        })()}
 
         {janela === 'ambiente' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>

@@ -79,6 +79,21 @@ const CZ = { nome: '', banco: '', tipo: 'corrente', saldo_inicial: '' }
 const CAZ = { nome: '', bandeira: '', limite: '', dia_fechamento: '', dia_vencimento: '' }
 const GZ = { data: new Date().toISOString().slice(0,10), descricao: '', valor: '', categoria: '', cartao_id: '', parcelas: '1', obra_id: '', servico_id: '', nf_numero: '', nf_arquivo: null as File | null }
 const IZ = { descricao: '', tipo: 'aporte', valor: '', data: new Date().toISOString().slice(0,10), instituicao: '', observacao: '' }
+const RCZ = { data: new Date().toISOString().slice(0,10), valor: '', descricao: '', obra_id: '', servico_id: '' }
+
+const WZ_VAZIO = {
+  step: 'tipo',
+  tipo: 'saida' as 'saida' | 'entrada',
+  data: new Date().toISOString().slice(0, 10),
+  descricao: '', valor: '', categoria: '',
+  nf_numero: '', nf_arquivo: null as File | null,
+  destino: 'empresa' as 'empresa' | 'obra',
+  obra_id: '', servico_id: '',
+  forma_pagamento: 'a_vista' as 'a_vista' | 'faturado' | 'cartao',
+  dias_prazo: '30',
+  cartao_id: '', parcelas: '1',
+  data_pagamento_combinada: '',
+}
 
 // classes reutilizáveis
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -129,6 +144,10 @@ export default function Financeiro() {
   const [investimentos, setInvestimentos] = useState<any[]>([])
   const [fInvest, setFInvest] = useState({...IZ})
   const [userEmail, setUserEmail] = useState('')
+  const [wizardAberto, setWizardAberto] = useState(false)
+  const [wiz, setWiz] = useState<any>({...WZ_VAZIO})
+  const [wizSalvando, setWizSalvando] = useState(false)
+  const [fRecebCartao, setFRecebCartao] = useState({...RCZ})
 
   useEffect(() => {
     const token = localStorage.getItem('viga_token')
@@ -212,6 +231,150 @@ export default function Financeiro() {
     if (!fInvest.descricao || !fInvest.valor) return alert('Preencha descrição e valor')
     await inserir('investimentos', { ...fInvest, valor: parseFloat(fInvest.valor || '0') })
     setModal(''); setFInvest({...IZ}); carregar()
+  }
+
+  // ── Fluxo guiado de lançamento (NF → obra/empresa → forma de pagamento) ──
+  function abrirWizard() {
+    setWiz({ ...WZ_VAZIO, data: new Date().toISOString().slice(0, 10) })
+    setWizardAberto(true)
+  }
+  function fecharWizard() {
+    setWizardAberto(false)
+    setWiz({ ...WZ_VAZIO })
+  }
+  function voltarWizard() {
+    const anterior: Record<string, string> = {
+      s_dados: 'tipo',
+      s_destino: 's_dados',
+      s_obra: 's_destino',
+      s_pagamento: wiz.destino === 'obra' ? 's_obra' : 's_destino',
+      s_faturado: 's_pagamento',
+      s_cartao: 's_pagamento',
+      e_pergunta_nf: 'tipo',
+      e_dados_nf: 'e_pergunta_nf',
+      e_obra: 'e_dados_nf',
+      e_data_pagamento: 'e_obra',
+    }
+    setWiz({ ...wiz, step: anterior[wiz.step] || 'tipo' })
+  }
+  function irParaFormularioTradicional() {
+    setWizardAberto(false)
+    setFLanc({ ...LZ, tipo: 'entrada' })
+    setModal('lancamento')
+    setWiz({ ...WZ_VAZIO })
+  }
+
+  async function finalizarSaidaWizard(overrides: Partial<typeof WZ_VAZIO> = {}) {
+    const wizFinal = { ...wiz, ...overrides }
+    if (!wizFinal.descricao || !wizFinal.valor) return alert('Preencha descrição e valor')
+    setWizSalvando(true)
+    let nf_url = ''
+    if (wizFinal.nf_arquivo) {
+      const url = await uploadNF(wizFinal.nf_arquivo, wizFinal.descricao)
+      if (url) nf_url = url
+    }
+    const obraId = wizFinal.destino === 'obra' ? wizFinal.obra_id : ''
+    const servicoId = wizFinal.destino === 'obra' ? wizFinal.servico_id : ''
+    const valorTotal = parseFloat(wizFinal.valor || '0')
+
+    if (wizFinal.forma_pagamento === 'cartao') {
+      const n = parseInt(wizFinal.parcelas || '1')
+      const valorParcela = Math.round((valorTotal / n) * 100) / 100
+      for (let i = 0; i < n; i++) {
+        const dataParcela = new Date(wizFinal.data + 'T00:00:00')
+        dataParcela.setMonth(dataParcela.getMonth() + i)
+        const dados: any = {
+          data: dataParcela.toISOString().slice(0, 10),
+          descricao: wizFinal.descricao + (n > 1 ? ` (parcela ${i + 1}/${n})` : ''),
+          valor: valorParcela,
+          categoria: wizFinal.categoria,
+          cartao_id: wizFinal.cartao_id,
+          parcelas: n,
+          parcela_numero: i + 1,
+        }
+        if (wizFinal.nf_numero) dados.nf_numero = wizFinal.nf_numero
+        if (obraId) dados.obra_id = obraId
+        if (nf_url) dados.nf_url = nf_url
+        await inserir('gastos_cartao', dados)
+      }
+    } else {
+      const dados: any = {
+        data: wizFinal.data,
+        descricao: wizFinal.descricao,
+        tipo: 'saida',
+        valor: valorTotal,
+        categoria: wizFinal.categoria,
+        forma_pagamento: wizFinal.forma_pagamento,
+        status: wizFinal.forma_pagamento === 'faturado' ? 'pendente' : 'pago',
+      }
+      if (wizFinal.forma_pagamento === 'faturado') {
+        const venc = new Date(wizFinal.data + 'T00:00:00')
+        venc.setDate(venc.getDate() + parseInt(wizFinal.dias_prazo || '0'))
+        dados.data_vencimento = venc.toISOString().slice(0, 10)
+      }
+      if (wizFinal.nf_numero) dados.nf_numero = wizFinal.nf_numero
+      if (obraId) dados.obra_id = obraId
+      if (servicoId) dados.servico_id = servicoId
+      if (nf_url) dados.nf_url = nf_url
+      await inserir('lancamentos', dados)
+    }
+
+    if (servicoId) {
+      const serv = servicosObra.find((s: any) => s.id === servicoId)
+      if (serv) {
+        const novoRealizado = parseFloat(serv.valor_realizado || 0) + valorTotal
+        await atualizar('obra_servicos', servicoId, { valor_realizado: novoRealizado })
+      }
+    }
+
+    setWizSalvando(false)
+    fecharWizard()
+    await carregar()
+  }
+
+  async function finalizarEntradaComNFWizard() {
+    if (!wiz.descricao || !wiz.valor || !wiz.data_pagamento_combinada) return alert('Preencha descrição, valor e data de pagamento')
+    setWizSalvando(true)
+    let nf_url = ''
+    if (wiz.nf_arquivo) {
+      const url = await uploadNF(wiz.nf_arquivo, wiz.descricao)
+      if (url) nf_url = url
+    }
+    const dados: any = {
+      data: wiz.data,
+      descricao: wiz.descricao,
+      tipo: 'entrada',
+      valor: parseFloat(wiz.valor || '0'),
+      categoria: wiz.categoria,
+      status: 'pendente',
+      data_vencimento: wiz.data_pagamento_combinada,
+    }
+    if (wiz.nf_numero) dados.nf_numero = wiz.nf_numero
+    if (wiz.obra_id) dados.obra_id = wiz.obra_id
+    if (wiz.servico_id) dados.servico_id = wiz.servico_id
+    if (nf_url) dados.nf_url = nf_url
+    await inserir('lancamentos', dados)
+    setWizSalvando(false)
+    fecharWizard()
+    await carregar()
+  }
+
+  async function salvarRecebimentoCartao() {
+    if (!fRecebCartao.valor || !fRecebCartao.data) return alert('Preencha valor e data de recebimento')
+    const hojeStr = new Date().toISOString().slice(0, 10)
+    const dados: any = {
+      data: fRecebCartao.data,
+      descricao: fRecebCartao.descricao || 'Recebimento no cartão',
+      tipo: 'entrada',
+      valor: parseFloat(fRecebCartao.valor),
+      meio_recebimento: 'cartao',
+      status: fRecebCartao.data <= hojeStr ? 'pago' : 'pendente',
+    }
+    if (fRecebCartao.data > hojeStr) dados.data_vencimento = fRecebCartao.data
+    if (fRecebCartao.obra_id) dados.obra_id = fRecebCartao.obra_id
+    if (fRecebCartao.servico_id) dados.servico_id = fRecebCartao.servico_id
+    await inserir('lancamentos', dados)
+    setModal(''); setFRecebCartao({...RCZ}); carregar()
   }
 
   // Cálculos
@@ -404,7 +567,7 @@ export default function Financeiro() {
           <button className={btnSecondaryCls + ' flex items-center gap-2'} onClick={()=>exportarExcel(lancamentos, obras, filtroMes)}>
             <span className="material-symbols-outlined text-[18px]">table_view</span> Excel
           </button>
-          <button onClick={()=>setModal('lancamento')} className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20">
+          <button onClick={abrirWizard} className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20">
             <span className="material-symbols-outlined text-[20px]">add_circle</span>
             Novo Lançamento
           </button>
@@ -514,7 +677,7 @@ export default function Financeiro() {
             </div>
             <div className="flex gap-2">
               <button className={btnSecondaryCls} onClick={()=>exportarExcel(lancamentos, obras, filtroMes)}>📊 Exportar Excel</button>
-              <button className={btnPrimaryCls} onClick={()=>setModal('lancamento')}>+ Novo Lançamento</button>
+              <button className={btnPrimaryCls} onClick={abrirWizard}>+ Novo Lançamento</button>
             </div>
           </div>
           <div className={sectionCls}>
@@ -666,7 +829,10 @@ export default function Financeiro() {
         <>
           <div className="flex justify-between mb-4 gap-2 flex-wrap">
             <button className={btnPrimaryCls} onClick={()=>setModal('cartao')}>+ Novo Cartão</button>
-            {cartoes.length>0 && <button className={btnSecondaryCls} onClick={()=>setModal('gasto')}>+ Lançar Gasto no Cartão</button>}
+            <div className="flex gap-2">
+              {cartoes.length>0 && <button className={btnSecondaryCls} onClick={()=>setModal('gasto')}>+ Lançar Gasto no Cartão</button>}
+              <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={()=>{ setFRecebCartao({...RCZ}); setModal('recebimento_cartao') }}>+ Recebimento no Cartão</button>
+            </div>
           </div>
           {cartoes.length===0 ? (
             <div className={sectionCls + ' text-center py-16'}>
@@ -717,6 +883,28 @@ export default function Financeiro() {
               </div>
             )
           })}
+
+          {lancamentos.filter(l=>l.meio_recebimento==='cartao').length > 0 && (
+            <div className={sectionCls}>
+              <div className="text-sm font-bold text-on-surface mb-3">💳 Recebíveis no Cartão</div>
+              {lancamentos.filter(l=>l.meio_recebimento==='cartao').sort((a,b)=>(a.data<b.data?1:-1)).map(l=>{
+                const obra = obras.find(o=>o.id===l.obra_id)
+                return (
+                  <div key={l.id} className={rowCls}>
+                    <div>
+                      <div className="font-semibold text-sm text-on-surface">{l.descricao}</div>
+                      <div className="text-[11px] text-on-surface-variant">{l.data} {obra?`· ${obra.codigo}`:''}</div>
+                    </div>
+                    <div className="flex items-center gap-2.5">
+                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusBadge(l.status==='pago')}`}>{l.status==='pago'?'Recebido':'A receber'}</span>
+                      <div className="text-primary-container font-bold">{fmt(parseFloat(l.valor))}</div>
+                      <button className={btnDangerSmCls} onClick={()=>deletar('lancamentos',l.id).then(carregar)}>×</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
         </>
       )}
 
@@ -1028,6 +1216,54 @@ export default function Financeiro() {
           </div>
         </div>
       )}
+
+      {modal==='recebimento_cartao' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e=>e.target===e.currentTarget&&setModal('')}>
+          <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[520px] max-h-[92vh] overflow-y-auto">
+            <div className="text-base font-bold text-on-surface mb-5">💳 Recebimento no Cartão</div>
+            <div className="grid grid-cols-2 gap-3 mb-3.5">
+              <div><label className={labelCls}>Valor (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={fRecebCartao.valor} onChange={e=>setFRecebCartao({...fRecebCartao,valor:e.target.value})} /></div>
+              <div><label className={labelCls}>Data de Recebimento *</label><input className={inputCls} type="date" value={fRecebCartao.data} onChange={e=>setFRecebCartao({...fRecebCartao,data:e.target.value})} /></div>
+            </div>
+            <div className="mb-3.5"><label className={labelCls}>Descrição</label><input className={inputCls} placeholder="Ex: Pagamento serviço no cartão" value={fRecebCartao.descricao} onChange={e=>setFRecebCartao({...fRecebCartao,descricao:e.target.value})} /></div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
+              <div><label className={labelCls}>Vincular à Obra (opcional)</label>
+                <select className={inputCls} value={fRecebCartao.obra_id} onChange={e=>setFRecebCartao({...fRecebCartao,obra_id:e.target.value,servico_id:''})}>
+                  <option value="">Nenhuma</option>
+                  {obras.map(o=><option key={o.id} value={o.id}>{o.codigo} — {o.nome}</option>)}
+                </select>
+              </div>
+              {fRecebCartao.obra_id && servicosObra.filter(s=>s.obra_id===fRecebCartao.obra_id).length > 0 && (
+                <div><label className={labelCls}>Serviço da Obra</label>
+                  <select className={inputCls} value={fRecebCartao.servico_id} onChange={e=>setFRecebCartao({...fRecebCartao,servico_id:e.target.value})}>
+                    <option value="">Nenhum</option>
+                    {servicosObra.filter(s=>s.obra_id===fRecebCartao.obra_id).map(s=><option key={s.id} value={s.id}>{s.nome}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button className={btnSecondaryCls} onClick={()=>setModal('')}>Cancelar</button>
+              <button className={btnPrimaryCls} onClick={salvarRecebimentoCartao}>Salvar Recebimento</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {wizardAberto && (
+        <WizardLancamento
+          wiz={wiz} setWiz={setWiz}
+          obras={obras.filter(o=>o.status==='em_execucao')}
+          servicos={servicosObra}
+          cartoes={cartoes}
+          salvando={wizSalvando}
+          onVoltar={voltarWizard}
+          onCancelar={fecharWizard}
+          onFinalizarSaida={finalizarSaidaWizard}
+          onFinalizarEntradaComNF={finalizarEntradaComNFWizard}
+          onIrParaFormularioTradicional={irParaFormularioTradicional}
+        />
+      )}
     </Layout>
   )
 }
@@ -1103,5 +1339,261 @@ function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, o
         <button className={btnPrimaryCls} onClick={onSalvar} disabled={salvando}>{salvando?'Salvando...':'Salvar Lançamento'}</button>
       </div>
     </>
+  )
+}
+
+// Fluxo guiado: anexar NF → obra/empresa → forma de pagamento (sem OCR — preenchimento manual)
+function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onVoltar, onCancelar, onFinalizarSaida, onFinalizarEntradaComNF, onIrParaFormularioTradicional }: any) {
+  const servicosDaObra = wiz.destino === 'obra' && wiz.obra_id ? servicos.filter((s: any) => s.obra_id === wiz.obra_id) : []
+  const servicosDaObraEntrada = wiz.obra_id ? servicos.filter((s: any) => s.obra_id === wiz.obra_id) : []
+
+  function Titulo({ children }: any) {
+    return <div className="text-base font-bold text-on-surface mb-5">{children}</div>
+  }
+  function Botoes({ onFinalizar, finalizarLabel, podeAvancar, onProximo }: any) {
+    return (
+      <div className="flex gap-2 justify-end mt-5">
+        {wiz.step !== 'tipo' && <button className={btnSecondaryCls} onClick={onVoltar}>← Voltar</button>}
+        <button className={btnSecondaryCls} onClick={onCancelar}>Cancelar</button>
+        {onProximo && <button className={btnPrimaryCls} onClick={onProximo} disabled={podeAvancar === false}>Próximo →</button>}
+        {onFinalizar && <button className={btnPrimaryCls} onClick={() => onFinalizar()} disabled={salvando}>{salvando ? 'Salvando...' : (finalizarLabel || 'Finalizar')}</button>}
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && onCancelar()}>
+      <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[560px] max-h-[92vh] overflow-y-auto">
+
+        {wiz.step === 'tipo' && (
+          <>
+            <Titulo>📋 Novo Lançamento — qual o tipo?</Titulo>
+            <div className="flex flex-col gap-3">
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-error bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, tipo: 'saida', step: 's_dados' })}>
+                <div className="font-bold text-on-surface mb-1">💸 Saída</div>
+                <div className="text-body-sm text-on-surface-variant">Compra ou pagamento a ser realizado — anexar NF/cupom fiscal</div>
+              </button>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary-container bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, tipo: 'entrada', step: 'e_pergunta_nf' })}>
+                <div className="font-bold text-on-surface mb-1">💰 Entrada</div>
+                <div className="text-body-sm text-on-surface-variant">Recebimento de cliente por serviço prestado</div>
+              </button>
+            </div>
+            <div className="flex justify-end mt-5"><button className={btnSecondaryCls} onClick={onCancelar}>Cancelar</button></div>
+          </>
+        )}
+
+        {wiz.step === 's_dados' && (
+          <>
+            <Titulo>💸 Dados da Compra / Pagamento</Titulo>
+            <div className="text-body-sm text-on-surface-variant mb-4">Anexe a NF ou cupom fiscal e preencha os dados. A leitura automática do arquivo ainda não está disponível — preencha manualmente por enquanto.</div>
+            <div className="mb-3.5">
+              <label className={labelCls}>Arquivo da NF/Cupom (PDF/imagem)</label>
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setWiz({ ...wiz, nf_arquivo: e.target.files?.[0] || null })} className={fileCls} />
+              {wiz.nf_arquivo && <div className="text-xs text-primary mt-1.5">📎 {(wiz.nf_arquivo as File).name}</div>}
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-3.5">
+              <div><label className={labelCls}>Valor (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={wiz.valor} onChange={e => setWiz({ ...wiz, valor: e.target.value })} /></div>
+              <div><label className={labelCls}>Data *</label><input className={inputCls} type="date" value={wiz.data} onChange={e => setWiz({ ...wiz, data: e.target.value })} /></div>
+            </div>
+            <div className="mb-3.5"><label className={labelCls}>O que foi comprado / serviço *</label><input className={inputCls} placeholder="Ex: Cimento e areia, mão de obra pedreiro..." value={wiz.descricao} onChange={e => setWiz({ ...wiz, descricao: e.target.value })} /></div>
+            <div className="grid grid-cols-2 gap-3 mb-3.5">
+              <div><label className={labelCls}>Categoria</label>
+                <select className={inputCls} value={wiz.categoria} onChange={e => setWiz({ ...wiz, categoria: e.target.value })}>
+                  <option value="">Selecione</option>
+                  {CAT_OUT.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div><label className={labelCls}>Número da NF</label><input className={inputCls} placeholder="Ex: 000847" value={wiz.nf_numero} onChange={e => setWiz({ ...wiz, nf_numero: e.target.value })} /></div>
+            </div>
+            <Botoes onProximo={() => { if (!wiz.descricao || !wiz.valor) return alert('Preencha o valor e a descrição'); setWiz({ ...wiz, step: 's_destino' }) }} />
+          </>
+        )}
+
+        {wiz.step === 's_destino' && (
+          <>
+            <Titulo>Esta despesa é para uma obra específica ou custo da empresa?</Titulo>
+            <div className="flex flex-col gap-3">
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, destino: 'empresa', step: 's_pagamento' })}>
+                <div className="font-bold text-on-surface">🏢 Custo da Empresa</div>
+              </button>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, destino: 'obra', step: 's_obra' })}>
+                <div className="font-bold text-on-surface">🏗️ Obra Específica</div>
+              </button>
+            </div>
+            <Botoes />
+          </>
+        )}
+
+        {wiz.step === 's_obra' && (
+          <>
+            <Titulo>Qual obra e serviço?</Titulo>
+            <div className="mb-3.5">
+              <label className={labelCls}>Obra (ativas) *</label>
+              <select className={inputCls} value={wiz.obra_id} onChange={e => setWiz({ ...wiz, obra_id: e.target.value, servico_id: '' })}>
+                <option value="">Selecione a obra</option>
+                {obras.map((o: any) => <option key={o.id} value={o.id}>{o.codigo} — {o.nome}</option>)}
+              </select>
+            </div>
+            {wiz.obra_id && servicosDaObra.length > 0 && (
+              <div className="mb-3.5">
+                <label className={labelCls + ' text-primary'}>🔧 Serviço da Obra</label>
+                <select className={inputCls + ' border-primary/40'} value={wiz.servico_id} onChange={e => setWiz({ ...wiz, servico_id: e.target.value })}>
+                  <option value="">— Selecione o serviço (opcional) —</option>
+                  {servicosDaObra.map((s: any) => <option key={s.id} value={s.id}>{s.nome}</option>)}
+                </select>
+                <div className="text-[11px] text-on-surface-variant mt-1">Selecionar o serviço atualiza automaticamente o valor realizado dele</div>
+              </div>
+            )}
+            <Botoes onProximo={() => { if (!wiz.obra_id) return alert('Selecione a obra'); setWiz({ ...wiz, step: 's_pagamento' }) }} />
+          </>
+        )}
+
+        {wiz.step === 's_pagamento' && (
+          <>
+            <Titulo>Forma de pagamento</Titulo>
+            <div className="flex flex-col gap-3">
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary bg-surface-container-low transition-all" onClick={() => onFinalizarSaida({ forma_pagamento: 'a_vista' })}>
+                <div className="font-bold text-on-surface">💵 À Vista</div>
+                <div className="text-body-sm text-on-surface-variant">Lança automático no controle do mês como pago</div>
+              </button>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-tertiary bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, forma_pagamento: 'faturado', step: 's_faturado' })}>
+                <div className="font-bold text-on-surface">📅 Faturado</div>
+                <div className="text-body-sm text-on-surface-variant">Define prazo em dias e calcula a data de pagamento</div>
+              </button>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-secondary bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, forma_pagamento: 'cartao', step: 's_cartao' })}>
+                <div className="font-bold text-on-surface">💳 Cartão</div>
+                <div className="text-body-sm text-on-surface-variant">À vista ou parcelado — lança nas faturas do cartão</div>
+              </button>
+            </div>
+            <Botoes />
+          </>
+        )}
+
+        {wiz.step === 's_faturado' && (() => {
+          const venc = new Date(wiz.data + 'T00:00:00')
+          venc.setDate(venc.getDate() + parseInt(wiz.dias_prazo || '0'))
+          return (
+            <>
+              <Titulo>📅 Faturado — prazo para pagamento</Titulo>
+              <div className="mb-3.5">
+                <label className={labelCls}>Prazo (dias) *</label>
+                <input className={inputCls} type="number" min="1" value={wiz.dias_prazo} onChange={e => setWiz({ ...wiz, dias_prazo: e.target.value })} />
+              </div>
+              <div className="bg-tertiary/10 border border-tertiary/30 rounded-lg px-3.5 py-2.5 text-tertiary text-sm mb-4">
+                📅 Data de pagamento: <strong>{venc.toLocaleDateString('pt-BR')}</strong>
+              </div>
+              <Botoes onFinalizar={onFinalizarSaida} finalizarLabel="Finalizar Lançamento" />
+            </>
+          )
+        })()}
+
+        {wiz.step === 's_cartao' && (() => {
+          const n = parseInt(wiz.parcelas || '1')
+          const valorTotal = parseFloat(wiz.valor || '0')
+          const valorParcela = n > 0 ? valorTotal / n : valorTotal
+          return (
+            <>
+              <Titulo>💳 Pagamento no Cartão</Titulo>
+              <div className="grid grid-cols-2 gap-3 mb-3.5">
+                <div><label className={labelCls}>Cartão *</label>
+                  <select className={inputCls} value={wiz.cartao_id} onChange={e => setWiz({ ...wiz, cartao_id: e.target.value })}>
+                    <option value="">Selecione</option>
+                    {cartoes.map((c: any) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  </select>
+                </div>
+                <div><label className={labelCls}>Parcelas</label>
+                  <select className={inputCls} value={wiz.parcelas} onChange={e => setWiz({ ...wiz, parcelas: e.target.value })}>
+                    <option value="1">À vista</option>
+                    {[2,3,4,5,6,7,8,9,10,11,12].map(x => <option key={x} value={x}>{x}x</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="bg-secondary/10 border border-secondary/30 rounded-lg px-3.5 py-2.5 text-secondary text-sm mb-4">
+                💳 {n > 1 ? `${n}x de ${fmt(valorParcela)}` : `À vista: ${fmt(valorTotal)}`}
+              </div>
+              <Botoes onFinalizar={onFinalizarSaida} finalizarLabel="Finalizar Lançamento" podeAvancar={!!wiz.cartao_id} />
+            </>
+          )
+        })()}
+
+        {wiz.step === 'e_pergunta_nf' && (
+          <>
+            <Titulo>Foi gerada uma Nota Fiscal para o cliente?</Titulo>
+            <div className="flex flex-col gap-3">
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary-container bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, step: 'e_dados_nf' })}>
+                <div className="font-bold text-on-surface">✅ Sim, foi gerada NF</div>
+              </button>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary bg-surface-container-low transition-all" onClick={onIrParaFormularioTradicional}>
+                <div className="font-bold text-on-surface">❌ Não — lançar manualmente</div>
+                <div className="text-body-sm text-on-surface-variant">Segue o formulário padrão de lançamento</div>
+              </button>
+            </div>
+            <Botoes />
+          </>
+        )}
+
+        {wiz.step === 'e_dados_nf' && (
+          <>
+            <Titulo>💰 Dados da NF de Serviço</Titulo>
+            <div className="mb-3.5">
+              <label className={labelCls}>Arquivo da NF (PDF/imagem)</label>
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => setWiz({ ...wiz, nf_arquivo: e.target.files?.[0] || null })} className={fileCls} />
+              {wiz.nf_arquivo && <div className="text-xs text-primary mt-1.5">📎 {(wiz.nf_arquivo as File).name}</div>}
+            </div>
+            <div className="grid grid-cols-2 gap-3 mb-3.5">
+              <div><label className={labelCls}>Valor (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={wiz.valor} onChange={e => setWiz({ ...wiz, valor: e.target.value })} /></div>
+              <div><label className={labelCls}>Data de Emissão *</label><input className={inputCls} type="date" value={wiz.data} onChange={e => setWiz({ ...wiz, data: e.target.value })} /></div>
+            </div>
+            <div className="mb-3.5"><label className={labelCls}>Descrição do serviço *</label><input className={inputCls} placeholder="Ex: Medição de obra, adiantamento..." value={wiz.descricao} onChange={e => setWiz({ ...wiz, descricao: e.target.value })} /></div>
+            <div className="grid grid-cols-2 gap-3 mb-3.5">
+              <div><label className={labelCls}>Categoria</label>
+                <select className={inputCls} value={wiz.categoria} onChange={e => setWiz({ ...wiz, categoria: e.target.value })}>
+                  <option value="">Selecione</option>
+                  {CAT_IN.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div><label className={labelCls}>Número da NF</label><input className={inputCls} placeholder="Ex: 000847" value={wiz.nf_numero} onChange={e => setWiz({ ...wiz, nf_numero: e.target.value })} /></div>
+            </div>
+            <Botoes onProximo={() => { if (!wiz.descricao || !wiz.valor) return alert('Preencha o valor e a descrição'); setWiz({ ...wiz, step: 'e_obra' }) }} />
+          </>
+        )}
+
+        {wiz.step === 'e_obra' && (
+          <>
+            <Titulo>Qual obra/serviço esta NF se refere?</Titulo>
+            <div className="mb-3.5">
+              <label className={labelCls}>Obra</label>
+              <select className={inputCls} value={wiz.obra_id} onChange={e => setWiz({ ...wiz, obra_id: e.target.value, servico_id: '' })}>
+                <option value="">Nenhuma</option>
+                {obras.map((o: any) => <option key={o.id} value={o.id}>{o.codigo} — {o.nome}</option>)}
+              </select>
+            </div>
+            {wiz.obra_id && servicosDaObraEntrada.length > 0 && (
+              <div className="mb-3.5">
+                <label className={labelCls + ' text-primary'}>🔧 Serviço da Obra</label>
+                <select className={inputCls + ' border-primary/40'} value={wiz.servico_id} onChange={e => setWiz({ ...wiz, servico_id: e.target.value })}>
+                  <option value="">Nenhum</option>
+                  {servicosDaObraEntrada.map((s: any) => <option key={s.id} value={s.id}>{s.nome}</option>)}
+                </select>
+              </div>
+            )}
+            <Botoes onProximo={() => setWiz({ ...wiz, step: 'e_data_pagamento' })} />
+          </>
+        )}
+
+        {wiz.step === 'e_data_pagamento' && (
+          <>
+            <Titulo>📅 Data de pagamento combinada com o cliente</Titulo>
+            <div className="mb-3.5">
+              <label className={labelCls}>Data de Pagamento *</label>
+              <input className={inputCls} type="date" value={wiz.data_pagamento_combinada} onChange={e => setWiz({ ...wiz, data_pagamento_combinada: e.target.value })} />
+              <div className="text-[11px] text-tertiary mt-1">Este lançamento entra na programação de pagamento como pendente</div>
+            </div>
+            <Botoes onFinalizar={onFinalizarEntradaComNF} finalizarLabel="Finalizar Lançamento" />
+          </>
+        )}
+
+      </div>
+    </div>
   )
 }

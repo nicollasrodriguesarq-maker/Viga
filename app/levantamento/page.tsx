@@ -221,10 +221,12 @@ export default function Levantamento() {
       banco_item_id: fItem.banco_item_id || null,
       categoria: fItem.categoria || null,
     }
-    if (editItem) { await editar('levantamento_itens', editItem.id, dados) }
-    else { await criar('levantamento_itens', dados) }
+    let itemSalvo: any
+    if (editItem) { await editar('levantamento_itens', editItem.id, dados); itemSalvo = { ...dados, id: editItem.id } }
+    else { itemSalvo = await criar('levantamento_itens', dados) }
     setJanela(null); setEditItem(null); setArquivoFoto(null)
     setFItem({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
+    if (itemSalvo?.id) { await sincronizarItemOrcamento(itemSalvo, ambienteAtivo) }
     carregar()
   }
 
@@ -254,41 +256,92 @@ export default function Levantamento() {
     carregar()
   }
 
-  async function criarOrcamento() {
-    if (!detalhe) return
+  // ── Sincronia automática Levantamento → Orçamento ────────────
+  function calcularTotalItemOrc(item: any) {
+    const valorUnit = (parseFloat(item.preco_material||0) + parseFloat(item.preco_mao_obra||0)) * (1 + parseFloat(item.lucro_percentual||0)/100) * (1 + parseFloat(item.imposto_percentual||0)/100)
+    return valorUnit * parseFloat(item.quantidade||1)
+  }
+  async function atualizarTotaisOrcamento(orcId: string) {
+    const todosItens = await buscar('orcamento_itens', '?orcamento_id=eq.' + orcId)
+    const tMat = todosItens.reduce((a: number, i: any) => a + parseFloat(i.preco_material||0) * parseFloat(i.quantidade||1), 0)
+    const tMao = todosItens.reduce((a: number, i: any) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)
+    const tGeral = todosItens.reduce((a: number, i: any) => a + calcularTotalItemOrc(i), 0)
+    await editar('orcamentos', orcId, { total_material: tMat, total_mao_obra: tMao, total_geral: tGeral })
+  }
+  async function orcamentoVinculado(): Promise<string | null> {
+    if (!detalhe) return null
+    const existentes = await buscar('orcamentos', `?levantamento_id=eq.${detalhe.id}&limit=1`)
+    if (existentes[0]) return existentes[0].id
     const ano = new Date().getFullYear()
-    const orcLista = await buscar('orcamentos', '?order=created_at.desc&limit=100')
+    const orcLista = await buscar('orcamentos', '?order=created_at.desc&limit=200')
     const n = orcLista.filter((o: any) => o.codigo?.startsWith('ORC-' + ano)).length + 1
     const codigo = 'ORC-' + ano + '-' + String(n).padStart(3, '0')
-    const orc = await criar('orcamentos', {
+    const novo = await criar('orcamentos', {
       codigo,
       levantamento_id: detalhe.id,
-      cliente: detalhe.cliente,
+      cliente_nome: detalhe.cliente,
       endereco: detalhe.endereco,
       status: 'rascunho',
+      total_material: 0, total_mao_obra: 0, total_geral: 0, desconto: 0,
     })
-    if (orc?.id) {
-      const ambsLev = ambientes.filter(a => a.levantamento_id === detalhe.id)
-      for (const amb of ambsLev) {
-        const oa = await criar('orcamento_ambientes', { orcamento_id: orc.id, nome: amb.nome, ordem: amb.ordem })
-        if (oa?.id) {
-          const itensAmb = itens.filter(i => i.ambiente === amb.id)
-          for (const item of itensAmb) {
-            await criar('orcamento_itens', {
-              orcamento_id: orc.id,
-              ambiente_id: oa.id,
-              servico: item.servico,
-              descricao: item.descricao,
-              quantidade: item.area || 1,
-              unidade: item.unidade,
-              preco_material: 0,
-              preco_mao_obra: 0,
-              total_item: 0,
-            })
-          }
-        }
-      }
-      alert('Orçamento ' + codigo + ' criado com sucesso! Acesse o módulo Orçamento para preencher os valores.')
+    return novo?.id || null
+  }
+  async function ambienteOrcamentoEspelhado(levAmbiente: any, orcId: string): Promise<string | null> {
+    const existentes = await buscar('orcamento_ambientes', `?levantamento_ambiente_id=eq.${levAmbiente.id}`)
+    if (existentes[0]) return existentes[0].id
+    const novo = await criar('orcamento_ambientes', { orcamento_id: orcId, nome: levAmbiente.nome, ordem: levAmbiente.ordem || 0, levantamento_ambiente_id: levAmbiente.id })
+    return novo?.id || null
+  }
+  async function sincronizarItemOrcamento(item: any, ambiente: any) {
+    const orcId = await orcamentoVinculado()
+    if (!orcId) return
+    const oaId = await ambienteOrcamentoEspelhado(ambiente, orcId)
+    if (!oaId) return
+    const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
+    const qtd = parseFloat(item.area || 1) || 1
+    const dadosOI = {
+      orcamento_id: orcId,
+      ambiente_id: oaId,
+      servico: item.servico,
+      descricao: item.descricao,
+      quantidade: qtd,
+      unidade: item.unidade,
+      preco_material: bi ? bi.preco_material : 0,
+      preco_mao_obra: bi ? bi.preco_mao_obra : 0,
+      lucro_percentual: bi ? bi.lucro_percentual : 0,
+      imposto_percentual: bi ? bi.imposto_percentual : 0,
+      banco_item_id: item.banco_item_id || null,
+      levantamento_item_id: item.id,
+    }
+    const totalItem = calcularTotalItemOrc(dadosOI)
+    const existentesItem = await buscar('orcamento_itens', `?levantamento_item_id=eq.${item.id}`)
+    if (existentesItem[0]) { await editar('orcamento_itens', existentesItem[0].id, { ...dadosOI, total_item: totalItem }) }
+    else { await criar('orcamento_itens', { ...dadosOI, total_item: totalItem }) }
+    await atualizarTotaisOrcamento(orcId)
+  }
+  async function excluirItemLevantamento(item: any) {
+    const linked = await buscar('orcamento_itens', `?levantamento_item_id=eq.${item.id}`)
+    for (const oi of linked) await remover('orcamento_itens', oi.id)
+    await remover('levantamento_itens', item.id)
+    if (linked[0]?.orcamento_id) await atualizarTotaisOrcamento(linked[0].orcamento_id)
+    carregar()
+  }
+  async function excluirAmbienteLevantamento(amb: any) {
+    if (!confirm('Excluir ambiente e todos os itens?')) return
+    const oaLinked = await buscar('orcamento_ambientes', `?levantamento_ambiente_id=eq.${amb.id}`)
+    for (const oa of oaLinked) await remover('orcamento_ambientes', oa.id)
+    await remover('levantamento_ambientes', amb.id)
+    if (oaLinked[0]?.orcamento_id) await atualizarTotaisOrcamento(oaLinked[0].orcamento_id)
+    carregar()
+  }
+  async function verOrcamentoVinculado() {
+    if (!detalhe) return
+    const existentes = await buscar('orcamentos', `?levantamento_id=eq.${detalhe.id}&limit=1`)
+    if (existentes[0]) {
+      localStorage.setItem('viga_orcamento_abrir', existentes[0].id)
+      window.location.href = '/orcamento'
+    } else {
+      alert('Nenhum orçamento vinculado ainda. Adicione um serviço no levantamento para criar automaticamente.')
     }
   }
 
@@ -517,7 +570,7 @@ export default function Levantamento() {
             ) : (
               <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
             )}
-            <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={criarOrcamento}>📋 Gerar Orçamento</button>
+            <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>🔗 Ver Orçamento Vinculado</button>
             <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPDFLevantamento(detalhe, ambsDetalhe, itensDetalhe)}>🖨️ Gerar Relatório PDF</button>
           </div>
         </div>
@@ -574,7 +627,7 @@ export default function Levantamento() {
                         </div>
                         <div className="flex gap-1.5 items-center">
                           <span className="text-[11px] text-on-surface-variant">{isAtivo ? '▲' : '▼'}</span>
-                          {podeEditar && <button className={btnDangerSmCls} onClick={e => { e.stopPropagation(); if (confirm('Excluir ambiente e todos os itens?')) remover('levantamento_ambientes', amb.id).then(carregar) }}>×</button>}
+                          {podeEditar && <button className={btnDangerSmCls} onClick={e => { e.stopPropagation(); excluirAmbienteLevantamento(amb) }}>×</button>}
                         </div>
                       </div>
 
@@ -627,7 +680,7 @@ export default function Levantamento() {
                                               setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento || '', largura: item.largura || '', altura: item.altura || '', area: item.area || '', unidade: item.unidade || 'm²', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
                                               setArquivoFoto(null); setEditItem(item); setJanela('item')
                                             }}>✏️</button>
-                                            <button className={btnDangerSmCls} onClick={() => remover('levantamento_itens', item.id).then(carregar)}>×</button>
+                                            <button className={btnDangerSmCls} onClick={() => excluirItemLevantamento(item)}>×</button>
                                           </div>
                                         )}
                                       </td>
@@ -689,8 +742,8 @@ export default function Levantamento() {
               </div>
             </div>
             <div className="mt-4">
-              <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={criarOrcamento}>
-                📋 Gerar Orçamento a partir deste Levantamento
+              <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>
+                🔗 Ver Orçamento Vinculado
               </button>
             </div>
           </div>

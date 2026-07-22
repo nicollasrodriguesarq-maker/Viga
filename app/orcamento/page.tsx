@@ -90,6 +90,13 @@ export default function Orcamento() {
     setUserEmail(localStorage.getItem('viga_email') || '')
     obterMinhasPermissoes().then(perm => { if (!temAcessoModulo(perm, 'orcamento')) window.location.href = '/' })
     carregar()
+    const abrirId = localStorage.getItem('viga_orcamento_abrir')
+    if (abrirId) {
+      localStorage.removeItem('viga_orcamento_abrir')
+      buscar('orcamentos', '?id=eq.' + abrirId).then(r => {
+        if (r[0]) { setDetalhe(r[0]); setAmbienteAtivo(null); setAbaDetalhe('itens') }
+      })
+    }
   }, [])
 
   function sair() {

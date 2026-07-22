@@ -91,6 +91,13 @@ const STATUS_BADGE: Record<string, string> = {
 const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
 const AMBIENTES_COMUNS = ['Sala de Estar', 'Sala de Jantar', 'Cozinha', 'Quarto 1', 'Quarto 2', 'Quarto 3', 'Banheiro Social', 'Banheiro Suíte', 'Área de Serviço', 'Varanda', 'Fachada', 'Área Externa', 'Corredor', 'Hall', 'Escritório', 'Garagem']
 const CATEGORIAS = ['Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Climatização (AC)', 'Forro', 'Revestimento de Parede', 'Revestimento de Piso', 'Pintura', 'Esquadrias', 'Marcenaria', 'Serralheria', 'Vidraçaria', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
+function ordemCategoria(categoria: string | null | undefined) {
+  const idx = CATEGORIAS.indexOf(categoria || '')
+  return idx === -1 ? CATEGORIAS.length : idx
+}
+function ordenarPorCategoria(itensList: any[]) {
+  return [...itensList].sort((a, b) => ordemCategoria(a.categoria) - ordemCategoria(b.categoria))
+}
 
 function gerarCodigo(lista: any[]) {
   const a = new Date().getFullYear()
@@ -577,7 +584,7 @@ export default function Levantamento() {
       const totalFinal = totalGeral - desconto
 
       const ambContent = orcAmbs.map((oa: any) => {
-        const itensAmb = orcItens.filter((i: any) => i.ambiente_id === oa.id)
+        const itensAmb = ordenarPorCategoria(orcItens.filter((i: any) => i.ambiente_id === oa.id))
         if (itensAmb.length === 0) return ''
         const totalAmb = itensAmb.reduce((a: number, i: any) => a + totalItem(i), 0)
         const rows = itensAmb.map((item: any) => `
@@ -680,7 +687,7 @@ export default function Levantamento() {
   // ── DETALHE ────────────────────────────────────────────────
   if (detalhe) {
     const ambsDetalhe = ambientes.filter(a => a.levantamento_id === detalhe.id).sort((a, b) => a.ordem - b.ordem)
-    const itensDetalhe = itens.filter(i => i.levantamento_id === detalhe.id)
+    const itensDetalhe = ordenarPorCategoria(itens.filter(i => i.levantamento_id === detalhe.id))
     const podeEditar = podeEditarLevantamento(detalhe)
     const souCriadorOuAdmin = souAdmin || detalhe.criado_por === meuId
     const pendentesDoLevantamento = souCriadorOuAdmin ? solicitacoesDoLevantamento(detalhe.id).filter(s => s.status === 'pendente') : []
@@ -769,7 +776,7 @@ export default function Levantamento() {
             ) : (
               <div className="flex flex-col gap-3">
                 {ambsDetalhe.map(amb => {
-                  const itensAmb = itens.filter(i => i.ambiente === amb.id)
+                  const itensAmb = ordenarPorCategoria(itens.filter(i => i.ambiente === amb.id))
                   const isAtivo = ambienteAtivo?.id === amb.id
                   return (
                     <div key={amb.id} className={`rounded-xl overflow-hidden border ${isAtivo ? 'border-primary bg-primary/5' : 'border-outline-variant bg-background'}`}>
@@ -863,7 +870,7 @@ export default function Levantamento() {
             {ambsDetalhe.length === 0 ? (
               <div className="text-center py-8 text-on-surface-variant">Nenhum ambiente cadastrado</div>
             ) : ambsDetalhe.map(amb => {
-              const itensAmb = itens.filter(i => i.ambiente === amb.id)
+              const itensAmb = ordenarPorCategoria(itens.filter(i => i.ambiente === amb.id))
               return (
                 <div key={amb.id} className="mb-5 pb-5 border-b border-outline-variant last:border-0">
                   <div className="text-sm font-bold text-primary mb-2.5">🏠 {amb.nome}</div>

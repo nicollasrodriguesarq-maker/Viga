@@ -40,6 +40,14 @@ const STATUS_BADGE: Record<string, string> = {
 const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
 const CATEGORIAS = ['Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Climatização (AC)', 'Forro', 'Revestimento de Parede', 'Revestimento de Piso', 'Pintura', 'Esquadrias', 'Marcenaria', 'Serralheria', 'Vidraçaria', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
 
+function ordemCategoria(categoria: string | null | undefined) {
+  const idx = CATEGORIAS.indexOf(categoria || '')
+  return idx === -1 ? CATEGORIAS.length : idx
+}
+function ordenarPorCategoria(itensList: any[]) {
+  return [...itensList].sort((a, b) => ordemCategoria(a.categoria) - ordemCategoria(b.categoria))
+}
+
 function calcularValorUnitario(precoMaterial: number, precoMaoObra: number, lucroPct: number, impostoPct: number) {
   return (precoMaterial + precoMaoObra) * (1 + (lucroPct || 0) / 100) * (1 + (impostoPct || 0) / 100)
 }
@@ -363,7 +371,7 @@ export default function Orcamento() {
     const totalFinal = totalGeral - desconto
 
     const ambContent = ambsOrc.map(amb => {
-      const itensAmb = itens.filter(i => i.ambiente_id === amb.id)
+      const itensAmb = ordenarPorCategoria(itens.filter(i => i.ambiente_id === amb.id))
       if (itensAmb.length === 0) return ''
       const matAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).material, 0)
       const maoAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).maoObra, 0)
@@ -690,7 +698,7 @@ export default function Orcamento() {
               <>
                 {!ambienteAtivo && <div className="px-3.5 py-2.5 bg-primary/5 rounded-lg text-body-sm text-primary mb-4">👆 Clique em um ambiente para selecioná-lo e adicionar itens</div>}
                 {ambsOrc.map(amb => {
-                  const itensAmb = itens.filter(i => i.ambiente_id === amb.id)
+                  const itensAmb = ordenarPorCategoria(itens.filter(i => i.ambiente_id === amb.id))
                   const isAtivo = ambienteAtivo?.id === amb.id
                   const matAmb = itensAmb.reduce((a, i) => a + parseFloat(i.preco_material||0) * parseFloat(i.quantidade||1), 0)
                   const maoAmb = itensAmb.reduce((a, i) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)

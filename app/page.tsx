@@ -74,10 +74,18 @@ export default function Home() {
   const [compromissosHoje, setCompromissosHoje] = useState<any[]>([])
   const [loadingDash, setLoadingDash] = useState(false)
 
+  function ehAppInstalado() {
+    return typeof window !== 'undefined' && (
+      window.matchMedia('(display-mode: standalone)').matches ||
+      (window.navigator as any).standalone === true
+    )
+  }
+
   useEffect(() => {
     const token = localStorage.getItem('viga_token')
     const savedEmail = localStorage.getItem('viga_email')
     if (token && savedEmail) {
+      if (ehAppInstalado()) { window.location.href = '/m'; return }
       setUserEmail(savedEmail)
       setLogado(true)
     }
@@ -119,6 +127,7 @@ export default function Home() {
       localStorage.setItem('viga_token', data.access_token)
       localStorage.setItem('viga_refresh_token', data.refresh_token || '')
       localStorage.setItem('viga_email', email.trim())
+      if (ehAppInstalado()) { window.location.href = '/m'; setLoading(false); return }
       setUserEmail(email.trim())
       setLogado(true)
     } else {
@@ -138,6 +147,7 @@ export default function Home() {
         localStorage.setItem('viga_token', data.access_token)
         localStorage.setItem('viga_refresh_token', data.refresh_token || '')
         localStorage.setItem('viga_email', email.trim())
+        if (ehAppInstalado()) { window.location.href = '/m'; setLoading(false); return }
         setUserEmail(email.trim())
         setLogado(true)
       } else {

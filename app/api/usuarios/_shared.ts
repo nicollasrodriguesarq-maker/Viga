@@ -2,6 +2,7 @@ export const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 export const ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
 
 export const MODULOS_VALIDOS = ['obras', 'financeiro', 'levantamento', 'orcamento', 'agenda']
+export const MODULOS_APP_VALIDOS = ['obras', 'financeiro', 'levantamento', 'orcamento']
 
 export async function resolveCaller(auth: string | null): Promise<{ id: string } | null> {
   if (!auth) return null

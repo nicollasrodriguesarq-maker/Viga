@@ -35,3 +35,35 @@ export function temAcessoModulo(perm: Permissoes | null, modulo: string): boolea
   if (perm.role === 'admin') return true
   return perm.modulos_permitidos.includes(modulo)
 }
+
+export interface PermissoesApp {
+  id: string
+  role: 'admin' | 'usuario'
+  modulos_app: string[]
+}
+
+export async function obterMinhasPermissoesApp(): Promise<PermissoesApp | null> {
+  const email = localStorage.getItem('viga_email') || ''
+  if (!email) return null
+  try {
+    const r = await fetch(
+      `${SUPABASE_URL}/rest/v1/usuarios?email=ilike.${encodeURIComponent(email)}&select=id,role,modulos_app`,
+      { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` } }
+    )
+    const rows = await r.json()
+    if (Array.isArray(rows) && rows[0]) {
+      return {
+        id: rows[0].id,
+        role: rows[0].role === 'admin' ? 'admin' : 'usuario',
+        modulos_app: Array.isArray(rows[0].modulos_app) ? rows[0].modulos_app : [],
+      }
+    }
+  } catch {}
+  return null
+}
+
+export function temAcessoModuloApp(perm: PermissoesApp | null, modulo: string): boolean {
+  if (!perm) return true
+  if (perm.role === 'admin') return true
+  return perm.modulos_app.includes(modulo)
+}

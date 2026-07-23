@@ -175,6 +175,12 @@ const MODULOS_SISTEMA = [
   { chave: 'orcamento', label: 'Orçamento' },
   { chave: 'agenda', label: 'Agenda' },
 ]
+const MODULOS_SISTEMA_APP = [
+  { chave: 'obras', label: 'Obras' },
+  { chave: 'financeiro', label: 'Financeiro' },
+  { chave: 'levantamento', label: 'Levantamento' },
+  { chave: 'orcamento', label: 'Orçamento' },
+]
 
 // ── Perfil da Empresa ──────────────────────────────────────────
 function PerfilEmpresa() {
@@ -344,7 +350,7 @@ function ContatosSetor() {
 }
 
 // ── Usuários ────────────────────────────────────────────────────
-const FORM_VAZIO = { nome: '', email: '', senha: '', role: 'usuario', setor: '', modulos_permitidos: [...MODULOS_SISTEMA.map(m => m.chave)] }
+const FORM_VAZIO = { nome: '', email: '', senha: '', role: 'usuario', setor: '', modulos_permitidos: [...MODULOS_SISTEMA.map(m => m.chave)], modulos_app: [...MODULOS_SISTEMA_APP.map(m => m.chave)] }
 
 function UsuariosTab({ meuId }: { meuId: string }) {
   const [usuarios, setUsuarios] = useState<any[]>([])
@@ -378,6 +384,7 @@ function UsuariosTab({ meuId }: { meuId: string }) {
       role: u.role || 'usuario',
       setor: u.setor || '',
       modulos_permitidos: Array.isArray(u.modulos_permitidos) ? u.modulos_permitidos : MODULOS_SISTEMA.map(m => m.chave),
+      modulos_app: Array.isArray(u.modulos_app) ? u.modulos_app : MODULOS_SISTEMA_APP.map(m => m.chave),
     })
     setErro('')
     setModalAberto(true)
@@ -389,6 +396,15 @@ function UsuariosTab({ meuId }: { meuId: string }) {
       modulos_permitidos: n.modulos_permitidos.includes(chave)
         ? n.modulos_permitidos.filter((m: string) => m !== chave)
         : [...n.modulos_permitidos, chave],
+    }))
+  }
+
+  function alternarModuloApp(chave: string) {
+    setNovo((n: any) => ({
+      ...n,
+      modulos_app: n.modulos_app.includes(chave)
+        ? n.modulos_app.filter((m: string) => m !== chave)
+        : [...n.modulos_app, chave],
     }))
   }
 
@@ -502,8 +518,8 @@ function UsuariosTab({ meuId }: { meuId: string }) {
                 <option value="admin">Admin</option>
               </select>
             </div>
-            <div className="mb-5">
-              <label className={labelCls}>Acesso aos módulos {novo.role === 'admin' && '(admin tem acesso a tudo)'}</label>
+            <div className="mb-3.5">
+              <label className={labelCls}>Acesso ao Sistema (Desktop) {novo.role === 'admin' && '(admin tem acesso a tudo)'}</label>
               <div className="flex flex-col gap-1.5 mt-1">
                 {MODULOS_SISTEMA.map(m => (
                   <label key={m.chave} className="flex items-center gap-2 text-sm text-on-surface cursor-pointer">
@@ -511,6 +527,22 @@ function UsuariosTab({ meuId }: { meuId: string }) {
                       type="checkbox"
                       checked={novo.modulos_permitidos.includes(m.chave)}
                       onChange={() => alternarModulo(m.chave)}
+                      disabled={novo.role === 'admin'}
+                    />
+                    {m.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="mb-5">
+              <label className={labelCls}>Acesso ao App (Mobile) {novo.role === 'admin' && '(admin tem acesso a tudo)'}</label>
+              <div className="flex flex-col gap-1.5 mt-1">
+                {MODULOS_SISTEMA_APP.map(m => (
+                  <label key={m.chave} className="flex items-center gap-2 text-sm text-on-surface cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={novo.modulos_app.includes(m.chave)}
+                      onChange={() => alternarModuloApp(m.chave)}
                       disabled={novo.role === 'admin'}
                     />
                     {m.label}

@@ -1,4 +1,4 @@
-import { SUPABASE_URL, MODULOS_VALIDOS, resolveCaller, getUsuarioRole } from './_shared'
+import { SUPABASE_URL, MODULOS_VALIDOS, MODULOS_APP_VALIDOS, resolveCaller, getUsuarioRole } from './_shared'
 
 export async function POST(req: Request) {
   const auth = req.headers.get('authorization')
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
   } catch {
     return Response.json({ error: 'Corpo inválido' }, { status: 400 })
   }
-  const { email, senha, nome, role, setor, modulos_permitidos } = body || {}
+  const { email, senha, nome, role, setor, modulos_permitidos, modulos_app } = body || {}
   if (!email || !senha || !nome) {
     return Response.json({ error: 'Preencha e-mail, senha e nome' }, { status: 400 })
   }
@@ -41,6 +41,9 @@ export async function POST(req: Request) {
   const modulosFinal = Array.isArray(modulos_permitidos)
     ? modulos_permitidos.filter((m: string) => MODULOS_VALIDOS.includes(m))
     : MODULOS_VALIDOS
+  const modulosAppFinal = Array.isArray(modulos_app)
+    ? modulos_app.filter((m: string) => MODULOS_APP_VALIDOS.includes(m))
+    : MODULOS_APP_VALIDOS
 
   // 4. Cria o usuário via Admin API do Supabase (service role)
   const createRes = await fetch(`${SUPABASE_URL}/auth/v1/admin/users`, {
@@ -76,6 +79,7 @@ export async function POST(req: Request) {
       role: roleFinal,
       setor: setor || null,
       modulos_permitidos: modulosFinal,
+      modulos_app: modulosAppFinal,
     }),
   })
 

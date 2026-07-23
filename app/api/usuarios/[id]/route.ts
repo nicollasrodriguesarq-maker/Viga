@@ -1,4 +1,4 @@
-import { SUPABASE_URL, MODULOS_VALIDOS, resolveCaller, getUsuarioRole } from '../_shared'
+import { SUPABASE_URL, MODULOS_VALIDOS, MODULOS_APP_VALIDOS, resolveCaller, getUsuarioRole } from '../_shared'
 
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -28,9 +28,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   } catch {
     return Response.json({ error: 'Corpo inválido' }, { status: 400 })
   }
-  const { nome, setor, email, senha, role, modulos_permitidos } = body || {}
+  const { nome, setor, email, senha, role, modulos_permitidos, modulos_app } = body || {}
 
-  if ((role !== undefined || modulos_permitidos !== undefined) && !souAdmin) {
+  if ((role !== undefined || modulos_permitidos !== undefined || modulos_app !== undefined) && !souAdmin) {
     return Response.json({ error: 'Apenas administradores podem alterar papel ou módulos de acesso' }, { status: 403 })
   }
   if (senha !== undefined && String(senha).length > 0 && String(senha).length < 6) {
@@ -70,6 +70,11 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     dadosPerfil.modulos_permitidos = Array.isArray(modulos_permitidos)
       ? modulos_permitidos.filter((m: string) => MODULOS_VALIDOS.includes(m))
       : MODULOS_VALIDOS
+  }
+  if (souAdmin && modulos_app !== undefined) {
+    dadosPerfil.modulos_app = Array.isArray(modulos_app)
+      ? modulos_app.filter((m: string) => MODULOS_APP_VALIDOS.includes(m))
+      : MODULOS_APP_VALIDOS
   }
 
   if (Object.keys(dadosPerfil).length > 0) {

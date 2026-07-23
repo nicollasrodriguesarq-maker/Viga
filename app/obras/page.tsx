@@ -235,8 +235,16 @@ export default function Obras() {
     const abrirId = localStorage.getItem('viga_obra_abrir')
     if (abrirId) {
       localStorage.removeItem('viga_obra_abrir')
+      const abaAlvo = localStorage.getItem('viga_obra_abrir_aba')
+      const abrirNovaVisitaFlag = localStorage.getItem('viga_obra_abrir_nova_visita')
+      localStorage.removeItem('viga_obra_abrir_aba')
+      localStorage.removeItem('viga_obra_abrir_nova_visita')
       buscar('obras', '?id=eq.' + abrirId).then(r => {
-        if (r[0]) { setDetalhe(r[0]); setAbaDetalhe('resumo') }
+        if (r[0]) {
+          setDetalhe(r[0])
+          setAbaDetalhe(abaAlvo || 'resumo')
+          if (abaAlvo === 'visitas' && abrirNovaVisitaFlag) abrirNovaVisita()
+        }
       })
     }
   }, [])

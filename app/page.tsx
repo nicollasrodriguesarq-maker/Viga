@@ -75,8 +75,11 @@ export default function Home() {
   const [aReceber, setAReceber] = useState(0)
   const [aPagar, setAPagar] = useState(0)
   const [obrasRecentes, setObrasRecentes] = useState<any[]>([])
+  const [todasObras, setTodasObras] = useState<any[]>([])
   const [compromissosHoje, setCompromissosHoje] = useState<any[]>([])
   const [loadingDash, setLoadingDash] = useState(false)
+  const [fabAberto, setFabAberto] = useState(false)
+  const [obraRdoSelecionada, setObraRdoSelecionada] = useState('')
 
   function ehAppInstalado() {
     return typeof window !== 'undefined' && (
@@ -131,6 +134,7 @@ export default function Home() {
 
       setObrasAtivas(obrasVisiveis.filter((o: any) => o.status === 'em_execucao').length)
       setObrasRecentes(obrasVisiveis.slice(0, 4))
+      setTodasObras(obrasVisiveis)
       setCompromissosHoje(compromissos)
 
       const lancMes = lancamentos.filter((l: any) => l.data?.slice(0, 7) === mesAtual)
@@ -413,7 +417,20 @@ export default function Home() {
             </div>
             <h4 className="font-headline text-headline-sm text-on-surface mb-2">Relatórios Diários</h4>
             <p className="text-on-surface-variant text-body-sm mb-lg">Suba fotos e relatórios das visitas técnicas realizadas hoje.</p>
-            <button className="w-full py-3 border-2 border-dashed border-outline-variant rounded-xl text-on-surface-variant hover:border-primary hover:text-primary transition-all font-bold">
+            <select value={obraRdoSelecionada} onChange={e => setObraRdoSelecionada(e.target.value)}
+              className="w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3 py-2.5 text-sm mb-2.5">
+              <option value="">Selecione a obra...</option>
+              {todasObras.map((o: any) => <option key={o.id} value={o.id}>{o.nome}</option>)}
+            </select>
+            <button
+              disabled={!obraRdoSelecionada}
+              onClick={() => {
+                localStorage.setItem('viga_obra_abrir', obraRdoSelecionada)
+                localStorage.setItem('viga_obra_abrir_aba', 'visitas')
+                localStorage.setItem('viga_obra_abrir_nova_visita', '1')
+                window.location.href = '/obras'
+              }}
+              className="w-full py-3 border-2 border-dashed border-outline-variant rounded-xl text-on-surface-variant hover:border-primary hover:text-primary transition-all font-bold disabled:opacity-40 disabled:cursor-not-allowed">
               Upload RDO
             </button>
           </div>
@@ -450,19 +467,21 @@ export default function Home() {
         <div className="text-center text-on-surface-variant/60 text-body-sm">VIGA v1.0 · Inverso Construção</div>
 
         {/* FAB */}
-        <div className="fixed bottom-lg right-lg group">
-          <div className="absolute bottom-full right-0 mb-4 flex flex-col items-end gap-2 pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto transition-all duration-300 -translate-y-2 group-hover:translate-y-0">
-            <Link href="/orcamento" className="flex items-center gap-3 px-4 py-2 bg-surface-container card-border rounded-lg text-on-surface hover:bg-surface-variant shadow-xl">
-              <span className="font-label-md">Novo Orçamento</span>
-              <span className="material-symbols-outlined text-primary">description</span>
-            </Link>
-            <Link href="/obras" className="flex items-center gap-3 px-4 py-2 bg-surface-container card-border rounded-lg text-on-surface hover:bg-surface-variant shadow-xl">
-              <span className="font-label-md">Adicionar Obra</span>
-              <span className="material-symbols-outlined text-primary">add_business</span>
-            </Link>
-          </div>
-          <button className="w-14 h-14 bg-primary text-on-primary rounded-full flex items-center justify-center shadow-xl shadow-primary/40 hover:scale-110 active:scale-95 transition-all">
-            <span className="material-symbols-outlined text-[28px] group-hover:rotate-45 transition-transform">add</span>
+        <div className="fixed bottom-lg right-lg">
+          {fabAberto && (
+            <div className="absolute bottom-full right-0 mb-4 flex flex-col items-end gap-2">
+              <Link href="/orcamento" className="flex items-center gap-3 px-4 py-2 bg-surface-container card-border rounded-lg text-on-surface hover:bg-surface-variant shadow-xl">
+                <span className="font-label-md">Novo Orçamento</span>
+                <span className="material-symbols-outlined text-primary">description</span>
+              </Link>
+              <Link href="/obras" className="flex items-center gap-3 px-4 py-2 bg-surface-container card-border rounded-lg text-on-surface hover:bg-surface-variant shadow-xl">
+                <span className="font-label-md">Adicionar Obra</span>
+                <span className="material-symbols-outlined text-primary">add_business</span>
+              </Link>
+            </div>
+          )}
+          <button onClick={() => setFabAberto(!fabAberto)} className="w-14 h-14 bg-primary text-on-primary rounded-full flex items-center justify-center shadow-xl shadow-primary/40 hover:scale-110 active:scale-95 transition-all">
+            <span className={`material-symbols-outlined text-[28px] transition-transform ${fabAberto ? 'rotate-45' : ''}`}>add</span>
           </button>
         </div>
       </Layout>

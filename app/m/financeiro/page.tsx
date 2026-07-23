@@ -37,7 +37,6 @@ const CAT_OUT = ['Material', 'Mão de obra', 'Terceiros', 'Aluguel', 'Equipament
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
 const labelCls = 'text-[11px] text-on-surface-variant font-semibold uppercase tracking-wide block mb-1.5'
-const fileCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer'
 const btnPrimaryCls = 'bg-primary text-on-primary rounded-lg px-4 py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer w-full'
 const btnSecondaryCls = 'bg-surface-container-low border border-outline-variant text-on-surface-variant rounded-lg px-4 py-3 text-sm cursor-pointer'
 
@@ -229,6 +228,23 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
   function Titulo({ children }: any) {
     return <div className="text-base font-bold text-on-surface mb-5">{children}</div>
   }
+  function SeletorArquivoNF({ value, onChange }: any) {
+    return (
+      <>
+        <div className="flex gap-2">
+          <label className={btnSecondaryCls + ' flex-1 text-center'}>
+            📷 Tirar Foto
+            <input type="file" accept="image/*" capture="environment" onChange={e => onChange(e.target.files?.[0] || null)} className="hidden" />
+          </label>
+          <label className={btnSecondaryCls + ' flex-1 text-center'}>
+            📎 Anexar Arquivo
+            <input type="file" accept=".pdf,.jpg,.jpeg,.png" onChange={e => onChange(e.target.files?.[0] || null)} className="hidden" />
+          </label>
+        </div>
+        {value && <div className="text-xs text-primary mt-1.5">📎 {(value as File).name}</div>}
+      </>
+    )
+  }
   function Botoes({ onFinalizar, finalizarLabel, podeAvancar, onProximo }: any) {
     return (
       <div className="flex flex-col gap-2 mt-5">
@@ -269,8 +285,7 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
             <div className="text-body-sm text-on-surface-variant mb-4">Tire uma foto da NF ou cupom fiscal e preencha os dados. A leitura automática ainda não está disponível — preencha manualmente por enquanto.</div>
             <div className="mb-3.5">
               <label className={labelCls}>Foto da NF/Cupom</label>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" capture="environment" onChange={e => setWiz({ ...wiz, nf_arquivo: e.target.files?.[0] || null })} className={fileCls} />
-              {wiz.nf_arquivo && <div className="text-xs text-primary mt-1.5">📎 {(wiz.nf_arquivo as File).name}</div>}
+              <SeletorArquivoNF value={wiz.nf_arquivo} onChange={(f: File | null) => setWiz({ ...wiz, nf_arquivo: f })} />
             </div>
             <div className="grid grid-cols-2 gap-3 mb-3.5">
               <div><label className={labelCls}>Valor (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={wiz.valor} onChange={e => setWiz({ ...wiz, valor: e.target.value })} /></div>
@@ -422,8 +437,7 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
             <Titulo>💰 Dados da NF de Serviço</Titulo>
             <div className="mb-3.5">
               <label className={labelCls}>Foto da NF</label>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png" capture="environment" onChange={e => setWiz({ ...wiz, nf_arquivo: e.target.files?.[0] || null })} className={fileCls} />
-              {wiz.nf_arquivo && <div className="text-xs text-primary mt-1.5">📎 {(wiz.nf_arquivo as File).name}</div>}
+              <SeletorArquivoNF value={wiz.nf_arquivo} onChange={(f: File | null) => setWiz({ ...wiz, nf_arquivo: f })} />
             </div>
             <div className="grid grid-cols-2 gap-3 mb-3.5">
               <div><label className={labelCls}>Valor (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={wiz.valor} onChange={e => setWiz({ ...wiz, valor: e.target.value })} /></div>

@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
-import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
+import { obterMinhasPermissoes, temAcessoModulo, obterUsuariosVisiveis } from '../lib/permissoes'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -38,6 +38,37 @@ function formatarGrupo(dataStr: string) {
   return d.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/^\w/, c => c.toUpperCase())
 }
 
+// ── Janela de datas para as visões Dia/Semana/Mês ──────────────
+function inicioSemana(d: Date) {
+  const dt = new Date(d); const dow = dt.getDay()
+  dt.setDate(dt.getDate() + (dow === 0 ? -6 : 1 - dow)); dt.setHours(0, 0, 0, 0)
+  return dt
+}
+function janelaDatas(visualizacao: 'dia' | 'semana' | 'mes', dataRef: Date) {
+  if (visualizacao === 'dia') return { inicio: new Date(dataRef), fim: new Date(dataRef) }
+  if (visualizacao === 'semana') {
+    const inicio = inicioSemana(dataRef)
+    const fim = new Date(inicio); fim.setDate(inicio.getDate() + 6)
+    return { inicio, fim }
+  }
+  const inicio = new Date(dataRef.getFullYear(), dataRef.getMonth(), 1)
+  const fim = new Date(dataRef.getFullYear(), dataRef.getMonth() + 1, 0)
+  return { inicio, fim }
+}
+function deslocarData(visualizacao: 'dia' | 'semana' | 'mes', dataRef: Date, direcao: 1 | -1) {
+  const d = new Date(dataRef)
+  if (visualizacao === 'dia') d.setDate(d.getDate() + direcao)
+  else if (visualizacao === 'semana') d.setDate(d.getDate() + direcao * 7)
+  else d.setMonth(d.getMonth() + direcao)
+  return d
+}
+function formatarJanela(visualizacao: 'dia' | 'semana' | 'mes', dataRef: Date) {
+  const { inicio, fim } = janelaDatas(visualizacao, dataRef)
+  if (visualizacao === 'dia') return inicio.toLocaleDateString('pt-BR', { weekday: 'long', day: 'numeric', month: 'long' }).replace(/^\w/, c => c.toUpperCase())
+  if (visualizacao === 'semana') return `${inicio.toLocaleDateString('pt-BR')} – ${fim.toLocaleDateString('pt-BR')}`
+  return dataRef.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).replace(/^\w/, c => c.toUpperCase())
+}
+
 // classes reutilizáveis
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
 const labelCls = 'text-[11px] text-on-surface-variant font-semibold uppercase tracking-wide block mb-1.5'
@@ -48,28 +79,46 @@ const btnEditSmCls = 'bg-primary/10 border border-primary/30 text-primary rounde
 const cardCls = 'bg-surface-container border border-outline-variant rounded-xl p-5'
 const sectionCls = 'bg-surface-container border border-outline-variant rounded-xl p-5 mb-4'
 
-const FORM_VAZIO = { titulo: '', descricao: '', endereco: '', data: '', hora_inicio: '', hora_fim: '', alerta_minutos_antes: '' }
+const FORM_VAZIO = { titulo: '', descricao: '', endereco: '', data: '', hora_inicio: '', hora_fim: '', alerta_minutos_antes: '', usuario_id: '' }
 
 export default function Agenda() {
   const [compromissos, setCompromissos] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState('')
-  const [mostrarPassados, setMostrarPassados] = useState(false)
   const [janela, setJanela] = useState<string | null>(null)
   const [fComp, setFComp] = useState(FORM_VAZIO)
   const [editando, setEditando] = useState<any>(null)
   const [userEmail, setUserEmail] = useState('')
   const [meuId, setMeuId] = useState('')
+  const [souAdmin, setSouAdmin] = useState(false)
+  const [souGerenteTime, setSouGerenteTime] = useState(false)
+  const [usuarios, setUsuarios] = useState<any[]>([])
+  const [visiveis, setVisiveis] = useState<string[]>([])
+  const [alvoAgenda, setAlvoAgenda] = useState('') // '' = minha agenda; 'equipe' = todos visíveis; ou um id de usuário
+  const [visualizacao, setVisualizacao] = useState<'dia' | 'semana' | 'mes'>('semana')
+  const [dataRef, setDataRef] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })
+
+  const souGestor = souAdmin || souGerenteTime
 
   useEffect(() => {
     if (!localStorage.getItem('viga_token')) { window.location.href = '/'; return }
     setUserEmail(localStorage.getItem('viga_email') || '')
-    obterMinhasPermissoes().then(perm => {
+    obterMinhasPermissoes().then(async perm => {
       if (!temAcessoModulo(perm, 'agenda')) { window.location.href = '/'; return }
-      if (perm) setMeuId(perm.id)
+      if (!perm) return
+      setMeuId(perm.id)
+      setSouAdmin(perm.role === 'admin')
+      setSouGerenteTime(perm.role === 'gerente_time')
+      const vis = await obterUsuariosVisiveis(perm)
+      setVisiveis(vis)
+      if (perm.role !== 'usuario') {
+        const u = await buscar('usuarios', '?select=id,nome,email&order=nome')
+        setUsuarios(u)
+      }
     })
-    carregar()
   }, [])
+
+  useEffect(() => { if (meuId) carregar() }, [alvoAgenda, meuId])
 
   function sair() {
     localStorage.removeItem('viga_token')
@@ -80,14 +129,25 @@ export default function Agenda() {
 
   async function carregar() {
     setLoading(true)
-    const c = await buscar('agenda_compromissos', '?order=data.asc,hora_inicio.asc')
+    let filtro = ''
+    if (!souGestor) {
+      filtro = '&usuario_id=eq.' + meuId
+    } else if (alvoAgenda === 'equipe') {
+      filtro = visiveis.length > 0 ? '&usuario_id=in.(' + visiveis.join(',') + ')' : ''
+    } else if (alvoAgenda) {
+      filtro = '&usuario_id=eq.' + alvoAgenda
+    } else {
+      filtro = '&usuario_id=eq.' + meuId
+    }
+    const c = await buscar('agenda_compromissos', '?order=data.asc,hora_inicio.asc' + filtro)
     setCompromissos(c)
     setLoading(false)
   }
 
   function abrirNovo() {
     setEditando(null)
-    setFComp({ ...FORM_VAZIO, data: new Date().toISOString().slice(0, 10) })
+    const usuarioPadrao = souGestor && alvoAgenda && alvoAgenda !== 'equipe' ? alvoAgenda : meuId
+    setFComp({ ...FORM_VAZIO, data: new Date().toISOString().slice(0, 10), usuario_id: usuarioPadrao })
     setJanela('compromisso')
   }
   function abrirEditar(c: any) {
@@ -96,6 +156,7 @@ export default function Agenda() {
       titulo: c.titulo || '', descricao: c.descricao || '', endereco: c.endereco || '',
       data: c.data || '', hora_inicio: c.hora_inicio || '', hora_fim: c.hora_fim || '',
       alerta_minutos_antes: c.alerta_minutos_antes != null ? String(c.alerta_minutos_antes) : '',
+      usuario_id: c.usuario_id || meuId,
     })
     setJanela('compromisso')
   }
@@ -112,6 +173,7 @@ export default function Agenda() {
       hora_fim: fComp.hora_fim || null,
       alerta_minutos_antes: fComp.alerta_minutos_antes ? parseInt(fComp.alerta_minutos_antes) : null,
       criado_por: meuId || null,
+      usuario_id: (souGestor && fComp.usuario_id) || meuId || null,
     }
     if (editando) { await editar('agenda_compromissos', editando.id, dados) }
     else { await criar('agenda_compromissos', dados) }
@@ -126,9 +188,11 @@ export default function Agenda() {
   }
 
   const hojeStr = new Date().toISOString().slice(0, 10)
+  const { inicio: janelaInicio, fim: janelaFim } = janelaDatas(visualizacao, dataRef)
 
   const filtrados = compromissos.filter(c => {
-    if (!mostrarPassados && c.data < hojeStr) return false
+    const d = new Date(c.data + 'T00:00:00')
+    if (d < janelaInicio || d > janelaFim) return false
     if (!busca) return true
     const termo = busca.toLowerCase()
     return [c.titulo, c.descricao, c.endereco].some(v => v?.toLowerCase().includes(termo))
@@ -182,13 +246,34 @@ export default function Agenda() {
           <p className="text-body-md text-on-surface-variant">Compromissos, visitas e prazos da equipe.</p>
         </div>
         <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant">
-          <button
-            className={`px-4 py-2 rounded-lg text-label-md transition-colors ${!mostrarPassados ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
-            onClick={() => setMostrarPassados(false)}>Próximos</button>
-          <button
-            className={`px-4 py-2 rounded-lg text-label-md transition-colors ${mostrarPassados ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
-            onClick={() => setMostrarPassados(true)}>Todos</button>
+          {(['dia', 'semana', 'mes'] as const).map(v => (
+            <button key={v}
+              className={`px-4 py-2 rounded-lg text-label-md transition-colors capitalize ${visualizacao === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+              onClick={() => setVisualizacao(v)}>{v}</button>
+          ))}
         </div>
+      </div>
+
+      {souGestor && (
+        <div className="mb-lg">
+          <label className={labelCls}>Ver agenda de</label>
+          <select className={inputCls + ' w-auto'} value={alvoAgenda} onChange={e => setAlvoAgenda(e.target.value)}>
+            <option value="">— Minha agenda —</option>
+            <option value="equipe">— Toda a equipe —</option>
+            {usuarios.filter(u => visiveis.includes(u.id) && u.id !== meuId).map(u => (
+              <option key={u.id} value={u.id}>{u.nome || u.email}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between flex-wrap gap-3 mb-lg">
+        <div className="flex items-center gap-2">
+          <button className={btnSecondaryCls} onClick={() => setDataRef(deslocarData(visualizacao, dataRef, -1))}>← Anterior</button>
+          <button className={btnSecondaryCls} onClick={() => { const d = new Date(); d.setHours(0, 0, 0, 0); setDataRef(d) }}>Hoje</button>
+          <button className={btnSecondaryCls} onClick={() => setDataRef(deslocarData(visualizacao, dataRef, 1))}>Próximo →</button>
+        </div>
+        <div className="text-sm font-semibold text-on-surface capitalize">{formatarJanela(visualizacao, dataRef)}</div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-lg">
@@ -255,6 +340,17 @@ export default function Agenda() {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
           <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[520px] max-h-[92vh] overflow-y-auto">
             <div className="text-base font-bold text-on-surface mb-5">📅 {editando ? 'Editar Compromisso' : 'Novo Compromisso'}</div>
+            {souGestor && (
+              <div className="mb-3.5">
+                <label className={labelCls}>Para quem</label>
+                <select className={inputCls} value={fComp.usuario_id} onChange={e => setFComp({ ...fComp, usuario_id: e.target.value })}>
+                  <option value={meuId}>Eu mesmo</option>
+                  {usuarios.filter(u => visiveis.includes(u.id) && u.id !== meuId).map(u => (
+                    <option key={u.id} value={u.id}>{u.nome || u.email}</option>
+                  ))}
+                </select>
+              </div>
+            )}
             <div className="mb-3.5">
               <label className={labelCls}>Título *</label>
               <input className={inputCls} placeholder="Ex: Visita técnica, Reunião com cliente..." value={fComp.titulo} onChange={e => setFComp({ ...fComp, titulo: e.target.value })} />

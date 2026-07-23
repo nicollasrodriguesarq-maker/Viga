@@ -13,8 +13,8 @@ async function buscar(tabela: string, q = '') {
 async function criar(tabela: string, dados: object) {
   try { const r = await fetch(BASE + '/' + tabela, { method: 'POST', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(dados) }); const d = await r.json(); return Array.isArray(d) ? d[0] : d } catch { return null }
 }
-async function editar(tabela: string, id: string, dados: object) {
-  try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }) } catch {}
+async function editar(tabela: string, id: string, dados: object): Promise<boolean> {
+  try { const r = await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }); return r.ok } catch { return false }
 }
 async function remover(tabela: string, id: string) {
   try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }) } catch {}
@@ -303,7 +303,19 @@ export default function ObrasMobile() {
       <MobileShell title={medicaoAtiva.numero}>
         <div className="p-4 flex flex-col gap-3 pb-8">
           <button className="text-primary text-sm font-semibold text-left" onClick={() => { setMedicaoAtiva(null); setTela('detalhe') }}>← Voltar às Medições</button>
-          <div className="text-[11px] text-on-surface-variant">{dataBR(medicaoAtiva.data)} · Retenção {(retPct * 100).toFixed(1)}%</div>
+          <div className="text-[11px] text-on-surface-variant flex items-center gap-1.5">
+            <span>{dataBR(medicaoAtiva.data)} · Retenção</span>
+            <input key={medicaoAtiva.id} type="number" step="0.1" min="0" defaultValue={(retPct * 100).toFixed(1)}
+              onBlur={async e => {
+                const novoPct = parseFloat(e.target.value || '0')
+                if (!orcamentoObra) return
+                const ok = await editar('orcamentos', orcamentoObra.id, { retencao_percentual: novoPct / 100 })
+                if (!ok) return alert('Não foi possível salvar a retenção.')
+                setOrcamentos(orcamentos.map(o => o.id === orcamentoObra.id ? { ...o, retencao_percentual: novoPct / 100 } : o))
+              }}
+              className="w-14 bg-surface-container-low border border-outline-variant rounded px-1.5 py-0.5 text-on-surface text-[11px]" />
+            <span>%</span>
+          </div>
           {linhas.length === 0 ? (
             <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum item para medir</div>
           ) : linhas.map(({ item, p, acumAtual, valorPeriodo, retencao, liquido }) => (

@@ -1556,7 +1556,19 @@ export default function Obras() {
                 <div>
                   <button className={btnSecondaryCls + ' mb-2'} onClick={() => setMedicaoAtiva(null)}>← Voltar às Medições</button>
                   <div className="text-sm font-bold text-on-surface">{medicaoAtiva.numero} — {medicaoAtiva.tipo === 'fornecedor' ? `Fornecedor: ${medicaoAtiva.fornecedor || '—'}` : 'Cliente'}</div>
-                  <div className="text-[11px] text-on-surface-variant">{dataBR(medicaoAtiva.data)} · Retenção {(retPct * 100).toFixed(1)}%</div>
+                  <div className="text-[11px] text-on-surface-variant flex items-center gap-1.5">
+                    <span>{dataBR(medicaoAtiva.data)} · Retenção</span>
+                    <input key={medicaoAtiva.id} type="number" step="0.1" min="0" defaultValue={(retPct * 100).toFixed(1)}
+                      onBlur={async e => {
+                        const novoPct = parseFloat(e.target.value || '0')
+                        if (!orcamentoObra) return
+                        const ok = await editar('orcamentos', orcamentoObra.id, { retencao_percentual: novoPct / 100 })
+                        if (!ok) return alert('Não foi possível salvar a retenção.')
+                        setOrcamentos(orcamentos.map(o => o.id === orcamentoObra.id ? { ...o, retencao_percentual: novoPct / 100 } : o))
+                      }}
+                      className="w-14 bg-surface-container-low border border-outline-variant rounded px-1.5 py-0.5 text-on-surface text-[11px]" />
+                    <span>%</span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-3 flex-wrap">
                   {medicaoAtiva.lancamento_id ? (

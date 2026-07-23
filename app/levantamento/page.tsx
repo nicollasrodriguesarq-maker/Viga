@@ -70,8 +70,8 @@ async function criar(tabela: string, dados: object) {
     return Array.isArray(d) ? d[0] : d
   } catch { return null }
 }
-async function editar(tabela: string, id: string, dados: object) {
-  try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }) } catch {}
+async function editar(tabela: string, id: string, dados: object): Promise<boolean> {
+  try { const r = await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }); return r.ok } catch { return false }
 }
 async function remover(tabela: string, id: string) {
   try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }) } catch {}
@@ -729,7 +729,12 @@ export default function Levantamento() {
           <div className="flex gap-2 flex-wrap items-start">
             {podeEditar ? (
               <select value={detalhe.status}
-                onChange={async e => { await editar('levantamentos', detalhe.id, { status: e.target.value }); setDetalhe({ ...detalhe, status: e.target.value }); carregar() }}
+                onChange={async e => {
+                  const novoStatus = e.target.value
+                  const ok = await editar('levantamentos', detalhe.id, { status: novoStatus })
+                  if (!ok) return alert('Não foi possível salvar o status. Tente novamente.')
+                  setDetalhe({ ...detalhe, status: novoStatus }); carregar()
+                }}
                 className={inputCls + ' w-auto text-xs py-1.5'}>
                 {Object.entries(STATUS_LEVA).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
               </select>

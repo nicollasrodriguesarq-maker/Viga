@@ -32,12 +32,13 @@ async function criar(tabela: string, dados: object) {
   } catch { return null }
 }
 
-async function editar(tabela: string, id: string, dados: object) {
+async function editar(tabela: string, id: string, dados: object): Promise<boolean> {
   try {
-    await fetch(BASE + '/' + tabela + '?id=eq.' + id, {
+    const r = await fetch(BASE + '/' + tabela + '?id=eq.' + id, {
       method: 'PATCH', headers: HDR, body: JSON.stringify(dados)
     })
-  } catch {}
+    return r.ok
+  } catch { return false }
 }
 
 async function remover(tabela: string, id: string) {
@@ -904,7 +905,8 @@ export default function Obras() {
       valor_contrato: parseFloat(fObra.valor_contrato || '0'),
     }
     if (obraEditando) {
-      await editar('obras', obraEditando.id, dados)
+      const ok = await editar('obras', obraEditando.id, dados)
+      if (!ok) return alert('Não foi possível salvar as alterações. Tente novamente.')
       if (detalhe?.id === obraEditando.id) {
         setDetalhe({ ...detalhe, ...dados })
       }
@@ -1033,7 +1035,12 @@ export default function Obras() {
           <div className="flex gap-2 flex-wrap items-start">
             <button onClick={() => abrirEditarObra(detalhe)} className={btnEditSmCls}>✏️ Editar</button>
             <select value={detalhe.status}
-              onChange={async e => { await editar('obras', detalhe.id, { status: e.target.value }); setDetalhe({ ...detalhe, status: e.target.value }); carregar() }}
+              onChange={async e => {
+                const novoStatus = e.target.value
+                const ok = await editar('obras', detalhe.id, { status: novoStatus })
+                if (!ok) return alert('Não foi possível salvar o status. Tente novamente.')
+                setDetalhe({ ...detalhe, status: novoStatus }); carregar()
+              }}
               className={inputCls + ' w-auto text-xs py-1.5'}>
               {Object.entries(STATUS_NOME).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
             </select>

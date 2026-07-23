@@ -37,7 +37,7 @@ export async function POST(req: Request) {
   if (String(senha).length < 6) {
     return Response.json({ error: 'A senha deve ter pelo menos 6 caracteres' }, { status: 400 })
   }
-  const roleFinal = role === 'admin' ? 'admin' : 'usuario'
+  const roleFinal = role === 'admin' ? 'admin' : role === 'gerente_time' ? 'gerente_time' : 'usuario'
   const modulosFinal = Array.isArray(modulos_permitidos)
     ? modulos_permitidos.filter((m: string) => MODULOS_VALIDOS.includes(m))
     : MODULOS_VALIDOS

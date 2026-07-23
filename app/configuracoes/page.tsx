@@ -473,8 +473,8 @@ function UsuariosTab({ meuId }: { meuId: string }) {
                 <div className="text-[11px] text-on-surface-variant truncate">{u.email}{u.setor ? ` · ${u.setor}` : ''}</div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${u.role === 'admin' ? 'bg-primary/10 text-primary border-primary/20' : 'bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20'}`}>
-                  {u.role === 'admin' ? 'Admin' : 'Usuário'}
+                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${u.role === 'admin' ? 'bg-primary/10 text-primary border-primary/20' : u.role === 'gerente_time' ? 'bg-tertiary/10 text-tertiary border-tertiary/20' : 'bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20'}`}>
+                  {u.role === 'admin' ? 'Admin' : u.role === 'gerente_time' ? 'Gerente de Time' : 'Usuário'}
                 </span>
                 <button className="text-on-surface-variant hover:text-primary text-xs font-semibold px-2 py-1" onClick={() => abrirModalEditar(u)}>Editar</button>
                 {u.id !== meuId && (
@@ -515,6 +515,7 @@ function UsuariosTab({ meuId }: { meuId: string }) {
               <label className={labelCls}>Papel</label>
               <select className={inputCls} value={novo.role} onChange={e => setNovo({ ...novo, role: e.target.value })}>
                 <option value="usuario">Usuário comum</option>
+                <option value="gerente_time">Gerente de Time</option>
                 <option value="admin">Admin</option>
               </select>
             </div>

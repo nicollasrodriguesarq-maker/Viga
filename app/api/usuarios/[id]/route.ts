@@ -65,7 +65,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (nome !== undefined) dadosPerfil.nome = nome
   if (setor !== undefined) dadosPerfil.setor = setor || null
   if (email !== undefined) dadosPerfil.email = email
-  if (souAdmin && role !== undefined) dadosPerfil.role = role === 'admin' ? 'admin' : 'usuario'
+  if (souAdmin && role !== undefined) dadosPerfil.role = role === 'admin' ? 'admin' : role === 'gerente_time' ? 'gerente_time' : 'usuario'
   if (souAdmin && modulos_permitidos !== undefined) {
     dadosPerfil.modulos_permitidos = Array.isArray(modulos_permitidos)
       ? modulos_permitidos.filter((m: string) => MODULOS_VALIDOS.includes(m))

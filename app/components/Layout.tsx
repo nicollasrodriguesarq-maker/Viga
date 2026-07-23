@@ -11,6 +11,7 @@ interface NavItem {
   href: string
   disabled?: boolean
   modulo?: string
+  adminOnly?: boolean
 }
 
 const NAV: NavItem[] = [
@@ -21,7 +22,7 @@ const NAV: NavItem[] = [
   { icon: 'work', label: 'Orçamento', href: '/orcamento', modulo: 'orcamento' },
   { icon: 'inventory_2', label: 'Suprimentos', href: '/suprimentos', disabled: true },
   { icon: 'group', label: 'Clientes & CRM', href: '/crm', disabled: true },
-  { icon: 'assignment', label: 'Equipes & Tarefas', href: '/equipes', disabled: true },
+  { icon: 'assignment', label: 'Equipes & Times', href: '/equipes', adminOnly: true },
   { icon: 'calendar_today', label: 'Agenda', href: '/agenda', modulo: 'agenda' },
 ]
 
@@ -42,7 +43,10 @@ export default function Layout({ children, userEmail, onLogout, topbarSlot, sear
 
   useEffect(() => { obterMinhasPermissoes().then(setPermissoes) }, [])
 
-  const navVisivel = NAV.filter(item => !item.modulo || temAcessoModulo(permissoes, item.modulo))
+  const navVisivel = NAV.filter(item =>
+    (!item.modulo || temAcessoModulo(permissoes, item.modulo)) &&
+    (!item.adminOnly || permissoes?.role === 'admin')
+  )
 
   return (
     <div className="min-h-screen bg-background text-on-background font-body-md">

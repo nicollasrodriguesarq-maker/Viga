@@ -2,6 +2,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Layout from './components/Layout'
+import { obterMinhasPermissoes } from './lib/permissoes'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -38,7 +39,7 @@ const MODULOS = [
   { icon: '💼', nome: 'Orçamento', desc: 'Composição e proposta', href: '/orcamento', ativo: true },
   { icon: '📦', nome: 'Suprimentos', desc: 'Compras e estoque', href: '/suprimentos', ativo: false },
   { icon: '🤝', nome: 'CRM', desc: 'Clientes e vendas', href: '/crm', ativo: false },
-  { icon: '👥', nome: 'Equipes', desc: 'Tarefas e alocação', href: '/equipes', ativo: false },
+  { icon: '👥', nome: 'Equipes', desc: 'Tarefas e alocação', href: '/equipes', ativo: true, adminOnly: true },
   { icon: '📅', nome: 'Agenda', desc: 'Compromissos', href: '/agenda', ativo: true },
 ]
 
@@ -66,6 +67,7 @@ export default function Home() {
   const [cadastroSucesso, setCadastroSucesso] = useState(false)
 
   // Dashboard data
+  const [souAdmin, setSouAdmin] = useState(false)
   const [obrasAtivas, setObrasAtivas] = useState(0)
   const [faturamentoMes, setFaturamentoMes] = useState(0)
   const [aReceber, setAReceber] = useState(0)
@@ -93,7 +95,7 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (logado) carregarDashboard()
+    if (logado) { carregarDashboard(); obterMinhasPermissoes().then(perm => setSouAdmin(perm?.role === 'admin')) }
   }, [logado])
 
   async function carregarDashboard() {
@@ -389,7 +391,7 @@ export default function Home() {
         <div className="bg-surface-container rounded-2xl card-border p-lg mb-xl">
           <h3 className="font-headline text-headline-sm text-on-surface mb-md">Módulos do Sistema</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-md">
-            {MODULOS.map(mod => {
+            {MODULOS.filter(mod => !(mod as any).adminOnly || souAdmin).map(mod => {
               const conteudo = (
                 <>
                   <div className="text-2xl mb-2">{mod.icon}</div>

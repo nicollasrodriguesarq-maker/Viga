@@ -33,7 +33,7 @@ async function uploadNF(file: File, lancamentoDesc: string): Promise<string | nu
 
 const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const CAT_IN = ['Medição de obra', 'Adiantamento', 'Sinal de contrato', 'Parcela de contrato', 'Outros']
-const CAT_OUT = ['Material', 'Mão de obra', 'Terceiros', 'Aluguel', 'Equipamento', 'Imposto', 'Pessoal', 'Marketing', 'Administrativo', 'Investimento (aporte)', 'Resgate de investimento', 'Outros']
+const CAT_OUT = ['Medição de obra', 'Material', 'Mão de obra', 'Terceiros', 'Aluguel', 'Equipamento', 'Imposto', 'Pessoal', 'Marketing', 'Administrativo', 'Investimento (aporte)', 'Resgate de investimento', 'Outros']
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
 const labelCls = 'text-[11px] text-on-surface-variant font-semibold uppercase tracking-wide block mb-1.5'

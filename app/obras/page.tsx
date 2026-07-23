@@ -176,7 +176,10 @@ export default function Obras() {
   const [loading,  setLoading]  = useState(true)
   const [detalhe,  setDetalhe]  = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('resumo')
-  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | 'relatorio_pdf' | 'nova_visita' | 'editar_visita' | 'novo_funcionario' | 'editar_funcionario' | null>(null)
+  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | 'relatorio_pdf' | 'nova_visita' | 'editar_visita' | 'novo_funcionario' | 'editar_funcionario' | 'programar_pagamento' | null>(null)
+  const [medicaoProgramando, setMedicaoProgramando] = useState<any>(null)
+  const [dataProgramar, setDataProgramar] = useState('')
+  const [totalLiquidoProgramar, setTotalLiquidoProgramar] = useState(0)
   const [observacoesPdf, setObservacoesPdf] = useState('')
   const [filtro,   setFiltro]   = useState('todos')
   const [busca,    setBusca]    = useState('')
@@ -436,6 +439,37 @@ export default function Obras() {
     const medIt = await buscar('medicao_itens', '?order=created_at')
     setMedItens(medIt)
     alert('Medição salva!')
+  }
+
+  function abrirProgramarPagamento(medicao: any, totalLiquido: number) {
+    setMedicaoProgramando(medicao)
+    setDataProgramar(medicao.data_pagamento_programada || new Date().toISOString().slice(0, 10))
+    setTotalLiquidoProgramar(totalLiquido)
+    setJanela('programar_pagamento')
+  }
+  async function confirmarProgramarPagamento() {
+    if (!medicaoProgramando || !dataProgramar) return
+    if (medicaoProgramando.lancamento_id) {
+      await editar('lancamentos', medicaoProgramando.lancamento_id, { data_vencimento: dataProgramar })
+      await editar('medicoes', medicaoProgramando.id, { data_pagamento_programada: dataProgramar })
+    } else {
+      const dados = {
+        data: new Date().toISOString().slice(0, 10),
+        descricao: 'Medição ' + medicaoProgramando.numero + (medicaoProgramando.fornecedor ? ' — ' + medicaoProgramando.fornecedor : ''),
+        tipo: medicaoProgramando.tipo === 'fornecedor' ? 'saida' : 'entrada',
+        valor: totalLiquidoProgramar,
+        categoria: 'Medição de obra',
+        status: 'pendente',
+        data_vencimento: dataProgramar,
+        obra_id: detalhe.id,
+      }
+      const lanc = await criar('lancamentos', dados)
+      if (lanc?.id) await editar('medicoes', medicaoProgramando.id, { data_pagamento_programada: dataProgramar, lancamento_id: lanc.id })
+    }
+    setJanela(null); setMedicaoProgramando(null); setDataProgramar('')
+    const [med] = await Promise.all([buscar('medicoes', '?order=data.desc')])
+    setMedicoes(med)
+    if (medicaoAtiva) setMedicaoAtiva(med.find((m: any) => m.id === medicaoAtiva.id) || null)
   }
 
   async function gerarPDFMedicao(medicao: any, linhas: any[], obra: any) {
@@ -1517,7 +1551,17 @@ export default function Obras() {
                   <div className="text-sm font-bold text-on-surface">{medicaoAtiva.numero} — {medicaoAtiva.tipo === 'fornecedor' ? `Fornecedor: ${medicaoAtiva.fornecedor || '—'}` : 'Cliente'}</div>
                   <div className="text-[11px] text-on-surface-variant">{dataBR(medicaoAtiva.data)} · Retenção {(retPct * 100).toFixed(1)}%</div>
                 </div>
-                <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPDFMedicao(medicaoAtiva, linhas, detalhe)}>🖨️ Gerar Boletim PDF</button>
+                <div className="flex items-center gap-3 flex-wrap">
+                  {medicaoAtiva.lancamento_id ? (
+                    <div className="text-[11px] text-primary-container font-semibold">
+                      ✅ Programado para {dataBR(medicaoAtiva.data_pagamento_programada)}{' '}
+                      <button className="text-primary underline font-semibold" onClick={() => abrirProgramarPagamento(medicaoAtiva, totalLiquido)}>Alterar data</button>
+                    </div>
+                  ) : (
+                    <button className="bg-tertiary/10 border border-tertiary/30 text-tertiary rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-tertiary/20 transition-all cursor-pointer" onClick={() => abrirProgramarPagamento(medicaoAtiva, totalLiquido)}>📅 Programar Pagamento</button>
+                  )}
+                  <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPDFMedicao(medicaoAtiva, linhas, detalhe)}>🖨️ Gerar Boletim PDF</button>
+                </div>
               </div>
               {linhas.length === 0 ? (
                 <div className="text-center py-8 text-on-surface-variant">Nenhum item para medir (verifique o fornecedor filtrado)</div>
@@ -1746,6 +1790,26 @@ export default function Obras() {
               <div className="flex gap-2 justify-end">
                 <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
                 <button className={btnPrimaryCls} onClick={() => { setJanela(null); gerarPDFObra(detalhe, observacoesPdf) }}>Gerar PDF</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* modal programar pagamento da medição */}
+        {janela === 'programar_pagamento' && medicaoProgramando && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[420px]">
+              <div className="text-base font-bold text-on-surface mb-1.5">📅 Programar Pagamento</div>
+              <div className="text-body-sm text-on-surface-variant mb-5">
+                {medicaoProgramando.tipo === 'fornecedor' ? 'Saída' : 'Entrada'} de {moeda(totalLiquidoProgramar)} referente à medição {medicaoProgramando.numero}
+              </div>
+              <div className="mb-5">
+                <label className={labelCls}>Data programada *</label>
+                <input className={inputCls} type="date" value={dataProgramar} onChange={e => setDataProgramar(e.target.value)} />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setMedicaoProgramando(null) }}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={confirmarProgramarPagamento}>Confirmar</button>
               </div>
             </div>
           </div>

@@ -75,6 +75,8 @@ export default function ObrasMobile() {
   const [fMedicao, setFMedicao] = useState(FMED_VAZIO)
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
+  const [mostrarProgramar, setMostrarProgramar] = useState(false)
+  const [dataProgramar, setDataProgramar] = useState('')
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -214,6 +216,28 @@ export default function ObrasMobile() {
     alert('Medição salva!')
   }
 
+  async function confirmarProgramarPagamento(totalLiquido: number) {
+    if (!medicaoAtiva || !dataProgramar) return
+    if (medicaoAtiva.lancamento_id) {
+      await editar('lancamentos', medicaoAtiva.lancamento_id, { data_vencimento: dataProgramar })
+      await editar('medicoes', medicaoAtiva.id, { data_pagamento_programada: dataProgramar })
+    } else {
+      const dados = {
+        data: new Date().toISOString().slice(0, 10),
+        descricao: 'Medição ' + medicaoAtiva.numero + (medicaoAtiva.fornecedor ? ' — ' + medicaoAtiva.fornecedor : ''),
+        tipo: medicaoAtiva.tipo === 'fornecedor' ? 'saida' : 'entrada',
+        valor: totalLiquido, categoria: 'Medição de obra', status: 'pendente',
+        data_vencimento: dataProgramar, obra_id: detalhe.id,
+      }
+      const lanc = await criar('lancamentos', dados)
+      if (lanc?.id) await editar('medicoes', medicaoAtiva.id, { data_pagamento_programada: dataProgramar, lancamento_id: lanc.id })
+    }
+    const med = await buscar('medicoes', '?order=data.desc')
+    setMedicoes(med)
+    setMedicaoAtiva(med.find((m: any) => m.id === medicaoAtiva.id) || null)
+    setMostrarProgramar(false)
+  }
+
   // ── Tela: Nova Medição ──────────────────────────────────────────
   if (tela === 'novaMedicao' && detalhe) {
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
@@ -308,8 +332,35 @@ export default function ObrasMobile() {
               <span className="font-black text-primary">{moeda(totalPeriodo)}</span>
             </div>
           )}
+          {medicaoAtiva.lancamento_id ? (
+            <div className="text-[12px] text-primary-container font-semibold text-center">
+              ✅ Programado para {dataBR(medicaoAtiva.data_pagamento_programada)}{' '}
+              <button className="text-primary underline font-semibold" onClick={() => { setDataProgramar(medicaoAtiva.data_pagamento_programada || new Date().toISOString().slice(0, 10)); setMostrarProgramar(true) }}>Alterar data</button>
+            </div>
+          ) : (
+            <button className={btnSecondaryCls}
+              onClick={() => { setDataProgramar(new Date().toISOString().slice(0, 10)); setMostrarProgramar(true) }}>📅 Programar Pagamento</button>
+          )}
           <button className={btnPrimaryCls} onClick={() => salvarPreenchimentoMedicao(itensFiltrados)}>Salvar Medição</button>
         </div>
+        {mostrarProgramar && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setMostrarProgramar(false)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-6 w-full max-w-[400px]">
+              <div className="text-base font-bold text-on-surface mb-1.5">📅 Programar Pagamento</div>
+              <div className="text-body-sm text-on-surface-variant mb-4">
+                {medicaoAtiva.tipo === 'fornecedor' ? 'Saída' : 'Entrada'} de {moeda(totalLiquido)} referente à medição {medicaoAtiva.numero}
+              </div>
+              <div className="mb-5">
+                <label className={labelCls}>Data programada *</label>
+                <input className={inputCls} type="date" value={dataProgramar} onChange={e => setDataProgramar(e.target.value)} />
+              </div>
+              <div className="flex gap-2">
+                <button className={btnSecondaryCls + ' flex-1'} onClick={() => setMostrarProgramar(false)}>Cancelar</button>
+                <button className={btnPrimaryCls + ' flex-1'} onClick={() => confirmarProgramarPagamento(totalLiquido)}>Confirmar</button>
+              </div>
+            </div>
+          </div>
+        )}
       </MobileShell>
     )
   }

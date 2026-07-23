@@ -73,7 +73,7 @@ function exportarExcel(lancamentos: any[], obras: any[], mes: string) {
 }
 
 const CAT_IN  = ['Medição de obra','Adiantamento','Sinal de contrato','Parcela de contrato','Outros']
-const CAT_OUT = ['Material','Mão de obra','Terceiros','Aluguel','Equipamento','Imposto','Pessoal','Marketing','Administrativo','Investimento (aporte)','Resgate de investimento','Outros']
+const CAT_OUT = ['Medição de obra','Material','Mão de obra','Terceiros','Aluguel','Equipamento','Imposto','Pessoal','Marketing','Administrativo','Investimento (aporte)','Resgate de investimento','Outros']
 
 const LZ = { data: new Date().toISOString().slice(0,10), descricao: '', tipo: 'saida', valor: '', categoria: '', conta: '', status: 'pago', data_vencimento: '', obra_id: '', servico_id: '', nf_numero: '', nf_url: '', nf_arquivo: null as File | null }
 const CZ = { nome: '', banco: '', tipo: 'corrente', saldo_inicial: '' }

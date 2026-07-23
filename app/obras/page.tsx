@@ -46,6 +46,21 @@ async function remover(tabela: string, id: string) {
   } catch {}
 }
 
+async function uploadFotoVisita(file: File): Promise<string | null> {
+  const ext = file.name.split('.').pop()
+  const nome = `visita_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
+  const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/relatorio-visita-fotos/${nome}`, {
+    method: 'POST',
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
+    body: file,
+  })
+  if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/relatorio-visita-fotos/${nome}`
+  return null
+}
+
+const CLIMA_OPCOES = [{ v: 'ensolarado', l: '☀️ Ensolarado' }, { v: 'nublado', l: '☁️ Nublado' }, { v: 'chuva', l: '🌧️ Chuva' }, { v: 'sem_expediente', l: '🚫 Sem expediente' }]
+const FRV_VAZIO = { data: new Date().toISOString().slice(0, 10), clima: '', descricao: '', pendencias: '', equipe_presente: [] as string[], nomeEquipeAtual: '' }
+
 const STATUS_NOME: Record<string, string> = {
   captacao: 'Em Captação',
   em_execucao: 'Em Execução',
@@ -149,7 +164,7 @@ export default function Obras() {
   const [loading,  setLoading]  = useState(true)
   const [detalhe,  setDetalhe]  = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('resumo')
-  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | 'relatorio_pdf' | null>(null)
+  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | 'relatorio_pdf' | 'nova_visita' | 'editar_visita' | null>(null)
   const [observacoesPdf, setObservacoesPdf] = useState('')
   const [filtro,   setFiltro]   = useState('todos')
   const [busca,    setBusca]    = useState('')
@@ -173,6 +188,13 @@ export default function Obras() {
   const [atribuicoes, setAtribuicoes] = useState<any[]>([])
   const [souAdmin, setSouAdmin] = useState(false)
   const [souGerenteTime, setSouGerenteTime] = useState(false)
+
+  const [relatoriosVisita, setRelatoriosVisita] = useState<any[]>([])
+  const [fRv, setFRv] = useState(FRV_VAZIO)
+  const [fotosRv, setFotosRv] = useState<{ file?: File; url?: string; descricao: string }[]>([])
+  const [enviandoRv, setEnviandoRv] = useState(false)
+  const [rvEditando, setRvEditando] = useState<any>(null)
+  const [buscaRv, setBuscaRv] = useState('')
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) {
@@ -204,7 +226,7 @@ export default function Obras() {
 
   async function carregar() {
     setLoading(true)
-    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt, u, atr] = await Promise.all([
+    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt, u, atr, rv] = await Promise.all([
       buscar('obras', '?order=created_at.desc'),
       buscar('lancamentos', '?order=data.desc'),
       buscar('gastos_cartao', '?order=data.desc'),
@@ -217,6 +239,7 @@ export default function Obras() {
       buscar('medicao_itens', '?order=created_at'),
       buscar('usuarios', '?select=id,nome,email,role&order=nome'),
       buscar('obra_atribuicoes', '?order=created_at'),
+      buscar('obra_relatorios_visita', '?order=data.desc'),
     ])
     setObras(o)
     setLancs(l)
@@ -230,7 +253,50 @@ export default function Obras() {
     setMedItens(medIt)
     setUsuarios(u)
     setAtribuicoes(atr)
+    setRelatoriosVisita(rv)
     setLoading(false)
+  }
+
+  // ── Relatório de Visita ──────────────────────────────────────
+  function adicionarNomeEquipe() {
+    if (!fRv.nomeEquipeAtual.trim()) return
+    setFRv({ ...fRv, equipe_presente: [...fRv.equipe_presente, fRv.nomeEquipeAtual.trim()], nomeEquipeAtual: '' })
+  }
+  function removerNomeEquipe(i: number) {
+    setFRv({ ...fRv, equipe_presente: fRv.equipe_presente.filter((_, idx) => idx !== i) })
+  }
+  function abrirNovaVisita() {
+    setRvEditando(null); setFRv(FRV_VAZIO); setFotosRv([])
+    setJanela('nova_visita')
+  }
+  function abrirEditarVisita(v: any) {
+    setRvEditando(v)
+    setFRv({ data: v.data, clima: v.clima || '', descricao: v.descricao || '', pendencias: v.pendencias || '', equipe_presente: v.equipe_presente || [], nomeEquipeAtual: '' })
+    setFotosRv((v.fotos || []).map((f: any) => ({ url: f.url, descricao: f.descricao || '' })))
+    setJanela('editar_visita')
+  }
+  async function excluirVisita(v: any) {
+    if (!confirm('Excluir este relatório de visita?')) return
+    await remover('obra_relatorios_visita', v.id)
+    await carregar()
+  }
+  async function salvarRelatorioVisita() {
+    if (!detalhe) return
+    setEnviandoRv(true)
+    const fotos: { url: string; descricao: string }[] = []
+    for (const f of fotosRv) {
+      const url = f.url || (f.file ? await uploadFotoVisita(f.file) : null)
+      if (url) fotos.push({ url, descricao: f.descricao || '' })
+    }
+    const dados = {
+      obra_id: detalhe.id, data: fRv.data, clima: fRv.clima || null, descricao: fRv.descricao || null,
+      pendencias: fRv.pendencias || null, equipe_presente: fRv.equipe_presente, fotos,
+    }
+    if (rvEditando) { await editar('obra_relatorios_visita', rvEditando.id, dados) }
+    else { await criar('obra_relatorios_visita', dados) }
+    setEnviandoRv(false); setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null)
+    setJanela(null)
+    await carregar()
   }
 
   function atribuicoesDaObra(obraId: string) {
@@ -846,6 +912,11 @@ export default function Obras() {
     const itensDoOrcamento = orcamentoObra ? orcItens.filter(i => i.orcamento_id === orcamentoObra.id) : []
     const medicoesObra = medicoes.filter(m => m.obra_id === detalhe.id)
     const fornecedoresDisponiveis = Array.from(new Set(itensDoOrcamento.map(i => i.fornecedor).filter(Boolean))) as string[]
+    const visitasObra = relatoriosVisita.filter(r => r.obra_id === detalhe.id).filter(v => {
+      if (!buscaRv) return true
+      const alvo = ((v.descricao || '') + ' ' + (v.pendencias || '') + ' ' + dataBR(v.data)).toLowerCase()
+      return alvo.includes(buscaRv.toLowerCase())
+    })
 
     return (
       <Layout userEmail={userEmail} onLogout={sair}>
@@ -922,7 +993,7 @@ export default function Obras() {
 
         {/* abas */}
         <div className="flex gap-2 mb-lg flex-wrap">
-          {([['resumo', '📋 Resumo'], ['equipe', '👷 Equipe'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições']] as [string, string][]).map(([id, nome]) => (
+          {([['resumo', '📋 Resumo'], ['equipe', '👷 Equipe'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições'], ['visitas', '📷 Visitas']] as [string, string][]).map(([id, nome]) => (
             <button key={id} className={abaDetalhe === id ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe(id)}>{nome}</button>
           ))}
         </div>
@@ -1348,6 +1419,131 @@ export default function Obras() {
             </div>
           )
         })()}
+
+        {/* aba visitas */}
+        {abaDetalhe === 'visitas' && (
+          <div className={sectionCls}>
+            <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
+              <div>
+                <div className="text-sm font-bold text-on-surface">📷 Relatórios de Visita</div>
+                <div className="text-body-sm text-on-surface-variant mt-0.5">Registros de acompanhamento da obra com fotos e observações</div>
+              </div>
+              <button className={btnPrimaryCls} onClick={abrirNovaVisita}>+ Relatório de Visita</button>
+            </div>
+            <input className={inputCls + ' mb-4'} placeholder="Pesquisar por data, descrição ou pendência..." value={buscaRv} onChange={e => setBuscaRv(e.target.value)} />
+            {visitasObra.length === 0 ? (
+              <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum relatório de visita encontrado</div>
+            ) : (
+              <div className="flex flex-col gap-3">
+                {visitasObra.map(v => {
+                  const climaLabel = CLIMA_OPCOES.find(c => c.v === v.clima)?.l || v.clima
+                  return (
+                    <div key={v.id} className="bg-surface-container-low border border-outline-variant rounded-xl p-4">
+                      <div className="flex justify-between items-start gap-2 mb-1.5">
+                        <div>
+                          <span className="font-semibold text-sm text-on-surface">{dataBR(v.data)}</span>
+                          {climaLabel && <span className="text-[11px] text-on-surface-variant ml-2">{climaLabel}</span>}
+                        </div>
+                        <div className="flex gap-1.5 shrink-0">
+                          <button className={btnEditSmCls} onClick={() => abrirEditarVisita(v)}>✏️</button>
+                          <button className={btnDangerSmCls} onClick={() => excluirVisita(v)}>×</button>
+                        </div>
+                      </div>
+                      {v.descricao && <div className="text-body-sm text-on-surface-variant mb-1.5">{v.descricao}</div>}
+                      {v.pendencias && <div className="text-[11px] text-tertiary mb-1.5">⚠️ {v.pendencias}</div>}
+                      <div className="text-[11px] text-on-surface-variant mb-2">{v.equipe_presente?.length || 0} pessoa(s) na equipe · {v.fotos?.length || 0} foto(s)</div>
+                      {v.fotos?.length > 0 && (
+                        <div className="flex gap-2 flex-wrap">
+                          {v.fotos.map((f: any, i: number) => (
+                            <div key={i} className="w-16 h-16 rounded-lg overflow-hidden border border-outline-variant relative group">
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img src={f.url} alt={f.descricao || ''} className="w-full h-full object-cover" title={f.descricao || ''} />
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* modal nova/editar visita */}
+        {(janela === 'nova_visita' || janela === 'editar_visita') && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[560px] max-h-[90vh] overflow-y-auto">
+              <div className="text-base font-bold text-on-surface mb-5">{janela === 'editar_visita' ? '✏️ Editar Relatório de Visita' : '📷 Novo Relatório de Visita'}</div>
+              <div className="flex flex-col gap-3.5">
+                <div>
+                  <label className={labelCls}>Data</label>
+                  <input className={inputCls} type="date" value={fRv.data} onChange={e => setFRv({ ...fRv, data: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Clima</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {CLIMA_OPCOES.map(c => (
+                      <button key={c.v} type="button"
+                        className={`px-3 py-2.5 rounded-lg border text-sm font-semibold ${fRv.clima === c.v ? 'bg-primary/10 text-primary border-primary/30' : 'bg-surface-container-low text-on-surface-variant border-outline-variant'}`}
+                        onClick={() => setFRv({ ...fRv, clima: c.v })}>{c.l}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Descrição / Observações</label>
+                  <textarea className={inputCls + ' min-h-[80px] resize-y'} placeholder="O que foi verificado ou feito na visita" value={fRv.descricao} onChange={e => setFRv({ ...fRv, descricao: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Pendências</label>
+                  <textarea className={inputCls + ' min-h-[60px] resize-y'} placeholder="Pendências / próximos passos" value={fRv.pendencias} onChange={e => setFRv({ ...fRv, pendencias: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Equipe presente</label>
+                  <div className="flex gap-2">
+                    <input className={inputCls} placeholder="Nome" value={fRv.nomeEquipeAtual} onChange={e => setFRv({ ...fRv, nomeEquipeAtual: e.target.value })}
+                      onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); adicionarNomeEquipe() } }} />
+                    <button type="button" className="bg-primary/10 text-primary rounded-lg px-3 text-sm font-bold shrink-0" onClick={adicionarNomeEquipe}>+</button>
+                  </div>
+                  {fRv.equipe_presente.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {fRv.equipe_presente.map((n, i) => (
+                        <span key={i} className="bg-surface-container-low border border-outline-variant rounded-full px-2.5 py-1 text-xs text-on-surface flex items-center gap-1">
+                          {n} <button onClick={() => removerNomeEquipe(i)} className="text-on-surface-variant">×</button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div>
+                  <label className={labelCls}>Fotos</label>
+                  <input type="file" accept="image/*" multiple
+                    onChange={e => setFotosRv([...fotosRv, ...Array.from(e.target.files || []).map(file => ({ file, descricao: '' }))])}
+                    className={inputCls} />
+                  {fotosRv.length > 0 && (
+                    <div className="flex flex-col gap-2 mt-2.5">
+                      {fotosRv.map((f, i) => (
+                        <div key={i} className="flex items-center gap-2.5 bg-surface-container-low border border-outline-variant rounded-lg p-2.5">
+                          <div className="w-11 h-11 rounded-lg bg-surface-container border border-outline-variant overflow-hidden shrink-0 flex items-center justify-center">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={f.url || (f.file ? URL.createObjectURL(f.file) : '')} alt="" className="w-full h-full object-cover" />
+                          </div>
+                          <input className={inputCls} placeholder="Descrição da foto" value={f.descricao}
+                            onChange={e => setFotosRv(fotosRv.map((x, idx) => idx === i ? { ...x, descricao: e.target.value } : x))} />
+                          <button className="text-error text-xs font-semibold shrink-0" onClick={() => setFotosRv(fotosRv.filter((_, idx) => idx !== i))}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2.5 justify-end mt-6">
+                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null) }}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={salvarRelatorioVisita} disabled={enviandoRv}>{enviandoRv ? 'Enviando...' : (janela === 'editar_visita' ? 'Salvar Alterações' : 'Salvar Relatório')}</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* modal nova medição */}
         {janela === 'nova_medicao' && orcamentoObra && (

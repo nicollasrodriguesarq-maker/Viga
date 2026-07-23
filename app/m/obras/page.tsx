@@ -16,6 +16,9 @@ async function criar(tabela: string, dados: object) {
 async function editar(tabela: string, id: string, dados: object) {
   try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }) } catch {}
 }
+async function remover(tabela: string, id: string) {
+  try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }) } catch {}
+}
 
 async function uploadFotoVisita(file: File): Promise<string | null> {
   const ext = file.name.split('.').pop()
@@ -60,8 +63,10 @@ export default function ObrasMobile() {
   const [aba, setAba] = useState('resumo')
   const [tela, setTela] = useState<string | null>(null)
   const [fRv, setFRv] = useState(FRV_VAZIO)
-  const [fotosRv, setFotosRv] = useState<File[]>([])
+  const [fotosRv, setFotosRv] = useState<{ file?: File; url?: string; descricao: string }[]>([])
   const [enviandoRv, setEnviandoRv] = useState(false)
+  const [rvEditando, setRvEditando] = useState<any>(null)
+  const [buscaRv, setBuscaRv] = useState('')
   const [fMedicao, setFMedicao] = useState(FMED_VAZIO)
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
@@ -119,17 +124,32 @@ export default function ObrasMobile() {
   async function salvarRelatorioVisita() {
     if (!detalhe) return
     setEnviandoRv(true)
-    const urls: string[] = []
+    const fotos: { url: string; descricao: string }[] = []
     for (const f of fotosRv) {
-      const url = await uploadFotoVisita(f)
-      if (url) urls.push(url)
+      const url = f.url || (f.file ? await uploadFotoVisita(f.file) : null)
+      if (url) fotos.push({ url, descricao: f.descricao || '' })
     }
-    await criar('obra_relatorios_visita', {
+    const dados = {
       obra_id: detalhe.id, data: fRv.data, clima: fRv.clima || null, descricao: fRv.descricao || null,
-      pendencias: fRv.pendencias || null, equipe_presente: fRv.equipe_presente, fotos: urls, criado_por: meuId || null,
-    })
-    setEnviandoRv(false); setFRv(FRV_VAZIO); setFotosRv([])
+      pendencias: fRv.pendencias || null, equipe_presente: fRv.equipe_presente, fotos,
+    }
+    if (rvEditando) { await editar('obra_relatorios_visita', rvEditando.id, dados) }
+    else { await criar('obra_relatorios_visita', { ...dados, criado_por: meuId || null }) }
+    setEnviandoRv(false); setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null)
     setTela('detalhe'); setAba('visitas')
+    await carregar()
+  }
+
+  function abrirEditarVisita(v: any) {
+    setRvEditando(v)
+    setFRv({ data: v.data, clima: v.clima || '', descricao: v.descricao || '', pendencias: v.pendencias || '', equipe_presente: v.equipe_presente || [], nomeEquipeAtual: '' })
+    setFotosRv((v.fotos || []).map((f: any) => ({ url: f.url, descricao: f.descricao || '' })))
+    setTela('novaVisita')
+  }
+
+  async function excluirVisita(v: any) {
+    if (!confirm('Excluir este relatório de visita?')) return
+    await remover('obra_relatorios_visita', v.id)
     await carregar()
   }
 
@@ -290,7 +310,7 @@ export default function ObrasMobile() {
   // ── Tela: Nova Visita ────────────────────────────────────────────
   if (tela === 'novaVisita' && detalhe) {
     return (
-      <MobileShell title="Relatório de Visita">
+      <MobileShell title={rvEditando ? '✏️ Editar Relatório' : 'Relatório de Visita'}>
         <div className="p-4 flex flex-col gap-3.5 pb-8">
           <div>
             <label className={labelCls}>Data</label>
@@ -333,12 +353,28 @@ export default function ObrasMobile() {
           </div>
           <div>
             <label className={labelCls}>Fotos</label>
-            <input type="file" accept="image/*" capture="environment" multiple onChange={e => setFotosRv(Array.from(e.target.files || []))} className={fileCls} />
-            {fotosRv.length > 0 && <div className="text-xs text-primary mt-1.5">📎 {fotosRv.length} foto(s) selecionada(s)</div>}
+            <input type="file" accept="image/*" capture="environment" multiple
+              onChange={e => setFotosRv([...fotosRv, ...Array.from(e.target.files || []).map(file => ({ file, descricao: '' }))])}
+              className={fileCls} />
+            {fotosRv.length > 0 && (
+              <div className="flex flex-col gap-2 mt-2.5">
+                {fotosRv.map((f, i) => (
+                  <div key={i} className="flex items-center gap-2.5 bg-surface-container-low border border-outline-variant rounded-lg p-2.5">
+                    <div className="w-11 h-11 rounded-lg bg-surface-container border border-outline-variant overflow-hidden shrink-0 flex items-center justify-center">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={f.url || (f.file ? URL.createObjectURL(f.file) : '')} alt="" className="w-full h-full object-cover" />
+                    </div>
+                    <input className={inputCls} placeholder="Descrição da foto" value={f.descricao}
+                      onChange={e => setFotosRv(fotosRv.map((x, idx) => idx === i ? { ...x, descricao: e.target.value } : x))} />
+                    <button className="text-error text-xs font-semibold shrink-0" onClick={() => setFotosRv(fotosRv.filter((_, idx) => idx !== i))}>×</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex flex-col gap-2 mt-2">
             <button className={btnPrimaryCls} onClick={salvarRelatorioVisita} disabled={enviandoRv}>{enviandoRv ? 'Enviando...' : 'Salvar Relatório'}</button>
-            <button className={btnSecondaryCls} onClick={() => { setTela('detalhe'); setFRv(FRV_VAZIO); setFotosRv([]) }}>Cancelar</button>
+            <button className={btnSecondaryCls} onClick={() => { setTela('detalhe'); setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null) }}>Cancelar</button>
           </div>
         </div>
       </MobileShell>
@@ -408,30 +444,41 @@ export default function ObrasMobile() {
             </div>
           )}
 
-          {aba === 'visitas' && (
-            <div className="flex flex-col gap-3">
-              <button className={btnPrimaryCls} onClick={() => setTela('novaVisita')}>+ Relatório de Visita</button>
-              {visitasObra.length === 0 ? (
-                <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhum relatório de visita ainda</div>
-              ) : visitasObra.map(v => {
-                const climaLabel = CLIMA_OPCOES.find(c => c.v === v.clima)?.l || v.clima
-                return (
-                  <div key={v.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
-                    <div className="flex justify-between items-center mb-1.5">
-                      <span className="font-semibold text-sm text-on-surface">{new Date(v.data + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
-                      {climaLabel && <span className="text-[11px] text-on-surface-variant">{climaLabel}</span>}
+          {aba === 'visitas' && (() => {
+            const visitasFiltradas = visitasObra.filter(v => {
+              if (!buscaRv) return true
+              const alvo = ((v.descricao || '') + ' ' + (v.pendencias || '') + ' ' + dataBR(v.data)).toLowerCase()
+              return alvo.includes(buscaRv.toLowerCase())
+            })
+            return (
+              <div className="flex flex-col gap-3">
+                <button className={btnPrimaryCls} onClick={() => { setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null); setTela('novaVisita') }}>+ Relatório de Visita</button>
+                <input className={inputCls} placeholder="Pesquisar por data, descrição ou pendência..." value={buscaRv} onChange={e => setBuscaRv(e.target.value)} />
+                {visitasFiltradas.length === 0 ? (
+                  <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhum relatório de visita encontrado</div>
+                ) : visitasFiltradas.map(v => {
+                  const climaLabel = CLIMA_OPCOES.find(c => c.v === v.clima)?.l || v.clima
+                  return (
+                    <div key={v.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
+                      <div className="flex justify-between items-center mb-1.5">
+                        <span className="font-semibold text-sm text-on-surface">{new Date(v.data + 'T00:00:00').toLocaleDateString('pt-BR')}</span>
+                        {climaLabel && <span className="text-[11px] text-on-surface-variant">{climaLabel}</span>}
+                      </div>
+                      {v.descricao && <div className="text-body-sm text-on-surface-variant mb-1.5">{v.descricao}</div>}
+                      {v.pendencias && <div className="text-[11px] text-tertiary mb-1.5">⚠️ {v.pendencias}</div>}
+                      <div className="flex justify-between items-center text-[11px] text-on-surface-variant">
+                        <span>{v.equipe_presente?.length || 0} pessoa(s) · {v.fotos?.length || 0} foto(s)</span>
+                        <div className="flex gap-3">
+                          <button className="text-primary font-semibold" onClick={() => abrirEditarVisita(v)}>Editar</button>
+                          <button className="text-error font-semibold" onClick={() => excluirVisita(v)}>Excluir</button>
+                        </div>
+                      </div>
                     </div>
-                    {v.descricao && <div className="text-body-sm text-on-surface-variant mb-1.5">{v.descricao}</div>}
-                    {v.pendencias && <div className="text-[11px] text-tertiary mb-1.5">⚠️ {v.pendencias}</div>}
-                    <div className="flex justify-between text-[11px] text-on-surface-variant">
-                      <span>{v.equipe_presente?.length || 0} pessoa(s)</span>
-                      <span>{v.fotos?.length || 0} foto(s)</span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
+                  )
+                })}
+              </div>
+            )
+          })()}
 
           {aba === 'medicoes' && (
             !orcamentoObra ? (

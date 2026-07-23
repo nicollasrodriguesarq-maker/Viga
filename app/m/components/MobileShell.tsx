@@ -32,10 +32,20 @@ export default function MobileShell({ children, title }: MobileShellProps) {
 
   const navVisivel = NAV.filter(item => !item.modulo || temAcessoModuloApp(permissoes, item.modulo))
 
+  function sair() {
+    localStorage.removeItem('viga_token')
+    localStorage.removeItem('viga_refresh_token')
+    localStorage.removeItem('viga_email')
+    window.location.href = '/'
+  }
+
   return (
     <div className="min-h-screen bg-background text-on-background font-body-md flex flex-col">
-      <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-sm px-4 h-14 flex items-center border-b border-outline-variant">
+      <header className="sticky top-0 z-40 bg-background/95 backdrop-blur-sm px-4 h-14 flex items-center justify-between border-b border-outline-variant">
         <h1 className="font-headline text-headline-sm text-on-surface truncate">{title}</h1>
+        <button onClick={sair} className="text-on-surface-variant shrink-0 ml-2" aria-label="Sair">
+          <span className="material-symbols-outlined text-[22px]">logout</span>
+        </button>
       </header>
 
       <main className="flex-1 overflow-y-auto custom-scrollbar pb-[calc(4.5rem+env(safe-area-inset-bottom))]">

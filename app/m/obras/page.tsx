@@ -35,6 +35,7 @@ async function uploadFotoVisita(file: File): Promise<string | null> {
 const moeda = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dataBR = (v: string) => v ? new Date(v + 'T00:00:00').toLocaleDateString('pt-BR') : '—'
 const STATUS_NOME: Record<string, string> = { captacao: 'Em Captação', em_execucao: 'Em Execução', pausada: 'Pausada', concluida: 'Concluída', cancelada: 'Cancelada' }
+const SERV_STATUS: Record<string, string> = { pendente: 'Pendente', em_execucao: 'Em Execução', concluido: 'Concluído', cancelado: 'Cancelado' }
 const CLIMA_OPCOES = [{ v: 'ensolarado', l: '☀️ Ensolarado' }, { v: 'nublado', l: '☁️ Nublado' }, { v: 'chuva', l: '🌧️ Chuva' }, { v: 'sem_expediente', l: '🚫 Sem expediente' }]
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -67,6 +68,7 @@ export default function ObrasMobile() {
   const [enviandoRv, setEnviandoRv] = useState(false)
   const [rvEditando, setRvEditando] = useState<any>(null)
   const [buscaRv, setBuscaRv] = useState('')
+  const [buscaMed, setBuscaMed] = useState('')
   const [fMedicao, setFMedicao] = useState(FMED_VAZIO)
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
@@ -418,7 +420,7 @@ export default function ObrasMobile() {
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {[['resumo', '📋 Resumo'], ['visitas', '📷 Visitas'], ['medicoes', '📐 Medições'], ['nf', '🧾 NF']].map(([id, nome]) => (
+            {[['resumo', '📋 Resumo'], ['visitas', '📷 Visitas'], ['medicoes', '📐 Medições'], ['servicos', '🔧 Serviços'], ['nf', '🧾 NF']].map(([id, nome]) => (
               <button key={id} onClick={() => setAba(id)}
                 className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${aba === id ? 'bg-primary/10 text-primary border-primary/30' : 'bg-surface-container text-on-surface-variant border-outline-variant'}`}>
                 {nome}
@@ -441,6 +443,30 @@ export default function ObrasMobile() {
                   <span className="font-semibold text-on-surface text-right">{v}</span>
                 </div>
               ))}
+            </div>
+          )}
+
+          {aba === 'servicos' && (
+            <div className="flex flex-col gap-3">
+              {svs.length === 0 ? (
+                <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado</div>
+              ) : svs.map(sv => {
+                const vp = parseFloat(sv.valor_previsto || 0)
+                const vr = parseFloat(sv.valor_realizado || 0)
+                return (
+                  <div key={sv.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
+                    <div className="flex justify-between items-start gap-2 mb-1.5">
+                      <span className="font-semibold text-sm text-on-surface">{sv.nome}</span>
+                      <span className="text-[10px] font-semibold text-on-surface-variant uppercase shrink-0">{SERV_STATUS[sv.status] || sv.status}</span>
+                    </div>
+                    {sv.observacao && <div className="text-[11px] text-on-surface-variant mb-1.5">{sv.observacao}</div>}
+                    <div className="flex justify-between text-[11px] text-on-surface-variant">
+                      <span>Previsto: {moeda(vp)}</span>
+                      <span>Realizado: {moeda(vr)}</span>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
 
@@ -486,9 +512,10 @@ export default function ObrasMobile() {
             ) : (
               <div className="flex flex-col gap-3">
                 <button className={btnPrimaryCls} onClick={() => { setFMedicao(FMED_VAZIO); setTela('novaMedicao') }}>+ Nova Medição</button>
-                {medicoesObra.length === 0 ? (
-                  <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhuma medição ainda</div>
-                ) : medicoesObra.map(med => {
+                <input className={inputCls} placeholder="Pesquisar por número ou fornecedor..." value={buscaMed} onChange={e => setBuscaMed(e.target.value)} />
+                {medicoesObra.filter(m => !buscaMed || ((m.numero || '') + ' ' + (m.fornecedor || '')).toLowerCase().includes(buscaMed.toLowerCase())).length === 0 ? (
+                  <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhuma medição encontrada</div>
+                ) : medicoesObra.filter(m => !buscaMed || ((m.numero || '') + ' ' + (m.fornecedor || '')).toLowerCase().includes(buscaMed.toLowerCase())).map(med => {
                   const itensDoOrcamento = orcItens.filter(i => i.orcamento_id === orcamentoObra.id)
                   const itensFiltrados = itensDoOrcamento.filter(i => med.tipo !== 'fornecedor' || !med.fornecedor || i.fornecedor === med.fornecedor)
                   return (

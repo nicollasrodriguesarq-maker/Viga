@@ -163,18 +163,18 @@ export default function ObrasMobile() {
   }
 
   // ── Medições ──────────────────────────────────────────────────
-  function ultimoRegistro(orcamentoItemId: string, medicaoIdAtual?: string) {
+  function ultimoRegistro(orcamentoItemId: string, medicaoIdAtual: string | undefined, tipo: string, fornecedor?: string | null) {
     return medItens
       .filter(mi => mi.orcamento_item_id === orcamentoItemId && mi.medicao_id !== medicaoIdAtual)
       .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
-      .filter(mi => mi.medicao)
+      .filter(mi => mi.medicao && mi.medicao.tipo === tipo && (tipo !== 'fornecedor' || mi.medicao.fornecedor === fornecedor))
       .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0] || null
   }
   function abrirPreenchimentoMedicao(medicao: any, itensFiltrados: any[]) {
     const preench: Record<string, { valor_base: string; percentual: string }> = {}
     itensFiltrados.forEach(item => {
       const existente = medItens.find(mi => mi.medicao_id === medicao.id && mi.orcamento_item_id === item.id)
-      const ultimo = ultimoRegistro(item.id, medicao.id)
+      const ultimo = ultimoRegistro(item.id, medicao.id, medicao.tipo, medicao.fornecedor)
       preench[item.id] = {
         valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(parseFloat(item.total_item || 0))),
         percentual: existente ? String(existente.percentual_acumulado * 100) : (ultimo ? String(ultimo.percentual_acumulado * 100) : '0'),
@@ -288,7 +288,7 @@ export default function ObrasMobile() {
     let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
     const linhas = itensFiltrados.map(item => {
       const p = preenchimento[item.id] || { valor_base: String(parseFloat(item.total_item || 0)), percentual: '0' }
-      const ultimo = ultimoRegistro(item.id, medicaoAtiva.id)
+      const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor)
       const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
       const valorBase = parseFloat(p.valor_base || '0')
       const percAtual = parseFloat(p.percentual || '0') / 100

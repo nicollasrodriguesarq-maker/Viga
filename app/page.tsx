@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Layout from './components/Layout'
 import { obterMinhasPermissoes, obterUsuariosVisiveis } from './lib/permissoes'
@@ -80,6 +80,23 @@ export default function Home() {
   const [loadingDash, setLoadingDash] = useState(false)
   const [fabAberto, setFabAberto] = useState(false)
   const [obraRdoSelecionada, setObraRdoSelecionada] = useState('')
+  const [meuId, setMeuId] = useState('')
+  const [anotacoes, setAnotacoes] = useState('')
+  const [anotacoesCarregadas, setAnotacoesCarregadas] = useState(false)
+
+  const anotacoesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function alterarAnotacoes(texto: string) {
+    setAnotacoes(texto)
+    if (anotacoesTimer.current) clearTimeout(anotacoesTimer.current)
+    anotacoesTimer.current = setTimeout(async () => {
+      if (!meuId) return
+      await fetch(`${SUPABASE_URL}/rest/v1/anotacoes_pessoais`, {
+        method: 'POST',
+        headers: { ...H, 'Prefer': 'resolution=merge-duplicates' },
+        body: JSON.stringify({ usuario_id: meuId, conteudo: texto, updated_at: new Date().toISOString() }),
+      })
+    }, 800)
+  }
 
   function ehAppInstalado() {
     return typeof window !== 'undefined' && (
@@ -111,6 +128,12 @@ export default function Home() {
       const ehGestor = ehAdmin || perm?.role === 'gerente_time'
       setSouAdmin(ehAdmin)
       setSouGestor(ehGestor)
+      if (perm?.id) {
+        setMeuId(perm.id)
+        const notas = await get('anotacoes_pessoais', '?usuario_id=eq.' + perm.id + '&select=conteudo')
+        setAnotacoes(notas[0]?.conteudo || '')
+        setAnotacoesCarregadas(true)
+      }
       const visiveis = await obterUsuariosVisiveis(perm)
       if (ehGestor) {
         const u = await get('usuarios', '?select=id,nome,email&order=nome')
@@ -434,6 +457,18 @@ export default function Home() {
               Upload RDO
             </button>
           </div>
+        </div>
+
+        {/* Bloco de notas pessoal */}
+        <div className="bg-surface-container rounded-2xl card-border p-lg mb-xl">
+          <h3 className="font-headline text-headline-sm text-on-surface mb-md">📝 Minhas Anotações</h3>
+          <textarea
+            value={anotacoes}
+            onChange={e => alterarAnotacoes(e.target.value)}
+            disabled={!anotacoesCarregadas}
+            placeholder={anotacoesCarregadas ? 'Escreva lembretes ou observações pessoais aqui — só você vê isso.' : 'Carregando...'}
+            className="w-full min-h-[100px] bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all resize-y disabled:opacity-50"
+          />
         </div>
 
         {/* Módulos */}

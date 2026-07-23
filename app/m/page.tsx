@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import MobileShell from './components/MobileShell'
 import { obterMinhasPermissoesApp, obterUsuariosVisiveis } from '../lib/permissoes'
@@ -25,6 +25,22 @@ export default function DashboardMobile() {
   const [obrasRecentes, setObrasRecentes] = useState<any[]>([])
   const [compromissosHoje, setCompromissosHoje] = useState<any[]>([])
   const [carregando, setCarregando] = useState(true)
+  const [meuId, setMeuId] = useState('')
+  const [anotacoes, setAnotacoes] = useState('')
+  const [anotacoesCarregadas, setAnotacoesCarregadas] = useState(false)
+  const anotacoesTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  function alterarAnotacoes(texto: string) {
+    setAnotacoes(texto)
+    if (anotacoesTimer.current) clearTimeout(anotacoesTimer.current)
+    anotacoesTimer.current = setTimeout(async () => {
+      if (!meuId) return
+      await fetch(BASE + '/anotacoes_pessoais', {
+        method: 'POST',
+        headers: { ...H, 'Prefer': 'resolution=merge-duplicates' },
+        body: JSON.stringify({ usuario_id: meuId, conteudo: texto, updated_at: new Date().toISOString() }),
+      })
+    }, 800)
+  }
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) {
@@ -39,6 +55,12 @@ export default function DashboardMobile() {
   async function carregar() {
     setCarregando(true)
     const perm = await obterMinhasPermissoesApp()
+    if (perm?.id) {
+      setMeuId(perm.id)
+      const notas = await get('anotacoes_pessoais', '?usuario_id=eq.' + perm.id + '&select=conteudo')
+      setAnotacoes(notas[0]?.conteudo || '')
+      setAnotacoesCarregadas(true)
+    }
     const ehGestor = perm?.role === 'admin' || perm?.role === 'gerente_time'
     const visiveis = await obterUsuariosVisiveis(perm)
     const mesAtual = new Date().toISOString().slice(0, 7)
@@ -107,6 +129,17 @@ export default function DashboardMobile() {
               ))}
             </div>
           )}
+        </div>
+
+        <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
+          <div className="text-sm font-bold text-on-surface mb-3">📝 Minhas Anotações</div>
+          <textarea
+            value={anotacoes}
+            onChange={e => alterarAnotacoes(e.target.value)}
+            disabled={!anotacoesCarregadas}
+            placeholder={anotacoesCarregadas ? 'Escreva lembretes ou observações pessoais aqui — só você vê isso.' : 'Carregando...'}
+            className="w-full min-h-[90px] bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all resize-y disabled:opacity-50"
+          />
         </div>
 
         <div className="bg-surface-container border border-outline-variant rounded-xl p-4">

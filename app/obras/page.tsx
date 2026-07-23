@@ -169,13 +169,22 @@ export default function Obras() {
   const [obraEditando,   setObraEditando]   = useState<any>(null)
   const [servicoEditando, setServicoEditando] = useState<any>(null)
 
+  const [usuarios, setUsuarios] = useState<any[]>([])
+  const [atribuicoes, setAtribuicoes] = useState<any[]>([])
+  const [souAdmin, setSouAdmin] = useState(false)
+  const [souGerenteTime, setSouGerenteTime] = useState(false)
+
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) {
       window.location.href = '/'
       return
     }
     setUserEmail(localStorage.getItem('viga_email') || '')
-    obterMinhasPermissoes().then(perm => { if (!temAcessoModulo(perm, 'obras')) window.location.href = '/' })
+    obterMinhasPermissoes().then(perm => {
+      if (!temAcessoModulo(perm, 'obras')) { window.location.href = '/'; return }
+      setSouAdmin(perm?.role === 'admin')
+      setSouGerenteTime(perm?.role === 'gerente_time')
+    })
     carregar()
     const abrirId = localStorage.getItem('viga_obra_abrir')
     if (abrirId) {
@@ -195,7 +204,7 @@ export default function Obras() {
 
   async function carregar() {
     setLoading(true)
-    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt] = await Promise.all([
+    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt, u, atr] = await Promise.all([
       buscar('obras', '?order=created_at.desc'),
       buscar('lancamentos', '?order=data.desc'),
       buscar('gastos_cartao', '?order=data.desc'),
@@ -206,6 +215,8 @@ export default function Obras() {
       buscar('cronograma_etapas', '?order=created_at'),
       buscar('medicoes', '?order=data.desc'),
       buscar('medicao_itens', '?order=created_at'),
+      buscar('usuarios', '?select=id,nome,email,role&order=nome'),
+      buscar('obra_atribuicoes', '?order=created_at'),
     ])
     setObras(o)
     setLancs(l)
@@ -217,7 +228,19 @@ export default function Obras() {
     setEtapas(et)
     setMedicoes(med)
     setMedItens(medIt)
+    setUsuarios(u)
+    setAtribuicoes(atr)
     setLoading(false)
+  }
+
+  function atribuicoesDaObra(obraId: string) {
+    return atribuicoes.filter(a => a.obra_id === obraId)
+  }
+  async function alternarAtribuicao(obraId: string, usuarioId: string) {
+    const existente = atribuicoes.find(a => a.obra_id === obraId && a.usuario_id === usuarioId)
+    if (existente) await remover('obra_atribuicoes', existente.id)
+    else await criar('obra_atribuicoes', { obra_id: obraId, usuario_id: usuarioId })
+    carregar()
   }
 
   // ── Medições ──────────────────────────────────────────────
@@ -899,7 +922,7 @@ export default function Obras() {
 
         {/* abas */}
         <div className="flex gap-2 mb-lg flex-wrap">
-          {([['resumo', '📋 Resumo'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições']] as [string, string][]).map(([id, nome]) => (
+          {([['resumo', '📋 Resumo'], ['equipe', '👷 Equipe'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições']] as [string, string][]).map(([id, nome]) => (
             <button key={id} className={abaDetalhe === id ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe(id)}>{nome}</button>
           ))}
         </div>
@@ -932,6 +955,42 @@ export default function Obras() {
             </div>
           </div>
         )}
+
+        {/* aba equipe (atribuição de técnicos) */}
+        {abaDetalhe === 'equipe' && (() => {
+          const tecnicos = usuarios.filter(u => u.role === 'usuario')
+          const atribuidosDaObra = atribuicoesDaObra(detalhe.id)
+          const podeEditarEquipe = souAdmin || souGerenteTime
+          return (
+            <div className={sectionCls}>
+              <div className="text-sm font-bold text-on-surface mb-1">👷 Equipe da Obra</div>
+              <div className="text-body-sm text-on-surface-variant mb-5">Técnicos atribuídos a esta obra — definem o que aparece no Dashboard e na Agenda de cada um</div>
+              {tecnicos.length === 0 ? (
+                <div className="text-center py-8 text-on-surface-variant">Nenhum técnico cadastrado ainda</div>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  {tecnicos.map(u => {
+                    const atribuido = atribuidosDaObra.some(a => a.usuario_id === u.id)
+                    return (
+                      <label key={u.id} className={`flex items-center gap-3 px-3.5 py-3 bg-surface-container-low rounded-lg border border-outline-variant ${podeEditarEquipe ? 'cursor-pointer' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={atribuido}
+                          disabled={!podeEditarEquipe}
+                          onChange={() => alternarAtribuicao(detalhe.id, u.id)}
+                        />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-sm text-on-surface truncate">{u.nome || u.email}</div>
+                          <div className="text-[11px] text-on-surface-variant truncate">{u.email}</div>
+                        </div>
+                      </label>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {/* aba serviços */}
         {abaDetalhe === 'servicos' && (

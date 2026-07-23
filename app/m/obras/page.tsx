@@ -30,6 +30,7 @@ async function uploadFotoVisita(file: File): Promise<string | null> {
 }
 
 const moeda = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const dataBR = (v: string) => v ? new Date(v + 'T00:00:00').toLocaleDateString('pt-BR') : '—'
 const STATUS_NOME: Record<string, string> = { captacao: 'Em Captação', em_execucao: 'Em Execução', pausada: 'Pausada', concluida: 'Concluída', cancelada: 'Cancelada' }
 const CLIMA_OPCOES = [{ v: 'ensolarado', l: '☀️ Ensolarado' }, { v: 'nublado', l: '☁️ Nublado' }, { v: 'chuva', l: '🌧️ Chuva' }, { v: 'sem_expediente', l: '🚫 Sem expediente' }]
 
@@ -251,7 +252,7 @@ export default function ObrasMobile() {
       <MobileShell title={medicaoAtiva.numero}>
         <div className="p-4 flex flex-col gap-3 pb-8">
           <button className="text-primary text-sm font-semibold text-left" onClick={() => { setMedicaoAtiva(null); setTela('detalhe') }}>← Voltar às Medições</button>
-          <div className="text-[11px] text-on-surface-variant">{medicaoAtiva.data} · Retenção {(retPct * 100).toFixed(1)}%</div>
+          <div className="text-[11px] text-on-surface-variant">{dataBR(medicaoAtiva.data)} · Retenção {(retPct * 100).toFixed(1)}%</div>
           {linhas.length === 0 ? (
             <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum item para medir</div>
           ) : linhas.map(({ item, p, acumAtual, valorPeriodo, retencao, liquido }) => (
@@ -446,7 +447,7 @@ export default function ObrasMobile() {
                   return (
                     <button key={med.id} className="text-left bg-surface-container border border-outline-variant rounded-xl p-4" onClick={() => abrirPreenchimentoMedicao(med, itensFiltrados)}>
                       <div className="font-semibold text-sm text-on-surface">{med.numero} · {med.tipo === 'fornecedor' ? `Fornecedor: ${med.fornecedor || '—'}` : 'Cliente'}</div>
-                      <div className="text-[11px] text-on-surface-variant mt-1">{med.data} · {itensFiltrados.length} item(ns)</div>
+                      <div className="text-[11px] text-on-surface-variant mt-1">{dataBR(med.data)} · {itensFiltrados.length} item(ns)</div>
                     </button>
                   )
                 })}

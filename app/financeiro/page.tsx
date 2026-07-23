@@ -8,6 +8,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const H = { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
 
 const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const dataBR = (v: string) => v ? new Date(v + 'T00:00:00').toLocaleDateString('pt-BR') : '—'
 const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
 async function get(tabela: string, q = '') {
@@ -54,7 +55,7 @@ function exportarExcel(lancamentos: any[], obras: any[], mes: string) {
   lancMes.forEach(l => {
     const obra = obras.find(o => o.id === l.obra_id)
     const valor = (l.tipo === 'entrada' ? '+' : '-') + parseFloat(l.valor || 0).toFixed(2).replace('.', ',')
-    csv += `${l.data};${l.descricao};${l.tipo === 'entrada' ? 'Entrada' : 'Saída'};${l.categoria || ''};${obra ? obra.nome : ''};${l.conta || ''};${l.status === 'pago' ? 'Pago' : 'Pendente'};${l.nf_numero || ''};${valor}\n`
+    csv += `${dataBR(l.data)};${l.descricao};${l.tipo === 'entrada' ? 'Entrada' : 'Saída'};${l.categoria || ''};${obra ? obra.nome : ''};${l.conta || ''};${l.status === 'pago' ? 'Pago' : 'Pendente'};${l.nf_numero || ''};${valor}\n`
   })
 
   const entradas = lancMes.filter(l=>l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
@@ -495,7 +496,7 @@ export default function Financeiro() {
                 <tbody>
                   {lancObra.map(l=>(
                     <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                      <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.data}</td>
+                      <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(l.data)}</td>
                       <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}</td>
                       <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria||'—'}</td>
                       <td className="px-3 py-2.5">
@@ -518,7 +519,7 @@ export default function Financeiro() {
                   ))}
                   {gastObra.map(g=>(
                     <tr key={g.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                      <td className="px-3 py-2.5 text-on-surface-variant text-xs">{g.data}</td>
+                      <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(g.data)}</td>
                       <td className="px-3 py-2.5 font-semibold text-on-surface">{g.descricao} <span className="text-[10px] text-secondary">💳</span></td>
                       <td className="px-3 py-2.5 text-on-surface-variant text-xs">{g.categoria||'—'}</td>
                       <td className="px-3 py-2.5">
@@ -697,7 +698,7 @@ export default function Financeiro() {
                     const obra = obras.find(o=>o.id===l.obra_id)
                     return (
                       <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                        <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{l.data}</td>
+                        <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{dataBR(l.data)}</td>
                         <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}</td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria||'—'}</td>
                         <td className="px-3 py-2.5">
@@ -865,7 +866,7 @@ export default function Financeiro() {
                       <div>
                         <div className="font-semibold text-sm text-on-surface">{g.descricao}</div>
                         <div className="text-[11px] text-on-surface-variant">
-                          {g.data} · {g.categoria||'—'} {obra?`· ${obra.codigo}`:''}
+                          {dataBR(g.data)} · {g.categoria||'—'} {obra?`· ${obra.codigo}`:''}
                           {g.nf_numero && ` · NF #${g.nf_numero}`}
                           {g.nf_url && <a href={g.nf_url} target="_blank" rel="noreferrer" className="text-primary ml-1.5 text-[11px]">📎 NF</a>}
                         </div>
@@ -893,7 +894,7 @@ export default function Financeiro() {
                   <div key={l.id} className={rowCls}>
                     <div>
                       <div className="font-semibold text-sm text-on-surface">{l.descricao}</div>
-                      <div className="text-[11px] text-on-surface-variant">{l.data} {obra?`· ${obra.codigo}`:''}</div>
+                      <div className="text-[11px] text-on-surface-variant">{dataBR(l.data)} {obra?`· ${obra.codigo}`:''}</div>
                     </div>
                     <div className="flex items-center gap-2.5">
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusBadge(l.status==='pago')}`}>{l.status==='pago'?'Recebido':'A receber'}</span>
@@ -1034,7 +1035,7 @@ export default function Financeiro() {
                   <tbody>
                     {investimentos.map(inv=>(
                       <tr key={inv.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                        <td className="px-3 py-2.5 text-on-surface-variant text-xs">{inv.data}</td>
+                        <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(inv.data)}</td>
                         <td className="px-3 py-2.5 font-semibold text-on-surface">{inv.descricao}</td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{inv.instituicao||'—'}</td>
                         <td className="px-3 py-2.5">

@@ -9,6 +9,7 @@ const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZ
 const HDR = { 'Content-Type': 'application/json', 'apikey': ANON, 'Authorization': 'Bearer ' + ANON }
 
 const moeda = (v: number) => Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const dataBR = (v: string) => v ? new Date(v + 'T00:00:00').toLocaleDateString('pt-BR') : '—'
 const pct = (a: number, b: number) => b > 0 ? Math.min((a / b) * 100, 100) : 0
 
 async function buscar(tabela: string, query = '') {
@@ -910,8 +911,8 @@ export default function Obras() {
               {([
                 ['TIPO', detalhe.tipo || '—'],
                 ['RESPONSÁVEL', detalhe.responsavel || '—'],
-                ['DATA INÍCIO', detalhe.data_inicio || '—'],
-                ['PREVISÃO TÉRMINO', detalhe.data_previsao ? (atrasada ? detalhe.data_previsao + ' ⚠️' : detalhe.data_previsao) : '—'],
+                ['DATA INÍCIO', dataBR(detalhe.data_inicio)],
+                ['PREVISÃO TÉRMINO', detalhe.data_previsao ? (dataBR(detalhe.data_previsao) + (atrasada ? ' ⚠️' : '')) : '—'],
                 ['ENDEREÇO', detalhe.endereco || '—'],
                 ['SERVIÇOS CADASTRADOS', svs.length + ' serviço(s)'],
                 ['LANÇAMENTOS', (lancD.length + gastD.length) + ' no total'],
@@ -1042,7 +1043,7 @@ export default function Obras() {
                     <tbody>
                       {lancD.map(l => (
                         <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                          <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.data}</td>
+                          <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(l.data)}</td>
                           <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}</td>
                           <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria || '—'}</td>
                           <td className="px-3 py-2.5">
@@ -1075,7 +1076,7 @@ export default function Obras() {
                 <div key={g.id} className="flex justify-between items-center py-2.5 border-b border-outline-variant">
                   <div>
                     <div className="font-semibold text-sm text-on-surface">{g.descricao}</div>
-                    <div className="text-[11px] text-on-surface-variant">{g.data} · {g.categoria || '—'}</div>
+                    <div className="text-[11px] text-on-surface-variant">{dataBR(g.data)} · {g.categoria || '—'}</div>
                   </div>
                   <div className="text-error font-bold">{moeda(parseFloat(g.valor))}</div>
                 </div>
@@ -1195,7 +1196,7 @@ export default function Obras() {
                     <div key={med.id} className="flex justify-between items-center px-4 py-3 bg-surface-container-low rounded-lg border border-outline-variant flex-wrap gap-2">
                       <div>
                         <div className="font-semibold text-sm text-on-surface">{med.numero} · {med.tipo === 'fornecedor' ? `Fornecedor: ${med.fornecedor || '—'}` : 'Cliente'}</div>
-                        <div className="text-[11px] text-on-surface-variant">{med.data} · {itensFiltrados.length} item(ns) · {moeda(totalPeriodo)} no período</div>
+                        <div className="text-[11px] text-on-surface-variant">{dataBR(med.data)} · {itensFiltrados.length} item(ns) · {moeda(totalPeriodo)} no período</div>
                       </div>
                       <div className="flex gap-2">
                         <button className={btnEditSmCls} onClick={() => abrirPreenchimentoMedicao(med, itensFiltrados)}>Abrir</button>
@@ -1233,7 +1234,7 @@ export default function Obras() {
                 <div>
                   <button className={btnSecondaryCls + ' mb-2'} onClick={() => setMedicaoAtiva(null)}>← Voltar às Medições</button>
                   <div className="text-sm font-bold text-on-surface">{medicaoAtiva.numero} — {medicaoAtiva.tipo === 'fornecedor' ? `Fornecedor: ${medicaoAtiva.fornecedor || '—'}` : 'Cliente'}</div>
-                  <div className="text-[11px] text-on-surface-variant">{medicaoAtiva.data} · Retenção {(retPct * 100).toFixed(1)}%</div>
+                  <div className="text-[11px] text-on-surface-variant">{dataBR(medicaoAtiva.data)} · Retenção {(retPct * 100).toFixed(1)}%</div>
                 </div>
                 <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPDFMedicao(medicaoAtiva, linhas, detalhe)}>🖨️ Gerar Boletim PDF</button>
               </div>
@@ -1545,8 +1546,8 @@ export default function Obras() {
                   )}
                   {(o.data_inicio || o.data_previsao || o.responsavel) && (
                     <div className="pt-3 border-t border-outline-variant grid grid-cols-2 gap-2 text-body-sm text-on-surface-variant">
-                      {o.data_inicio && <span className="flex items-center gap-1.5">📅 {o.data_inicio}</span>}
-                      {o.data_previsao && <span className={`flex items-center gap-1.5 ${at ? 'text-error' : ''}`}>🏁 {o.data_previsao}</span>}
+                      {o.data_inicio && <span className="flex items-center gap-1.5">📅 {dataBR(o.data_inicio)}</span>}
+                      {o.data_previsao && <span className={`flex items-center gap-1.5 ${at ? 'text-error' : ''}`}>🏁 {dataBR(o.data_previsao)}</span>}
                       {o.responsavel && <span className="flex items-center gap-1.5 col-span-2">👷 {o.responsavel}</span>}
                     </div>
                   )}

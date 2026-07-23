@@ -17,6 +17,7 @@ const NAV: NavItem[] = [
   { icon: 'account_balance_wallet', label: 'Financeiro', href: '/m/financeiro', modulo: 'financeiro' },
   { icon: 'architecture', label: 'Levant.', href: '/m/levantamento', modulo: 'levantamento' },
   { icon: 'work', label: 'Orçamento', href: '/m/orcamento', modulo: 'orcamento' },
+  { icon: 'event', label: 'Agenda', href: '/m/agenda', modulo: 'agenda' },
 ]
 
 interface MobileShellProps {

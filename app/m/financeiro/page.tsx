@@ -67,6 +67,12 @@ export default function FinanceiroMobile() {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) { window.location.href = '/'; return }
     obterMinhasPermissoesApp().then(perm => { if (!temAcessoModuloApp(perm, 'financeiro')) window.location.href = '/m' })
     carregar()
+    const obraId = localStorage.getItem('viga_financeiro_obra_id')
+    if (obraId) {
+      localStorage.removeItem('viga_financeiro_obra_id')
+      setWiz({ ...WZ_VAZIO, tipo: 'saida', destino: 'obra', obra_id: obraId, step: 's_dados' })
+      setWizardAberto(true)
+    }
   }, [])
 
   async function carregar() {
@@ -280,7 +286,11 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
               </div>
               <div><label className={labelCls}>Número da NF</label><input className={inputCls} placeholder="Ex: 000847" value={wiz.nf_numero} onChange={e => setWiz({ ...wiz, nf_numero: e.target.value })} /></div>
             </div>
-            <Botoes onProximo={() => { if (!wiz.descricao || !wiz.valor) return alert('Preencha o valor e a descrição'); setWiz({ ...wiz, step: 's_destino' }) }} />
+            <Botoes onProximo={() => {
+              if (!wiz.descricao || !wiz.valor) return alert('Preencha o valor e a descrição')
+              if (wiz.destino === 'obra' && wiz.obra_id) setWiz({ ...wiz, step: 's_pagamento' })
+              else setWiz({ ...wiz, step: 's_destino' })
+            }} />
           </>
         )}
 

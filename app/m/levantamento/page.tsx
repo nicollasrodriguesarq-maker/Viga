@@ -74,6 +74,7 @@ export default function LevantamentoMobile() {
   const [fItem, setFItem] = useState(FITEM_VAZIO)
   const [arquivoFoto, setArquivoFoto] = useState<File | null>(null)
   const [enviando, setEnviando] = useState(false)
+  const [fotoCompartilhada, setFotoCompartilhada] = useState<string | null>(null)
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -170,26 +171,30 @@ export default function LevantamentoMobile() {
     await atualizarTotaisOrcamento(orcId)
   }
 
+  async function selecionarFotoCompartilhada(file: File) {
+    setEnviando(true)
+    const url = await uploadFotoServico(file)
+    setEnviando(false)
+    if (url) setFotoCompartilhada(url)
+  }
+
   async function salvarItem() {
     if (!ambienteAtivo || !fItem.servico) return alert('Preencha o serviço')
     const area = fItem.area ? num(fItem.area) : num(calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura))
-    let fotoUrl = fItem.foto_url
-    if (arquivoFoto) {
-      setEnviando(true)
-      const url = await uploadFotoServico(arquivoFoto)
-      setEnviando(false)
-      if (url) fotoUrl = url
-    }
     const dados = {
       ambiente: ambienteAtivo.id, levantamento_id: detalhe.id, servico: fItem.servico, descricao: fItem.descricao,
       comprimento: num(fItem.comprimento) || null, largura: num(fItem.largura) || null, altura: num(fItem.altura) || null,
-      area: area || null, unidade: fItem.unidade, observacao: fItem.observacao, foto_url: fotoUrl || null,
+      area: area || null, unidade: fItem.unidade, observacao: fItem.observacao, foto_url: fotoCompartilhada || fItem.foto_url || null,
       banco_item_id: fItem.banco_item_id || null, categoria: fItem.categoria || null,
     }
     const itemSalvo = await criar('levantamento_itens', dados)
-    setTela('detalhe'); setArquivoFoto(null); setFItem(FITEM_VAZIO)
+    setFItem(FITEM_VAZIO)
     if (itemSalvo?.id) await sincronizarItemOrcamento(itemSalvo, ambienteAtivo)
     await carregar()
+  }
+
+  function concluirServicos() {
+    setTela('detalhe'); setArquivoFoto(null); setFotoCompartilhada(null); setFItem(FITEM_VAZIO)
   }
 
   const ambsDetalhe = detalhe ? ambientes.filter(a => a.levantamento_id === detalhe.id) : []
@@ -302,22 +307,32 @@ export default function LevantamentoMobile() {
             <label className={labelCls}>Descrição</label>
             <input className={inputCls} placeholder="Ex: Tinta acrílica cor branco neve, 2 demãos" value={fItem.descricao} onChange={e => setFItem({ ...fItem, descricao: e.target.value })} />
           </div>
-          <div className="flex items-center gap-3">
-            <div className="w-16 h-16 rounded-lg bg-surface-container-low border border-outline-variant flex items-center justify-center overflow-hidden shrink-0">
-              {arquivoFoto ? (
+          <div className="flex items-center gap-3 bg-surface-container-low border border-outline-variant rounded-lg p-3">
+            <div className="w-16 h-16 rounded-lg bg-surface-container border border-outline-variant flex items-center justify-center overflow-hidden shrink-0">
+              {fotoCompartilhada ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={URL.createObjectURL(arquivoFoto)} alt="Prévia" className="w-full h-full object-cover" />
+                <img src={fotoCompartilhada} alt="Foto do serviço" className="w-full h-full object-cover" />
               ) : (
                 <span className="material-symbols-outlined text-on-surface-variant/40">photo_camera</span>
               )}
             </div>
             <div className="flex-1">
-              <label className={labelCls}>Foto do serviço</label>
-              <input
-                type="file" accept="image/*" capture="environment"
-                onChange={e => setArquivoFoto(e.target.files?.[0] || null)}
-                className="w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer"
-              />
+              {fotoCompartilhada ? (
+                <>
+                  <div className="text-[11px] text-on-surface mb-1">Foto anexada — pode adicionar quantos serviços quiser nela</div>
+                  <button className="text-xs text-primary font-semibold" onClick={() => setFotoCompartilhada(null)}>Trocar foto</button>
+                </>
+              ) : (
+                <>
+                  <label className={labelCls}>Foto (compartilhada entre vários serviços)</label>
+                  <input
+                    type="file" accept="image/*" capture="environment"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) selecionarFotoCompartilhada(f) }}
+                    className="w-full bg-surface-container border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer"
+                  />
+                  {enviando && <div className="text-[11px] text-primary mt-1">Enviando foto...</div>}
+                </>
+              )}
             </div>
           </div>
           {usaMedidas ? (
@@ -370,8 +385,8 @@ export default function LevantamentoMobile() {
             <input className={inputCls} placeholder="Ex: Infiltração detectada" value={fItem.observacao} onChange={e => setFItem({ ...fItem, observacao: e.target.value })} />
           </div>
           <div className="flex flex-col gap-2 mt-2">
-            <button className={btnPrimaryCls} onClick={salvarItem} disabled={enviando}>{enviando ? 'Enviando foto...' : 'Adicionar Serviço'}</button>
-            <button className={btnSecondaryCls} onClick={() => { setTela('detalhe'); setArquivoFoto(null); setFItem(FITEM_VAZIO) }}>Cancelar</button>
+            <button className={btnPrimaryCls} onClick={salvarItem} disabled={enviando}>+ Adicionar e continuar</button>
+            <button className={btnSecondaryCls} onClick={concluirServicos}>Concluir</button>
           </div>
         </div>
       </MobileShell>
@@ -401,7 +416,7 @@ export default function LevantamentoMobile() {
               <div key={amb.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-bold text-on-surface text-sm">🏠 {amb.nome}</div>
-                  <button className="text-primary text-xs font-semibold" onClick={() => { setAmbienteAtivo(amb); setTela('novoItem') }}>+ Serviço</button>
+                  <button className="text-primary text-xs font-semibold" onClick={() => { setAmbienteAtivo(amb); setFItem(FITEM_VAZIO); setArquivoFoto(null); setFotoCompartilhada(null); setTela('novoItem') }}>+ Serviço</button>
                 </div>
                 {itensAmb.length === 0 ? (
                   <div className="text-[12px] text-on-surface-variant py-2">Nenhum serviço registrado</div>

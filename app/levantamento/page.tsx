@@ -144,6 +144,7 @@ export default function Levantamento() {
   const [editItem, setEditItem] = useState<any>(null)
   const [arquivoFoto, setArquivoFoto] = useState<File | null>(null)
   const [enviandoFoto, setEnviandoFoto] = useState(false)
+  const [fotoCompartilhada, setFotoCompartilhada] = useState<string | null>(null)
 
   useEffect(() => {
     if (!localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -220,16 +221,16 @@ export default function Levantamento() {
     setJanela(null); setFAmb({ nome: '', nomeCustom: '' }); carregar()
   }
 
+  async function selecionarFotoCompartilhada(file: File) {
+    setEnviandoFoto(true)
+    const url = await uploadFotoServico(file)
+    setEnviandoFoto(false)
+    if (url) setFotoCompartilhada(url)
+  }
+
   async function salvarItem() {
     if (!ambienteAtivo || !fItem.servico) return alert('Preencha o serviço')
     const area = fItem.area ? num(fItem.area) : num(calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura))
-    let fotoUrl = fItem.foto_url
-    if (arquivoFoto) {
-      setEnviandoFoto(true)
-      const url = await uploadFotoServico(arquivoFoto)
-      setEnviandoFoto(false)
-      if (url) fotoUrl = url
-    }
     const dados = {
       ambiente: ambienteAtivo.id,
       levantamento_id: detalhe.id,
@@ -241,17 +242,22 @@ export default function Levantamento() {
       area: area || null,
       unidade: fItem.unidade,
       observacao: fItem.observacao,
-      foto_url: fotoUrl || null,
+      foto_url: fotoCompartilhada || fItem.foto_url || null,
       banco_item_id: fItem.banco_item_id || null,
       categoria: fItem.categoria || null,
     }
     let itemSalvo: any
     if (editItem) { await editar('levantamento_itens', editItem.id, dados); itemSalvo = { ...dados, id: editItem.id } }
     else { itemSalvo = await criar('levantamento_itens', dados) }
-    setJanela(null); setEditItem(null); setArquivoFoto(null)
     setFItem({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
     if (itemSalvo?.id) { await sincronizarItemOrcamento(itemSalvo, ambienteAtivo) }
-    carregar()
+    await carregar()
+    if (editItem) { setJanela(null); setEditItem(null); setFotoCompartilhada(null) }
+  }
+
+  function concluirServicos() {
+    setJanela(null); setEditItem(null); setFotoCompartilhada(null); setArquivoFoto(null)
+    setFItem({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
   }
 
   // ── Permissão de edição ──────────────────────────────────────
@@ -801,7 +807,7 @@ export default function Levantamento() {
                             <div className="flex justify-end mb-3">
                               <button className={btnPrimaryCls} onClick={() => {
                                 setFItem({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
-                                setArquivoFoto(null); setEditItem(null); setJanela('item')
+                                setArquivoFoto(null); setFotoCompartilhada(null); setEditItem(null); setJanela('item')
                               }}>+ Adicionar Serviço</button>
                             </div>
                           )}
@@ -842,7 +848,7 @@ export default function Levantamento() {
                                           <div className="flex gap-1">
                                             <button className={btnEditSmCls} onClick={() => {
                                               setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento || '', largura: item.largura || '', altura: item.altura || '', area: item.area || '', unidade: item.unidade || 'm²', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
-                                              setArquivoFoto(null); setEditItem(item); setJanela('item')
+                                              setArquivoFoto(null); setFotoCompartilhada(item.foto_url || null); setEditItem(item); setJanela('item')
                                             }}>✏️</button>
                                             <button className={btnDangerSmCls} onClick={() => excluirItemLevantamento(item)}>×</button>
                                           </div>
@@ -1000,10 +1006,38 @@ export default function Levantamento() {
         {janela === 'item' && (() => {
           const usaMedidas = fItem.unidade === 'm²' || fItem.unidade === 'm³'
           return (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && concluirServicos()}>
             <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[560px] max-h-[92vh] overflow-y-auto">
               <div className="text-base font-bold text-on-surface mb-1.5">{editItem ? '✏️ Editar Serviço' : '🔧 Novo Serviço'}</div>
               <div className="text-body-sm text-primary mb-5">Ambiente: {ambienteAtivo?.nome}</div>
+              <div className="mb-5 flex items-center gap-3 bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                <div className="w-16 h-16 rounded-lg bg-surface-container border border-outline-variant flex items-center justify-center overflow-hidden shrink-0">
+                  {fotoCompartilhada ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={fotoCompartilhada} alt="Foto do serviço" className="w-full h-full object-cover" />
+                  ) : (
+                    <span className="material-symbols-outlined text-on-surface-variant/40">photo_camera</span>
+                  )}
+                </div>
+                <div className="flex-1">
+                  {fotoCompartilhada ? (
+                    <>
+                      <div className="text-body-sm text-on-surface mb-1">Foto anexada — pode adicionar quantos serviços quiser nela</div>
+                      <button className="text-xs text-primary font-semibold" onClick={() => setFotoCompartilhada(null)}>Trocar foto</button>
+                    </>
+                  ) : (
+                    <>
+                      <label className={labelCls}>Foto do serviço (compartilhada entre vários serviços)</label>
+                      <input
+                        type="file" accept="image/*"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) selecionarFotoCompartilhada(f) }}
+                        className="w-full bg-surface-container border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer"
+                      />
+                      {enviandoFoto && <div className="text-[11px] text-primary mt-1">Enviando foto...</div>}
+                    </>
+                  )}
+                </div>
+              </div>
               <div className="mb-3.5">
                 <label className={labelCls}>Serviço *</label>
                 <select className={inputCls} value={fItem.banco_item_id || (fItem.servico ? '__custom__' : '')}
@@ -1038,27 +1072,6 @@ export default function Levantamento() {
               <div className="mb-3.5">
                 <label className={labelCls}>Descrição</label>
                 <input className={inputCls} placeholder="Ex: Tinta acrílica cor branco neve, 2 demãos" value={fItem.descricao} onChange={e => setFItem({ ...fItem, descricao: e.target.value })} />
-              </div>
-              <div className="mb-3.5 flex items-center gap-3">
-                <div className="w-16 h-16 rounded-lg bg-surface-container-low border border-outline-variant flex items-center justify-center overflow-hidden shrink-0">
-                  {arquivoFoto ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={URL.createObjectURL(arquivoFoto)} alt="Prévia" className="w-full h-full object-cover" />
-                  ) : fItem.foto_url ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={fItem.foto_url} alt="Foto atual" className="w-full h-full object-cover" />
-                  ) : (
-                    <span className="material-symbols-outlined text-on-surface-variant/40">photo_camera</span>
-                  )}
-                </div>
-                <div className="flex-1">
-                  <label className={labelCls}>Foto do serviço</label>
-                  <input
-                    type="file" accept="image/*"
-                    onChange={e => setArquivoFoto(e.target.files?.[0] || null)}
-                    className="w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer"
-                  />
-                </div>
               </div>
               {usaMedidas ? (
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mb-3.5">
@@ -1132,8 +1145,8 @@ export default function Levantamento() {
                 <input className={inputCls + (fItem.observacao ? ' border-tertiary/40' : '')} placeholder="Ex: Infiltração detectada, verificar antes de iniciar" value={fItem.observacao} onChange={e => setFItem({ ...fItem, observacao: e.target.value })} />
               </div>
               <div className="flex gap-2 justify-end">
-                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setEditItem(null); setArquivoFoto(null) }}>Cancelar</button>
-                <button className={btnPrimaryCls} onClick={salvarItem} disabled={enviandoFoto}>{enviandoFoto ? 'Enviando foto...' : editItem ? 'Salvar Alterações' : 'Adicionar Serviço'}</button>
+                <button className={btnSecondaryCls} onClick={concluirServicos}>{editItem ? 'Cancelar' : 'Concluir'}</button>
+                <button className={btnPrimaryCls} onClick={salvarItem} disabled={enviandoFoto}>{editItem ? 'Salvar Alterações' : '+ Adicionar e continuar'}</button>
               </div>
             </div>
           </div>

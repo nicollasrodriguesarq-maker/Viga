@@ -114,6 +114,8 @@ export default function Agenda() {
       if (perm.role !== 'usuario') {
         const u = await buscar('usuarios', '?select=id,nome,email&order=nome')
         setUsuarios(u)
+        const usuarioIdNaUrl = new URLSearchParams(window.location.search).get('usuario_id')
+        if (usuarioIdNaUrl) setAlvoAgenda(usuarioIdNaUrl)
       }
     })
   }, [])

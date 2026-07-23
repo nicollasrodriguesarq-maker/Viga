@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import MobileShell from './components/MobileShell'
+import { obterMinhasPermissoesApp, obterUsuariosVisiveis } from '../lib/permissoes'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -37,15 +38,24 @@ export default function DashboardMobile() {
 
   async function carregar() {
     setCarregando(true)
+    const perm = await obterMinhasPermissoesApp()
+    const ehGestor = perm?.role === 'admin' || perm?.role === 'gerente_time'
+    const visiveis = await obterUsuariosVisiveis(perm)
     const mesAtual = new Date().toISOString().slice(0, 7)
     const hojeStr = new Date().toISOString().slice(0, 10)
-    const [obras, lancamentos, compromissos] = await Promise.all([
+    const filtroCompromissos = perm?.role === 'admin' ? '' : '&usuario_id=in.(' + visiveis.join(',') + ')'
+    const [obras, lancamentos, compromissos, atribuicoes] = await Promise.all([
       get('obras', '?order=created_at.desc'),
       get('lancamentos', '?order=data.desc'),
-      get('agenda_compromissos', '?data=eq.' + hojeStr + '&order=hora_inicio.asc'),
+      get('agenda_compromissos', '?data=eq.' + hojeStr + filtroCompromissos + '&order=hora_inicio.asc'),
+      !ehGestor && perm ? get('obra_atribuicoes', '?usuario_id=eq.' + perm.id + '&select=obra_id') : Promise.resolve([]),
     ])
-    setObrasAtivas(obras.filter((o: any) => o.status === 'em_execucao').length)
-    setObrasRecentes(obras.slice(0, 4))
+    const obrasVisiveis = ehGestor ? obras : (() => {
+      const idsAtribuidos = new Set(atribuicoes.map((a: any) => a.obra_id))
+      return obras.filter((o: any) => idsAtribuidos.has(o.id))
+    })()
+    setObrasAtivas(obrasVisiveis.filter((o: any) => o.status === 'em_execucao').length)
+    setObrasRecentes(obrasVisiveis.slice(0, 4))
     setCompromissosHoje(compromissos)
     const lancMes = lancamentos.filter((l: any) => l.data?.slice(0, 7) === mesAtual)
     setFaturamentoMes(lancMes.filter((l: any) => l.tipo === 'entrada').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))

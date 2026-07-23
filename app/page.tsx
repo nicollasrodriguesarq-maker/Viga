@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Layout from './components/Layout'
-import { obterMinhasPermissoes } from './lib/permissoes'
+import { obterMinhasPermissoes, obterUsuariosVisiveis } from './lib/permissoes'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -68,6 +68,8 @@ export default function Home() {
 
   // Dashboard data
   const [souAdmin, setSouAdmin] = useState(false)
+  const [souGestor, setSouGestor] = useState(false)
+  const [usuariosEquipe, setUsuariosEquipe] = useState<any[]>([])
   const [obrasAtivas, setObrasAtivas] = useState(0)
   const [faturamentoMes, setFaturamentoMes] = useState(0)
   const [aReceber, setAReceber] = useState(0)
@@ -95,22 +97,40 @@ export default function Home() {
   }, [])
 
   useEffect(() => {
-    if (logado) { carregarDashboard(); obterMinhasPermissoes().then(perm => setSouAdmin(perm?.role === 'admin')) }
+    if (logado) carregarDashboard()
   }, [logado])
 
   async function carregarDashboard() {
     setLoadingDash(true)
     try {
+      const perm = await obterMinhasPermissoes()
+      const ehAdmin = perm?.role === 'admin'
+      const ehGestor = ehAdmin || perm?.role === 'gerente_time'
+      setSouAdmin(ehAdmin)
+      setSouGestor(ehGestor)
+      const visiveis = await obterUsuariosVisiveis(perm)
+      if (ehGestor) {
+        const u = await get('usuarios', '?select=id,nome,email&order=nome')
+        setUsuariosEquipe(u.filter((x: any) => visiveis.includes(x.id) && x.id !== perm?.id))
+      }
+
       const mesAtual = new Date().toISOString().slice(0, 7)
       const hojeStr = new Date().toISOString().slice(0, 10)
-      const [obras, lancamentos, compromissos] = await Promise.all([
+      const filtroCompromissos = ehAdmin ? '' : '&usuario_id=in.(' + visiveis.join(',') + ')'
+      const [obras, lancamentos, compromissos, atribuicoes] = await Promise.all([
         get('obras', '?order=created_at.desc'),
         get('lancamentos', '?order=data.desc'),
-        get('agenda_compromissos', '?data=eq.' + hojeStr + '&order=hora_inicio.asc')
+        get('agenda_compromissos', '?data=eq.' + hojeStr + filtroCompromissos + '&order=hora_inicio.asc'),
+        !ehGestor && perm ? get('obra_atribuicoes', '?usuario_id=eq.' + perm.id + '&select=obra_id') : Promise.resolve([]),
       ])
 
-      setObrasAtivas(obras.filter((o: any) => o.status === 'em_execucao').length)
-      setObrasRecentes(obras.slice(0, 4))
+      const obrasVisiveis = ehGestor ? obras : (() => {
+        const idsAtribuidos = new Set(atribuicoes.map((a: any) => a.obra_id))
+        return obras.filter((o: any) => idsAtribuidos.has(o.id))
+      })()
+
+      setObrasAtivas(obrasVisiveis.filter((o: any) => o.status === 'em_execucao').length)
+      setObrasRecentes(obrasVisiveis.slice(0, 4))
       setCompromissosHoje(compromissos)
 
       const lancMes = lancamentos.filter((l: any) => l.data?.slice(0, 7) === mesAtual)
@@ -274,12 +294,24 @@ export default function Home() {
 
         {/* Compromissos de hoje */}
         <section className="bg-surface-container rounded-2xl card-border overflow-hidden flex flex-col mb-xl">
-          <div className="px-lg py-lg flex items-center justify-between border-b border-outline-variant bg-surface-container-high/50">
+          <div className="px-lg py-lg flex items-center justify-between border-b border-outline-variant bg-surface-container-high/50 flex-wrap gap-2">
             <h3 className="font-headline text-headline-sm text-on-surface">📅 Compromissos de Hoje</h3>
-            <Link href="/agenda" className="text-primary font-label-md hover:underline flex items-center gap-1">
-              Ver agenda
-              <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
-            </Link>
+            <div className="flex items-center gap-3">
+              {souGestor && usuariosEquipe.length > 0 && (
+                <select
+                  className="bg-surface-container-low border border-outline-variant rounded-lg text-on-surface text-xs px-2.5 py-1.5 outline-none focus:border-primary"
+                  defaultValue=""
+                  onChange={e => { if (e.target.value) window.location.href = '/agenda?usuario_id=' + e.target.value }}
+                >
+                  <option value="">Ver agenda de...</option>
+                  {usuariosEquipe.map((u: any) => <option key={u.id} value={u.id}>{u.nome || u.email}</option>)}
+                </select>
+              )}
+              <Link href="/agenda" className="text-primary font-label-md hover:underline flex items-center gap-1">
+                Ver agenda
+                <span className="material-symbols-outlined text-[16px]">arrow_forward</span>
+              </Link>
+            </div>
           </div>
           {compromissosHoje.length === 0 ? (
             <div className="px-lg py-lg text-on-surface-variant text-body-sm">Nenhum compromisso para hoje.</div>

@@ -260,6 +260,7 @@ export default function Orcamento() {
       }
     }
     await atualizarTotais(detalhe.id)
+    if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id)
     setJanela(null); setEditItem(null)
     setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' })
     carregar()
@@ -271,6 +272,23 @@ export default function Orcamento() {
     const tMao = todosItens.reduce((a: number, i: any) => a + parseFloat(i.preco_mao_obra||0) * parseFloat(i.quantidade||1), 0)
     const tGeral = todosItens.reduce((a: number, i: any) => a + calcularTotalItem(i), 0)
     await editar('orcamentos', orcId, { total_material: tMat, total_mao_obra: tMao, total_geral: tGeral })
+  }
+
+  // Agrupa orcamento_itens por nome exato de servico e sincroniza obra_servicos.
+  // Nunca apaga linha orfa: pode ter valor_realizado/status preenchido manualmente depois.
+  async function sincronizarServicosObra(orcamentoId: string, obraId: string) {
+    const itensOrc = await buscar('orcamento_itens', '?orcamento_id=eq.' + orcamentoId)
+    const grupos = new Map<string, number>()
+    for (const item of itensOrc) {
+      if (!item.servico) continue
+      grupos.set(item.servico, (grupos.get(item.servico) || 0) + calcularTotalItem(item))
+    }
+    const servicosExistentes = await buscar('obra_servicos', '?obra_id=eq.' + obraId)
+    for (const [nome, valorPrevisto] of grupos) {
+      const existente = servicosExistentes.find((s: any) => s.nome === nome)
+      if (existente) await editar('obra_servicos', existente.id, { valor_previsto: valorPrevisto })
+      else await criar('obra_servicos', { obra_id: obraId, nome, valor_previsto: valorPrevisto, valor_realizado: 0, status: 'pendente', observacao: '' })
+    }
   }
 
   function somaComposicao() {
@@ -439,6 +457,8 @@ export default function Orcamento() {
         data_fim_prevista: formatarDataISO(fim),
       })
     }
+
+    await sincronizarServicosObra(detalhe.id, novaObra.id)
 
     setJanela(null)
     alert('Obra ' + codigo + ' criada com sucesso! Cronograma gerado automaticamente com ' + etapasCalculadas.length + ' etapa(s).')
@@ -866,7 +886,7 @@ export default function Orcamento() {
                                                 setFItem({ servico: item.servico, descricao: item.descricao||'', categoria: item.categoria || '', banco_item_id: item.banco_item_id || '', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), fornecedor: item.fornecedor || '' })
                                                 setEditItem(item); setMostrarSugestoes(false); setJanela('item')
                                               }}>✏️</button>
-                                              <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); carregar() }}>×</button>
+                                              <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id); carregar() }}>×</button>
                                             </div>
                                           )}
                                         </td>

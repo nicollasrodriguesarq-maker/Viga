@@ -16,6 +16,9 @@ async function criar(tabela: string, dados: object) {
 async function editar(tabela: string, id: string, dados: object) {
   try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }) } catch {}
 }
+async function remover(tabela: string, id: string) {
+  try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }) } catch {}
+}
 
 async function uploadFotoServico(file: File): Promise<string | null> {
   const ext = file.name.split('.').pop()
@@ -72,6 +75,7 @@ export default function LevantamentoMobile() {
   const [fLev, setFLev] = useState(FLEV_VAZIO)
   const [fAmb, setFAmb] = useState(FAMB_VAZIO)
   const [fItem, setFItem] = useState(FITEM_VAZIO)
+  const [editItem, setEditItem] = useState<any>(null)
   const [arquivoFoto, setArquivoFoto] = useState<File | null>(null)
   const [enviando, setEnviando] = useState(false)
   const [fotoCompartilhada, setFotoCompartilhada] = useState<string | null>(null)
@@ -187,9 +191,29 @@ export default function LevantamentoMobile() {
       area: area || null, unidade: fItem.unidade, observacao: fItem.observacao, foto_url: fotoCompartilhada || fItem.foto_url || null,
       banco_item_id: fItem.banco_item_id || null, categoria: fItem.categoria || null,
     }
-    const itemSalvo = await criar('levantamento_itens', dados)
+    let itemSalvo: any
+    if (editItem) { await editar('levantamento_itens', editItem.id, dados); itemSalvo = { ...dados, id: editItem.id } }
+    else { itemSalvo = await criar('levantamento_itens', dados) }
     setFItem(FITEM_VAZIO)
     if (itemSalvo?.id) await sincronizarItemOrcamento(itemSalvo, ambienteAtivo)
+    await carregar()
+    if (editItem) { setTela('detalhe'); setEditItem(null); setFotoCompartilhada(null) }
+  }
+
+  async function excluirItemLevantamento(item: any) {
+    const linked = await buscar('orcamento_itens', `?levantamento_item_id=eq.${item.id}`)
+    for (const oi of linked) await remover('orcamento_itens', oi.id)
+    await remover('levantamento_itens', item.id)
+    if (linked[0]?.orcamento_id) await atualizarTotaisOrcamento(linked[0].orcamento_id)
+    await carregar()
+  }
+
+  async function excluirAmbienteLevantamento(amb: any) {
+    if (!confirm('Excluir ambiente e todos os itens?')) return
+    const oaLinked = await buscar('orcamento_ambientes', `?levantamento_ambiente_id=eq.${amb.id}`)
+    for (const oa of oaLinked) await remover('orcamento_ambientes', oa.id)
+    await remover('levantamento_ambientes', amb.id)
+    if (oaLinked[0]?.orcamento_id) await atualizarTotaisOrcamento(oaLinked[0].orcamento_id)
     await carregar()
   }
 
@@ -272,7 +296,7 @@ export default function LevantamentoMobile() {
   // ── Tela: Novo Item ──────────────────────────────────────────────
   if (tela === 'novoItem') {
     return (
-      <MobileShell title={`Novo Serviço — ${ambienteAtivo?.nome || ''}`}>
+      <MobileShell title={`${editItem ? '✏️ Editar Serviço' : '🔧 Novo Serviço'} — ${ambienteAtivo?.nome || ''}`}>
         <div className="p-4 flex flex-col gap-3.5 pb-8">
           <div>
             <label className={labelCls}>Serviço *</label>
@@ -385,8 +409,8 @@ export default function LevantamentoMobile() {
             <input className={inputCls} placeholder="Ex: Infiltração detectada" value={fItem.observacao} onChange={e => setFItem({ ...fItem, observacao: e.target.value })} />
           </div>
           <div className="flex flex-col gap-2 mt-2">
-            <button className={btnPrimaryCls} onClick={salvarItem} disabled={enviando}>+ Adicionar e continuar</button>
-            <button className={btnSecondaryCls} onClick={concluirServicos}>Concluir</button>
+            <button className={btnPrimaryCls} onClick={salvarItem} disabled={enviando}>{editItem ? 'Salvar Alterações' : '+ Adicionar e continuar'}</button>
+            <button className={btnSecondaryCls} onClick={editItem ? () => { setTela('detalhe'); setEditItem(null); setFotoCompartilhada(null); setFItem(FITEM_VAZIO) } : concluirServicos}>{editItem ? 'Cancelar' : 'Concluir'}</button>
           </div>
         </div>
       </MobileShell>
@@ -416,7 +440,10 @@ export default function LevantamentoMobile() {
               <div key={amb.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
                 <div className="flex items-center justify-between mb-2">
                   <div className="font-bold text-on-surface text-sm">🏠 {amb.nome}</div>
-                  <button className="text-primary text-xs font-semibold" onClick={() => { setAmbienteAtivo(amb); setFItem(FITEM_VAZIO); setArquivoFoto(null); setFotoCompartilhada(null); setTela('novoItem') }}>+ Serviço</button>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button className="text-primary text-xs font-semibold" onClick={() => { setAmbienteAtivo(amb); setFItem(FITEM_VAZIO); setEditItem(null); setArquivoFoto(null); setFotoCompartilhada(null); setTela('novoItem') }}>+ Serviço</button>
+                    <button className="text-error text-xs font-semibold" onClick={() => excluirAmbienteLevantamento(amb)}>Excluir</button>
+                  </div>
                 </div>
                 {itensAmb.length === 0 ? (
                   <div className="text-[12px] text-on-surface-variant py-2">Nenhum serviço registrado</div>
@@ -424,16 +451,27 @@ export default function LevantamentoMobile() {
                   <div className="flex flex-col gap-2">
                     {itensAmb.map(item => (
                       <div key={item.id} className="flex gap-2.5 items-center py-2 border-t border-outline-variant first:border-0">
-                        <div className="w-11 h-11 rounded-lg bg-surface-container-low border border-outline-variant overflow-hidden shrink-0 flex items-center justify-center">
+                        <div className="w-11 h-11 rounded-lg bg-surface-container-low border border-outline-variant overflow-hidden shrink-0 flex items-center justify-center cursor-pointer"
+                          onClick={() => {
+                            setAmbienteAtivo(amb)
+                            setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento ? String(item.comprimento) : '', largura: item.largura ? String(item.largura) : '', altura: item.altura ? String(item.altura) : '', area: item.area ? String(item.area) : '', unidade: item.unidade || 'm²', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
+                            setArquivoFoto(null); setFotoCompartilhada(item.foto_url || null); setEditItem(item); setTela('novoItem')
+                          }}>
                           {item.foto_url ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img src={item.foto_url} alt="" className="w-full h-full object-cover" />
                           ) : <span className="material-symbols-outlined text-[16px] text-on-surface-variant/40">image</span>}
                         </div>
-                        <div className="min-w-0 flex-1">
+                        <div className="min-w-0 flex-1 cursor-pointer"
+                          onClick={() => {
+                            setAmbienteAtivo(amb)
+                            setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento ? String(item.comprimento) : '', largura: item.largura ? String(item.largura) : '', altura: item.altura ? String(item.altura) : '', area: item.area ? String(item.area) : '', unidade: item.unidade || 'm²', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
+                            setArquivoFoto(null); setFotoCompartilhada(item.foto_url || null); setEditItem(item); setTela('novoItem')
+                          }}>
                           <div className="text-sm text-on-surface truncate">{item.servico}</div>
                           {item.area && <div className="text-[11px] text-on-surface-variant">{item.area} {item.unidade}</div>}
                         </div>
+                        <button className="text-error text-xs font-semibold shrink-0" onClick={() => excluirItemLevantamento(item)}>×</button>
                       </div>
                     ))}
                   </div>

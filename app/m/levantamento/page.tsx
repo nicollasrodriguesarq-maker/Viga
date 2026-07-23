@@ -217,6 +217,31 @@ export default function LevantamentoMobile() {
     await carregar()
   }
 
+  async function excluirLevantamento(lev: any) {
+    const orcs = await buscar('orcamentos', `?levantamento_id=eq.${lev.id}`)
+    if (orcs.some((o: any) => o.obra_id)) {
+      alert('Este levantamento já foi convertido em obra e não pode ser excluído. Exclua a obra primeiro, se necessário.')
+      return
+    }
+    if (!confirm(`Excluir o levantamento ${lev.codigo}? Esta ação não pode ser desfeita.`)) return
+    const ambs = await buscar('levantamento_ambientes', `?levantamento_id=eq.${lev.id}`)
+    const itensLev = await buscar('levantamento_itens', `?levantamento_id=eq.${lev.id}`)
+    for (const item of itensLev) {
+      const oi = await buscar('orcamento_itens', `?levantamento_item_id=eq.${item.id}`)
+      for (const o of oi) await remover('orcamento_itens', o.id)
+    }
+    for (const amb of ambs) {
+      const oa = await buscar('orcamento_ambientes', `?levantamento_ambiente_id=eq.${amb.id}`)
+      for (const o of oa) await remover('orcamento_ambientes', o.id)
+    }
+    for (const orc of orcs) await remover('orcamentos', orc.id)
+    for (const item of itensLev) await remover('levantamento_itens', item.id)
+    for (const amb of ambs) await remover('levantamento_ambientes', amb.id)
+    await remover('levantamentos', lev.id)
+    if (detalhe?.id === lev.id) { setDetalhe(null); setTela(null) }
+    await carregar()
+  }
+
   function concluirServicos() {
     setTela('detalhe'); setArquivoFoto(null); setFotoCompartilhada(null); setFItem(FITEM_VAZIO)
   }
@@ -504,17 +529,20 @@ export default function LevantamentoMobile() {
         ) : filtrados.map(l => {
           const qtdItens = itens.filter(i => i.levantamento_id === l.id).length
           return (
-            <button key={l.id} onClick={() => { setDetalhe(l); setTela('detalhe') }}
-              className="text-left bg-surface-container border border-outline-variant rounded-xl p-4">
+            <div key={l.id} onClick={() => { setDetalhe(l); setTela('detalhe') }}
+              className="text-left bg-surface-container border border-outline-variant rounded-xl p-4 cursor-pointer">
               <div className="flex justify-between items-start gap-2">
                 <div className="min-w-0">
                   <div className="font-bold text-on-surface text-sm truncate">{l.nome || l.cliente}</div>
                   <div className="text-[11px] text-on-surface-variant truncate">{l.codigo} · {l.cliente}</div>
                 </div>
-                <span className="text-[10px] font-semibold text-on-surface-variant uppercase shrink-0">{STATUS_LEVA[l.status] || l.status}</span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[10px] font-semibold text-on-surface-variant uppercase">{STATUS_LEVA[l.status] || l.status}</span>
+                  <button className="text-error text-xs font-semibold" onClick={e => { e.stopPropagation(); excluirLevantamento(l) }}>🗑️</button>
+                </div>
               </div>
               <div className="text-[11px] text-on-surface-variant mt-2">{qtdItens} serviço{qtdItens === 1 ? '' : 's'} registrado{qtdItens === 1 ? '' : 's'}</div>
-            </button>
+            </div>
           )
         })}
       </div>

@@ -386,6 +386,30 @@ export default function Levantamento() {
     if (oaLinked[0]?.orcamento_id) await atualizarTotaisOrcamento(oaLinked[0].orcamento_id)
     carregar()
   }
+  async function excluirLevantamento(lev: any) {
+    const orcs = await buscar('orcamentos', `?levantamento_id=eq.${lev.id}`)
+    if (orcs.some((o: any) => o.obra_id)) {
+      alert('Este levantamento já foi convertido em obra e não pode ser excluído. Exclua a obra primeiro, se necessário.')
+      return
+    }
+    if (!confirm(`Excluir o levantamento ${lev.codigo}? Esta ação não pode ser desfeita.`)) return
+    const ambs = await buscar('levantamento_ambientes', `?levantamento_id=eq.${lev.id}`)
+    const itensLev = await buscar('levantamento_itens', `?levantamento_id=eq.${lev.id}`)
+    for (const item of itensLev) {
+      const oi = await buscar('orcamento_itens', `?levantamento_item_id=eq.${item.id}`)
+      for (const o of oi) await remover('orcamento_itens', o.id)
+    }
+    for (const amb of ambs) {
+      const oa = await buscar('orcamento_ambientes', `?levantamento_ambiente_id=eq.${amb.id}`)
+      for (const o of oa) await remover('orcamento_ambientes', o.id)
+    }
+    for (const orc of orcs) await remover('orcamentos', orc.id)
+    for (const item of itensLev) await remover('levantamento_itens', item.id)
+    for (const amb of ambs) await remover('levantamento_ambientes', amb.id)
+    await remover('levantamentos', lev.id)
+    if (detalhe?.id === lev.id) { setDetalhe(null) }
+    carregar()
+  }
   async function verOrcamentoVinculado() {
     if (!detalhe) return
     const existentes = await buscar('orcamentos', `?levantamento_id=eq.${detalhe.id}&limit=1`)
@@ -1232,9 +1256,12 @@ export default function Levantamento() {
                 onClick={() => { setDetalhe(lev); setAmbienteAtivo(null); setAbaDetalhe('ambientes') }}
                 className="bg-surface-container border border-outline-variant hover:border-primary transition-all duration-300 rounded-xl overflow-hidden cursor-pointer">
                 <div className="p-lg">
-                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border uppercase ${STATUS_BADGE[lev.status] || STATUS_BADGE.em_andamento}`}>{STATUS_LEVA[lev.status] || lev.status}</span>
-                    <span className="font-data-mono text-on-surface-variant text-body-sm">#{lev.codigo}</span>
+                  <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border uppercase ${STATUS_BADGE[lev.status] || STATUS_BADGE.em_andamento}`}>{STATUS_LEVA[lev.status] || lev.status}</span>
+                      <span className="font-data-mono text-on-surface-variant text-body-sm">#{lev.codigo}</span>
+                    </div>
+                    <button className={btnDangerSmCls} onClick={e => { e.stopPropagation(); excluirLevantamento(lev) }}>🗑️</button>
                   </div>
                   <h4 className="font-headline text-headline-sm text-on-surface mb-1">{lev.nome || lev.cliente}</h4>
                   {lev.nome && <div className="text-on-surface-variant text-body-sm mb-1">{lev.cliente}</div>}

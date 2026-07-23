@@ -68,6 +68,19 @@ function formatarJanela(visualizacao: 'dia' | 'semana' | 'mes', dataRef: Date) {
   if (visualizacao === 'semana') return `${inicio.toLocaleDateString('pt-BR')} – ${fim.toLocaleDateString('pt-BR')}`
   return dataRef.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' }).replace(/^\w/, c => c.toUpperCase())
 }
+function dataKey(d: Date) {
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0')
+}
+function diasDaSemana(dataRef: Date) {
+  const inicio = inicioSemana(dataRef)
+  return Array.from({ length: 7 }, (_, i) => { const d = new Date(inicio); d.setDate(inicio.getDate() + i); return d })
+}
+function diasDoMes(dataRef: Date) {
+  const primeiroDia = new Date(dataRef.getFullYear(), dataRef.getMonth(), 1)
+  const inicioGrade = inicioSemana(primeiroDia)
+  return Array.from({ length: 42 }, (_, i) => { const d = new Date(inicioGrade); d.setDate(inicioGrade.getDate() + i); return d })
+}
+const NOMES_DIA_SEMANA = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom']
 
 // classes reutilizáveis
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -200,6 +213,16 @@ export default function Agenda() {
     return [c.titulo, c.descricao, c.endereco].some(v => v?.toLowerCase().includes(termo))
   })
 
+  const filtradosBusca = compromissos.filter(c => {
+    if (!busca) return true
+    const termo = busca.toLowerCase()
+    return [c.titulo, c.descricao, c.endereco].some(v => v?.toLowerCase().includes(termo))
+  })
+  function compromissosDoDia(d: Date) {
+    const key = dataKey(d)
+    return filtradosBusca.filter(c => c.data === key)
+  }
+
   const grupos: { data: string, itens: any[] }[] = []
   for (const c of filtrados) {
     let grupo = grupos.find(g => g.data === c.data)
@@ -297,44 +320,102 @@ export default function Agenda() {
         </div>
       </div>
 
-      {grupos.length === 0 ? (
-        <div className={sectionCls + ' text-center py-16'}>
-          <div className="text-5xl mb-4">📅</div>
-          <div className="text-base font-bold text-on-surface mb-4">{compromissos.length === 0 ? 'Nenhum compromisso ainda' : 'Nenhum resultado'}</div>
-          {compromissos.length === 0 && <button className={btnPrimaryCls} onClick={abrirNovo}>+ Criar primeiro compromisso</button>}
-        </div>
-      ) : (
-        <div className="flex flex-col gap-5">
-          {grupos.map(grupo => (
-            <div key={grupo.data}>
-              <div className="text-sm font-bold text-primary mb-2.5 capitalize">{formatarGrupo(grupo.data)}</div>
-              <div className="flex flex-col gap-2">
-                {grupo.itens.map(c => (
-                  <div key={c.id} className={sectionCls + ' mb-0 flex justify-between items-start gap-3'}>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        {(c.hora_inicio || c.hora_fim) && (
-                          <span className="text-[11px] font-bold text-primary bg-primary/10 px-2 py-1 rounded-full">
-                            {c.hora_inicio?.slice(0, 5) || '—'}{c.hora_fim ? ' – ' + c.hora_fim.slice(0, 5) : ''}
-                          </span>
-                        )}
-                        {c.alerta_minutos_antes != null && (
-                          <span className="text-[11px] text-tertiary">🔔 {ALERTA_OPCOES.find(a => a.valor === String(c.alerta_minutos_antes))?.label || c.alerta_minutos_antes + ' min antes'}</span>
-                        )}
+      {visualizacao === 'dia' && (
+        grupos.length === 0 ? (
+          <div className={sectionCls + ' text-center py-16'}>
+            <div className="text-5xl mb-4">📅</div>
+            <div className="text-base font-bold text-on-surface mb-4">{compromissos.length === 0 ? 'Nenhum compromisso ainda' : 'Nenhum resultado'}</div>
+            {compromissos.length === 0 && <button className={btnPrimaryCls} onClick={abrirNovo}>+ Criar primeiro compromisso</button>}
+          </div>
+        ) : (
+          <div className="flex flex-col gap-5">
+            {grupos.map(grupo => (
+              <div key={grupo.data}>
+                <div className="text-sm font-bold text-primary mb-2.5 capitalize">{formatarGrupo(grupo.data)}</div>
+                <div className="flex flex-col gap-2">
+                  {grupo.itens.map(c => (
+                    <div key={c.id} className={sectionCls + ' mb-0 flex justify-between items-start gap-3'}>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1 flex-wrap">
+                          {(c.hora_inicio || c.hora_fim) && (
+                            <span className="text-[11px] font-bold text-primary bg-primary/10 px-2 py-1 rounded-full">
+                              {c.hora_inicio?.slice(0, 5) || '—'}{c.hora_fim ? ' – ' + c.hora_fim.slice(0, 5) : ''}
+                            </span>
+                          )}
+                          {c.alerta_minutos_antes != null && (
+                            <span className="text-[11px] text-tertiary">🔔 {ALERTA_OPCOES.find(a => a.valor === String(c.alerta_minutos_antes))?.label || c.alerta_minutos_antes + ' min antes'}</span>
+                          )}
+                        </div>
+                        <div className="font-bold text-on-surface">{c.titulo}</div>
+                        {c.endereco && <div className="text-[11px] text-on-surface-variant mt-0.5">📍 {c.endereco}</div>}
+                        {c.descricao && <div className="text-body-sm text-on-surface-variant mt-1">{c.descricao}</div>}
                       </div>
-                      <div className="font-bold text-on-surface">{c.titulo}</div>
-                      {c.endereco && <div className="text-[11px] text-on-surface-variant mt-0.5">📍 {c.endereco}</div>}
-                      {c.descricao && <div className="text-body-sm text-on-surface-variant mt-1">{c.descricao}</div>}
+                      <div className="flex gap-1.5 shrink-0">
+                        <button className={btnEditSmCls} onClick={() => abrirEditar(c)}>✏️</button>
+                        <button className={btnDangerSmCls} onClick={() => excluirCompromisso(c.id)}>×</button>
+                      </div>
                     </div>
-                    <div className="flex gap-1.5 shrink-0">
-                      <button className={btnEditSmCls} onClick={() => abrirEditar(c)}>✏️</button>
-                      <button className={btnDangerSmCls} onClick={() => excluirCompromisso(c.id)}>×</button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
+        )
+      )}
+
+      {visualizacao === 'semana' && (
+        <div className="grid grid-cols-7 gap-2">
+          {diasDaSemana(dataRef).map(d => {
+            const itensDia = compromissosDoDia(d)
+            const ehHoje = dataKey(d) === hojeStr
+            return (
+              <div key={dataKey(d)} className={`rounded-xl border p-2.5 min-h-[160px] ${ehHoje ? 'border-primary bg-primary/5' : 'border-outline-variant bg-surface-container'}`}>
+                <div className={`text-[11px] font-bold uppercase mb-2 ${ehHoje ? 'text-primary' : 'text-on-surface-variant'}`}>
+                  {NOMES_DIA_SEMANA[(d.getDay() + 6) % 7]} <span className="text-on-surface">{d.getDate()}</span>
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  {itensDia.map(c => (
+                    <div key={c.id} className="bg-surface-container-low border border-outline-variant rounded-lg px-2 py-1.5 cursor-pointer hover:border-primary transition-colors" onClick={() => abrirEditar(c)}>
+                      {(c.hora_inicio) && <div className="text-[10px] font-bold text-primary">{c.hora_inicio.slice(0, 5)}</div>}
+                      <div className="text-[11px] text-on-surface truncate">{c.titulo}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {visualizacao === 'mes' && (
+        <div className={sectionCls}>
+          <div className="grid grid-cols-7 gap-1 mb-1">
+            {NOMES_DIA_SEMANA.map(n => <div key={n} className="text-[10px] font-bold text-on-surface-variant uppercase text-center py-1">{n}</div>)}
+          </div>
+          <div className="grid grid-cols-7 gap-1">
+            {diasDoMes(dataRef).map(d => {
+              const itensDia = compromissosDoDia(d)
+              const foraDoMes = d.getMonth() !== dataRef.getMonth()
+              const ehHoje = dataKey(d) === hojeStr
+              const visiveis = itensDia.slice(0, 2)
+              const restantes = itensDia.length - visiveis.length
+              return (
+                <div key={dataKey(d)}
+                  onClick={() => { setVisualizacao('dia'); setDataRef(d) }}
+                  className={`rounded-lg border p-1.5 min-h-[80px] cursor-pointer hover:border-primary transition-colors ${ehHoje ? 'border-primary bg-primary/5' : 'border-outline-variant bg-surface-container'} ${foraDoMes ? 'opacity-40' : ''}`}>
+                  <div className={`text-[11px] font-bold mb-1 ${ehHoje ? 'text-primary' : 'text-on-surface'}`}>{d.getDate()}</div>
+                  <div className="flex flex-col gap-0.5">
+                    {visiveis.map(c => (
+                      <div key={c.id} className="text-[9px] bg-primary/10 text-primary rounded px-1 py-0.5 truncate">
+                        {c.hora_inicio ? c.hora_inicio.slice(0, 5) + ' ' : ''}{c.titulo}
+                      </div>
+                    ))}
+                    {restantes > 0 && <div className="text-[9px] text-on-surface-variant">+{restantes} mais</div>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
         </div>
       )}
 

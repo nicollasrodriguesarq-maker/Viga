@@ -110,6 +110,9 @@ export default function Agenda() {
   const [alvoAgenda, setAlvoAgenda] = useState('') // '' = minha agenda; 'equipe' = todos visíveis; ou um id de usuário
   const [visualizacao, setVisualizacao] = useState<'dia' | 'semana' | 'mes'>('semana')
   const [dataRef, setDataRef] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })
+  const [feedToken, setFeedToken] = useState('')
+  const [mostrarSync, setMostrarSync] = useState(false)
+  const [copiado, setCopiado] = useState(false)
 
   const souGestor = souAdmin || souGerenteTime
 
@@ -130,6 +133,8 @@ export default function Agenda() {
         const usuarioIdNaUrl = new URLSearchParams(window.location.search).get('usuario_id')
         if (usuarioIdNaUrl) setAlvoAgenda(usuarioIdNaUrl)
       }
+      const meu = await buscar('usuarios', '?id=eq.' + perm.id + '&select=feed_token')
+      setFeedToken(meu[0]?.feed_token || '')
     })
   }, [])
 
@@ -270,14 +275,44 @@ export default function Agenda() {
           <h2 className="font-headline text-headline-lg text-on-surface">Agenda</h2>
           <p className="text-body-md text-on-surface-variant">Compromissos, visitas e prazos da equipe.</p>
         </div>
-        <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant">
-          {(['dia', 'semana', 'mes'] as const).map(v => (
-            <button key={v}
-              className={`px-4 py-2 rounded-lg text-label-md transition-colors capitalize ${visualizacao === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
-              onClick={() => setVisualizacao(v)}>{v}</button>
-          ))}
+        <div className="flex items-center gap-3 flex-wrap">
+          <button className={btnSecondaryCls} onClick={() => setMostrarSync(!mostrarSync)}>🔗 Sincronizar com o celular</button>
+          <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant">
+            {(['dia', 'semana', 'mes'] as const).map(v => (
+              <button key={v}
+                className={`px-4 py-2 rounded-lg text-label-md transition-colors capitalize ${visualizacao === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+                onClick={() => setVisualizacao(v)}>{v}</button>
+            ))}
+          </div>
         </div>
       </div>
+
+      {mostrarSync && (
+        <div className={sectionCls}>
+          <div className="text-sm font-bold text-on-surface mb-1.5">🔗 Sincronizar com o celular</div>
+          <p className="text-body-sm text-on-surface-variant mb-3">
+            Assine este link uma vez no app de Calendário do seu celular para que seus compromissos apareçam automaticamente lá
+            (o celular verifica atualizações a cada poucas horas — não é instantâneo).
+          </p>
+          {feedToken ? (
+            <>
+              <div className="flex gap-2 mb-3">
+                <input readOnly className={inputCls} value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/agenda/feed/${feedToken}`} onFocus={e => e.target.select()} />
+                <button className={btnPrimaryCls} onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/api/agenda/feed/${feedToken}`)
+                  setCopiado(true); setTimeout(() => setCopiado(false), 2000)
+                }}>{copiado ? '✓ Copiado' : 'Copiar'}</button>
+              </div>
+              <div className="text-[11px] text-on-surface-variant">
+                <strong className="text-on-surface">iPhone:</strong> Ajustes → Calendário → Contas → Adicionar Conta → Outra → Adicionar Calendário Assinado, cole o link acima.<br />
+                <strong className="text-on-surface">Android/Google Agenda:</strong> app Google Agenda → Configurações → Adicionar calendário → A partir de URL, cole o link acima.
+              </div>
+            </>
+          ) : (
+            <div className="text-body-sm text-on-surface-variant">Carregando link...</div>
+          )}
+        </div>
+      )}
 
       {souGestor && (
         <div className="mb-lg">

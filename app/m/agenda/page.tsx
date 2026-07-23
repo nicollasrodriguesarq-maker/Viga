@@ -102,6 +102,9 @@ export default function AgendaMobile() {
   const [alvoAgenda, setAlvoAgenda] = useState('')
   const [visualizacao, setVisualizacao] = useState<'dia' | 'semana' | 'mes'>('semana')
   const [dataRef, setDataRef] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d })
+  const [feedToken, setFeedToken] = useState('')
+  const [mostrarSync, setMostrarSync] = useState(false)
+  const [copiado, setCopiado] = useState(false)
 
   const souGestor = souAdmin || souGerenteTime
 
@@ -119,6 +122,8 @@ export default function AgendaMobile() {
         const u = await buscar('usuarios', '?select=id,nome,email&order=nome')
         setUsuarios(u)
       }
+      const meu = await buscar('usuarios', '?id=eq.' + perm.id + '&select=feed_token')
+      setFeedToken(meu[0]?.feed_token || '')
     })
   }, [])
 
@@ -272,6 +277,32 @@ export default function AgendaMobile() {
     <MobileShell title="Agenda">
       <div className="p-4 flex flex-col gap-3 pb-8">
         <input className={inputCls} placeholder="Pesquisar compromissos..." value={busca} onChange={e => setBusca(e.target.value)} />
+
+        <button className={btnSecondaryCls} onClick={() => setMostrarSync(!mostrarSync)}>🔗 Sincronizar com o celular</button>
+
+        {mostrarSync && (
+          <div className="bg-surface-container-low border border-outline-variant rounded-xl p-3.5">
+            <p className="text-[11px] text-on-surface-variant mb-2.5">
+              Assine este link uma vez no app de Calendário do celular para que seus compromissos apareçam automaticamente lá
+              (verifica a cada poucas horas — não é instantâneo).
+            </p>
+            {feedToken ? (
+              <>
+                <input readOnly className={inputCls + ' mb-2 text-xs'} value={`${typeof window !== 'undefined' ? window.location.origin : ''}/api/agenda/feed/${feedToken}`} onFocus={e => e.target.select()} />
+                <button className={btnPrimaryCls} onClick={() => {
+                  navigator.clipboard.writeText(`${window.location.origin}/api/agenda/feed/${feedToken}`)
+                  setCopiado(true); setTimeout(() => setCopiado(false), 2000)
+                }}>{copiado ? '✓ Copiado' : 'Copiar link'}</button>
+                <div className="text-[10px] text-on-surface-variant mt-2.5">
+                  <strong className="text-on-surface">iPhone:</strong> Ajustes → Calendário → Contas → Adicionar Conta → Outra → Adicionar Calendário Assinado.<br />
+                  <strong className="text-on-surface">Android:</strong> Google Agenda → Configurações → Adicionar calendário → A partir de URL.
+                </div>
+              </>
+            ) : (
+              <div className="text-[11px] text-on-surface-variant">Carregando link...</div>
+            )}
+          </div>
+        )}
 
         <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant">
           {(['dia', 'semana', 'mes'] as const).map(v => (

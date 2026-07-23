@@ -57,6 +57,9 @@ export default function ObrasMobile() {
   const [medicoes, setMedicoes] = useState<any[]>([])
   const [medItens, setMedItens] = useState<any[]>([])
   const [relatorios, setRelatorios] = useState<any[]>([])
+  const [funcionarios, setFuncionarios] = useState<any[]>([])
+  const [funcionarioArquivos, setFuncionarioArquivos] = useState<any[]>([])
+  const [funcExpandido, setFuncExpandido] = useState<string | null>(null)
   const [meuId, setMeuId] = useState('')
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState('todos')
@@ -83,7 +86,7 @@ export default function ObrasMobile() {
   }, [])
 
   async function carregar() {
-    const [o, l, g, s, orc, orcIt, med, medIt, rv] = await Promise.all([
+    const [o, l, g, s, orc, orcIt, med, medIt, rv, fu, fua] = await Promise.all([
       buscar('obras', '?order=created_at.desc'),
       buscar('lancamentos', '?order=data.desc'),
       buscar('gastos_cartao', '?order=data.desc'),
@@ -93,9 +96,11 @@ export default function ObrasMobile() {
       buscar('medicoes', '?order=data.desc'),
       buscar('medicao_itens', '?order=created_at'),
       buscar('obra_relatorios_visita', '?order=data.desc'),
+      buscar('obra_funcionarios', '?order=created_at'),
+      buscar('obra_funcionario_arquivos', '?order=created_at'),
     ])
     setObras(o); setLancs(l); setGastos(g); setServicos(s); setOrcamentos(orc); setOrcItens(orcIt)
-    setMedicoes(med); setMedItens(medIt); setRelatorios(rv)
+    setMedicoes(med); setMedItens(medIt); setRelatorios(rv); setFuncionarios(fu); setFuncionarioArquivos(fua)
   }
 
   function custosObra(id: string) {
@@ -394,6 +399,7 @@ export default function ObrasMobile() {
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
     const medicoesObra = medicoes.filter(m => m.obra_id === detalhe.id)
     const visitasObra = relatorios.filter(r => r.obra_id === detalhe.id)
+    const funcionariosObra = funcionarios.filter(f => f.obra_id === detalhe.id)
 
     return (
       <MobileShell title={detalhe.codigo}>
@@ -420,7 +426,7 @@ export default function ObrasMobile() {
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {[['resumo', '📋 Resumo'], ['visitas', '📷 Visitas'], ['medicoes', '📐 Medições'], ['servicos', '🔧 Serviços'], ['nf', '🧾 NF']].map(([id, nome]) => (
+            {[['resumo', '📋 Resumo'], ['visitas', '📷 Visitas'], ['medicoes', '📐 Medições'], ['servicos', '🔧 Serviços'], ['funcionarios', '🪪 Funcionários'], ['nf', '🧾 NF']].map(([id, nome]) => (
               <button key={id} onClick={() => setAba(id)}
                 className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${aba === id ? 'bg-primary/10 text-primary border-primary/30' : 'bg-surface-container text-on-surface-variant border-outline-variant'}`}>
                 {nome}
@@ -464,6 +470,41 @@ export default function ObrasMobile() {
                       <span>Previsto: {moeda(vp)}</span>
                       <span>Realizado: {moeda(vr)}</span>
                     </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {aba === 'funcionarios' && (
+            <div className="flex flex-col gap-2">
+              {funcionariosObra.length === 0 ? (
+                <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhum funcionário cadastrado</div>
+              ) : funcionariosObra.map(f => {
+                const arquivosDoFunc = funcionarioArquivos.filter(a => a.funcionario_id === f.id)
+                const expandido = funcExpandido === f.id
+                return (
+                  <div key={f.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
+                    <div className="cursor-pointer" onClick={() => setFuncExpandido(expandido ? null : f.id)}>
+                      <div className="font-semibold text-sm text-on-surface">{f.nome}</div>
+                      <div className="text-[11px] text-on-surface-variant mt-0.5">{[f.empresa, f.telefone].filter(Boolean).join(' · ') || '—'}</div>
+                      <div className="text-[11px] text-on-surface-variant">{arquivosDoFunc.length} arquivo(s) — {expandido ? 'ocultar' : 'ver detalhes'}</div>
+                    </div>
+                    {expandido && (
+                      <div className="mt-3 pt-3 border-t border-outline-variant">
+                        <div className="grid grid-cols-2 gap-2 text-[11px] text-on-surface-variant mb-2">
+                          <div><span className="uppercase">CPF</span><div className="text-on-surface font-semibold">{f.cpf || '—'}</div></div>
+                          <div><span className="uppercase">RG</span><div className="text-on-surface font-semibold">{f.rg || '—'}</div></div>
+                        </div>
+                        {arquivosDoFunc.length > 0 && (
+                          <div className="flex flex-col gap-1.5">
+                            {arquivosDoFunc.map(arq => (
+                              <a key={arq.id} href={arq.url} target="_blank" rel="noopener noreferrer" className="px-3 py-2 bg-surface-container-low rounded-lg border border-outline-variant text-xs text-on-surface truncate">📄 {arq.nome}</a>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )
               })}

@@ -61,6 +61,18 @@ async function uploadFotoVisita(file: File): Promise<string | null> {
 const CLIMA_OPCOES = [{ v: 'ensolarado', l: '☀️ Ensolarado' }, { v: 'nublado', l: '☁️ Nublado' }, { v: 'chuva', l: '🌧️ Chuva' }, { v: 'sem_expediente', l: '🚫 Sem expediente' }]
 const FRV_VAZIO = { data: new Date().toISOString().slice(0, 10), clima: '', descricao: '', pendencias: '', equipe_presente: [] as string[], nomeEquipeAtual: '' }
 
+async function uploadArquivoFuncionario(file: File): Promise<string | null> {
+  const nome = `arq_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+  const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/obra-funcionarios-arquivos/${nome}`, {
+    method: 'POST',
+    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type || 'application/octet-stream' },
+    body: file,
+  })
+  if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/obra-funcionarios-arquivos/${nome}`
+  return null
+}
+const FFUNC_VAZIO = { nome: '', cpf: '', rg: '', empresa: '', telefone: '' }
+
 const STATUS_NOME: Record<string, string> = {
   captacao: 'Em Captação',
   em_execucao: 'Em Execução',
@@ -164,7 +176,7 @@ export default function Obras() {
   const [loading,  setLoading]  = useState(true)
   const [detalhe,  setDetalhe]  = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('resumo')
-  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | 'relatorio_pdf' | 'nova_visita' | 'editar_visita' | null>(null)
+  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | 'relatorio_pdf' | 'nova_visita' | 'editar_visita' | 'novo_funcionario' | 'editar_funcionario' | null>(null)
   const [observacoesPdf, setObservacoesPdf] = useState('')
   const [filtro,   setFiltro]   = useState('todos')
   const [busca,    setBusca]    = useState('')
@@ -196,6 +208,14 @@ export default function Obras() {
   const [rvEditando, setRvEditando] = useState<any>(null)
   const [buscaRv, setBuscaRv] = useState('')
 
+  const [funcionarios, setFuncionarios] = useState<any[]>([])
+  const [funcionarioArquivos, setFuncionarioArquivos] = useState<any[]>([])
+  const [fFunc, setFFunc] = useState(FFUNC_VAZIO)
+  const [funcEditando, setFuncEditando] = useState<any>(null)
+  const [funcExpandido, setFuncExpandido] = useState<string | null>(null)
+  const [arquivoUploadFunc, setArquivoUploadFunc] = useState<File | null>(null)
+  const [enviandoArquivoFunc, setEnviandoArquivoFunc] = useState(false)
+
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) {
       window.location.href = '/'
@@ -226,7 +246,7 @@ export default function Obras() {
 
   async function carregar() {
     setLoading(true)
-    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt, u, atr, rv] = await Promise.all([
+    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt, u, atr, rv, fu, fua] = await Promise.all([
       buscar('obras', '?order=created_at.desc'),
       buscar('lancamentos', '?order=data.desc'),
       buscar('gastos_cartao', '?order=data.desc'),
@@ -240,6 +260,8 @@ export default function Obras() {
       buscar('usuarios', '?select=id,nome,email,role&order=nome'),
       buscar('obra_atribuicoes', '?order=created_at'),
       buscar('obra_relatorios_visita', '?order=data.desc'),
+      buscar('obra_funcionarios', '?order=created_at'),
+      buscar('obra_funcionario_arquivos', '?order=created_at'),
     ])
     setObras(o)
     setLancs(l)
@@ -254,7 +276,48 @@ export default function Obras() {
     setUsuarios(u)
     setAtribuicoes(atr)
     setRelatoriosVisita(rv)
+    setFuncionarios(fu)
+    setFuncionarioArquivos(fua)
     setLoading(false)
+  }
+
+  // ── Funcionários / equipe da obra ────────────────────────────
+  function abrirNovoFuncionario() {
+    setFuncEditando(null); setFFunc(FFUNC_VAZIO)
+    setJanela('novo_funcionario')
+  }
+  function abrirEditarFuncionario(f: any) {
+    setFuncEditando(f)
+    setFFunc({ nome: f.nome, cpf: f.cpf || '', rg: f.rg || '', empresa: f.empresa || '', telefone: f.telefone || '' })
+    setJanela('editar_funcionario')
+  }
+  async function salvarFuncionario() {
+    if (!detalhe || !fFunc.nome.trim()) return alert('Preencha o nome')
+    const dados = { obra_id: detalhe.id, nome: fFunc.nome.trim(), cpf: fFunc.cpf || null, rg: fFunc.rg || null, empresa: fFunc.empresa || null, telefone: fFunc.telefone || null }
+    if (funcEditando) { await editar('obra_funcionarios', funcEditando.id, dados) }
+    else { await criar('obra_funcionarios', dados) }
+    setJanela(null); setFuncEditando(null); setFFunc(FFUNC_VAZIO)
+    await carregar()
+  }
+  async function excluirFuncionario(f: any) {
+    if (!confirm(`Excluir ${f.nome}? Isso também remove os arquivos anexados.`)) return
+    await remover('obra_funcionarios', f.id)
+    await carregar()
+  }
+  async function salvarArquivoFuncionario(funcionarioId: string) {
+    if (!arquivoUploadFunc) return
+    setEnviandoArquivoFunc(true)
+    const url = await uploadArquivoFuncionario(arquivoUploadFunc)
+    setEnviandoArquivoFunc(false)
+    if (!url) return alert('Falha ao enviar o arquivo. Tente novamente.')
+    await criar('obra_funcionario_arquivos', { funcionario_id: funcionarioId, nome: arquivoUploadFunc.name, url, tipo: arquivoUploadFunc.type || null })
+    setArquivoUploadFunc(null)
+    await carregar()
+  }
+  async function removerArquivoFuncionario(id: string) {
+    if (!confirm('Excluir este arquivo?')) return
+    await remover('obra_funcionario_arquivos', id)
+    await carregar()
   }
 
   // ── Relatório de Visita ──────────────────────────────────────
@@ -917,6 +980,7 @@ export default function Obras() {
       const alvo = ((v.descricao || '') + ' ' + (v.pendencias || '') + ' ' + dataBR(v.data)).toLowerCase()
       return alvo.includes(buscaRv.toLowerCase())
     })
+    const funcionariosObra = funcionarios.filter(f => f.obra_id === detalhe.id)
 
     return (
       <Layout userEmail={userEmail} onLogout={sair}>
@@ -993,7 +1057,7 @@ export default function Obras() {
 
         {/* abas */}
         <div className="flex gap-2 mb-lg flex-wrap">
-          {([['resumo', '📋 Resumo'], ['equipe', '👷 Equipe'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições'], ['visitas', '📷 Visitas']] as [string, string][]).map(([id, nome]) => (
+          {([['resumo', '📋 Resumo'], ['equipe', '👷 Equipe'], ['funcionarios', '🪪 Funcionários'], ['servicos', '🔧 Serviços'], ['lancamentos', '💰 Lançamentos'], ['cartao', '💳 Cartão'], ['cronograma', '📅 Cronograma'], ['medicoes', '📐 Medições'], ['visitas', '📷 Visitas']] as [string, string][]).map(([id, nome]) => (
             <button key={id} className={abaDetalhe === id ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe(id)}>{nome}</button>
           ))}
         </div>
@@ -1062,6 +1126,93 @@ export default function Obras() {
             </div>
           )
         })()}
+
+        {/* aba funcionários */}
+        {abaDetalhe === 'funcionarios' && (
+          <div className={sectionCls}>
+            <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
+              <div>
+                <div className="text-sm font-bold text-on-surface">🪪 Funcionários / Equipe da Obra</div>
+                <div className="text-body-sm text-on-surface-variant mt-0.5">Cadastro manual — nome, documento, empresa e anexos por pessoa</div>
+              </div>
+              <button className={btnPrimaryCls} onClick={abrirNovoFuncionario}>+ Novo Funcionário</button>
+            </div>
+            {funcionariosObra.length === 0 ? (
+              <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum funcionário cadastrado ainda</div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                {funcionariosObra.map(f => {
+                  const arquivosDoFunc = funcionarioArquivos.filter(a => a.funcionario_id === f.id)
+                  const expandido = funcExpandido === f.id
+                  return (
+                    <div key={f.id} className="bg-surface-container-low border border-outline-variant rounded-lg p-3.5">
+                      <div className="flex justify-between items-start gap-2">
+                        <div className="min-w-0 cursor-pointer" onClick={() => setFuncExpandido(expandido ? null : f.id)}>
+                          <div className="font-semibold text-sm text-on-surface">{f.nome}</div>
+                          <div className="text-[11px] text-on-surface-variant mt-0.5">
+                            {[f.empresa, f.telefone].filter(Boolean).join(' · ') || '—'}
+                          </div>
+                          <div className="text-[11px] text-on-surface-variant">{arquivosDoFunc.length} arquivo(s) — {expandido ? 'ocultar' : 'ver detalhes'}</div>
+                        </div>
+                        <div className="flex gap-1.5 shrink-0">
+                          <button className={btnEditSmCls} onClick={() => abrirEditarFuncionario(f)}>✏️</button>
+                          <button className={btnDangerSmCls} onClick={() => excluirFuncionario(f)}>×</button>
+                        </div>
+                      </div>
+                      {expandido && (
+                        <div className="mt-3 pt-3 border-t border-outline-variant">
+                          <div className="grid grid-cols-2 gap-2 text-[11px] text-on-surface-variant mb-3">
+                            <div><span className="uppercase">CPF</span><div className="text-on-surface font-semibold">{f.cpf || '—'}</div></div>
+                            <div><span className="uppercase">RG</span><div className="text-on-surface font-semibold">{f.rg || '—'}</div></div>
+                          </div>
+                          <div className="flex items-center gap-2.5 mb-3">
+                            <input type="file" onChange={e => setArquivoUploadFunc(e.target.files?.[0] || null)}
+                              className="flex-1 bg-surface-container border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer" />
+                            <button className={btnEditSmCls} onClick={() => salvarArquivoFuncionario(f.id)} disabled={!arquivoUploadFunc || enviandoArquivoFunc}>
+                              {enviandoArquivoFunc ? 'Enviando...' : '+ Enviar'}
+                            </button>
+                          </div>
+                          {arquivosDoFunc.length > 0 && (
+                            <div className="flex flex-col gap-1.5">
+                              {arquivosDoFunc.map(arq => (
+                                <div key={arq.id} className="flex justify-between items-center px-3 py-2 bg-surface-container rounded-lg border border-outline-variant">
+                                  <a href={arq.url} target="_blank" rel="noopener noreferrer" className="text-xs text-on-surface hover:text-primary truncate">📄 {arq.nome}</a>
+                                  <button className={btnDangerSmCls} onClick={() => removerArquivoFuncionario(arq.id)}>×</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* modal novo/editar funcionário */}
+        {(janela === 'novo_funcionario' || janela === 'editar_funcionario') && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
+              <div className="text-base font-bold text-on-surface mb-5">{janela === 'editar_funcionario' ? '✏️ Editar Funcionário' : '🪪 Novo Funcionário'}</div>
+              <div className="flex flex-col gap-3.5">
+                <div><label className={labelCls}>Nome *</label><input className={inputCls} value={fFunc.nome} onChange={e => setFFunc({ ...fFunc, nome: e.target.value })} /></div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div><label className={labelCls}>CPF</label><input className={inputCls} value={fFunc.cpf} onChange={e => setFFunc({ ...fFunc, cpf: e.target.value })} /></div>
+                  <div><label className={labelCls}>RG</label><input className={inputCls} value={fFunc.rg} onChange={e => setFFunc({ ...fFunc, rg: e.target.value })} /></div>
+                </div>
+                <div><label className={labelCls}>Empresa</label><input className={inputCls} value={fFunc.empresa} onChange={e => setFFunc({ ...fFunc, empresa: e.target.value })} /></div>
+                <div><label className={labelCls}>Telefone</label><input className={inputCls} value={fFunc.telefone} onChange={e => setFFunc({ ...fFunc, telefone: e.target.value })} /></div>
+              </div>
+              <div className="flex gap-2.5 justify-end mt-6">
+                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setFuncEditando(null); setFFunc(FFUNC_VAZIO) }}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={salvarFuncionario}>{janela === 'editar_funcionario' ? 'Salvar Alterações' : 'Adicionar Funcionário'}</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* aba serviços */}
         {abaDetalhe === 'servicos' && (

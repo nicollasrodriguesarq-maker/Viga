@@ -161,16 +161,33 @@ export default function ObrasMobile() {
 
   // Mesma logica "viva" de app/obras/page.tsx: custo/recebido por servico via medicoes,
   // com fallback pro lancamento/gasto vinculado ou pro valor manual.
-  function custoServicoAuto(servico: any) {
-    const vrLanc = lancs.filter(l => l.servico_id === servico.id && l.tipo === 'saida').reduce((a, l) => a + parseFloat(l.valor || 0), 0)
-    const vrGasto = gastos.filter(g => g.servico_id === servico.id).reduce((a, g) => a + parseFloat(g.valor || 0), 0)
+  // Base "viva" pra medição: fornecedor mede em cima do custo de mão de obra do serviço
+  // (não do valor cobrado do cliente); cliente mede em cima do valor cobrado.
+  function baseParaMedicao(item: any, tipo: string) {
+    if (tipo === 'fornecedor') {
+      const mo = parseFloat(item.valor_mao_obra_previsto || 0)
+      return mo > 0 ? mo : parseFloat(item.valor_previsto || 0)
+    }
+    return parseFloat(item.valor_previsto || 0)
+  }
+  function custoMaoObraServicoAuto(servico: any) {
+    const vrLanc = lancs.filter(l => l.servico_id === servico.id && l.tipo === 'saida' && l.categoria !== 'Material').reduce((a, l) => a + parseFloat(l.valor || 0), 0)
+    const vrGasto = gastos.filter(g => g.servico_id === servico.id && g.categoria !== 'Material').reduce((a, g) => a + parseFloat(g.valor || 0), 0)
     const registro = medItens
       .filter(mi => mi.servico_id === servico.id)
       .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
       .filter((mi): mi is any => !!mi.medicao && mi.medicao.tipo === 'fornecedor')
       .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0]
     const vrMedicao = registro ? registro.valor_base * registro.percentual_acumulado : 0
-    const vrAuto = Math.max(vrLanc + vrGasto, vrMedicao)
+    return Math.max(vrLanc + vrGasto, vrMedicao)
+  }
+  function custoMaterialServicoAuto(servico: any) {
+    const vrLanc = lancs.filter(l => l.servico_id === servico.id && l.tipo === 'saida' && l.categoria === 'Material').reduce((a, l) => a + parseFloat(l.valor || 0), 0)
+    const vrGasto = gastos.filter(g => g.servico_id === servico.id && g.categoria === 'Material').reduce((a, g) => a + parseFloat(g.valor || 0), 0)
+    return vrLanc + vrGasto
+  }
+  function custoServicoAuto(servico: any) {
+    const vrAuto = custoMaoObraServicoAuto(servico) + custoMaterialServicoAuto(servico)
     return vrAuto > 0 ? vrAuto : parseFloat(servico.valor_realizado || 0)
   }
   function cobradoClienteServicoAuto(servicoId: string) {
@@ -281,7 +298,7 @@ export default function ObrasMobile() {
       const existente = medItens.find(mi => mi.medicao_id === medicao.id && mi.servico_id === item.id)
       const ultimo = ultimoRegistro(item.id, medicao.id, medicao.tipo, medicao.fornecedor)
       preench[item.id] = {
-        valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(parseFloat(item.valor_previsto || 0))),
+        valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(baseParaMedicao(item, medicao.tipo))),
         percentual: existente ? String(existente.percentual_acumulado * 100) : (ultimo ? String(ultimo.percentual_acumulado * 100) : '0'),
       }
     })
@@ -497,7 +514,7 @@ export default function ObrasMobile() {
     const retPct = parseFloat(orcamentoObra?.retencao_percentual || 0)
     let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
     const linhas = itensFiltrados.map(item => {
-      const p = preenchimento[item.id] || { valor_base: String(parseFloat(item.valor_previsto || 0)), percentual: '0' }
+      const p = preenchimento[item.id] || { valor_base: String(baseParaMedicao(item, medicaoAtiva.tipo)), percentual: '0' }
       const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor)
       const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
       const valorBase = parseFloat(p.valor_base || '0')
@@ -731,6 +748,8 @@ export default function ObrasMobile() {
                 <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado</div>
               ) : svs.map(sv => {
                 const vp = parseFloat(sv.valor_previsto || 0)
+                const vrMao = custoMaoObraServicoAuto(sv)
+                const vrMat = custoMaterialServicoAuto(sv)
                 const vr = custoServicoAuto(sv)
                 const vCliente = cobradoClienteServicoAuto(sv.id)
                 return (
@@ -746,6 +765,7 @@ export default function ObrasMobile() {
                       <div><div>Cobrado Cliente</div><div className="font-semibold text-primary-container">{moeda(vCliente)}</div></div>
                       <div><div>Nosso Custo</div><div className="font-semibold text-on-surface">{moeda(vr)}</div></div>
                     </div>
+                    {(vrMao > 0 || vrMat > 0) && <div className="text-[10px] text-on-surface-variant text-center mt-1">M.O: {moeda(vrMao)} · Mat: {moeda(vrMat)}</div>}
                   </div>
                 )
               })}

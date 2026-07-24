@@ -257,6 +257,7 @@ export default function Obras() {
 
   const [fServ, setFServ] = useState({
     nome: '', valor_previsto: '', valor_realizado: '',
+    valor_mao_obra_previsto: '', valor_material_previsto: '',
     status: 'pendente', observacao: '', fornecedor: ''
   })
 
@@ -483,7 +484,7 @@ export default function Obras() {
       const existente = medItens.find(mi => mi.medicao_id === medicao.id && mi.servico_id === item.id)
       const ultimo = ultimoRegistro(item.id, medicao.id, medicao.tipo, medicao.fornecedor)
       preench[item.id] = {
-        valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(parseFloat(item.valor_previsto || 0))),
+        valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(baseParaMedicao(item, medicao.tipo))),
         percentual: existente ? String(existente.percentual_acumulado * 100) : (ultimo ? String(ultimo.percentual_acumulado * 100) : '0'),
       }
     })
@@ -1094,18 +1095,41 @@ export default function Obras() {
   }
 
   // ── cálculos ──────────────────────────────────────────────
-  // Custo "vivo" de um serviço: maior valor entre lançamentos/gastos vinculados a ele e a
-  // última medição de fornecedor registrada nele; cai para o valor manual só se nada disso existir.
-  function custoServicoAuto(servico: any) {
-    const vrLanc = lancs.filter(l => l.servico_id === servico.id && l.tipo === 'saida').reduce((a, l) => a + parseFloat(l.valor || 0), 0)
-    const vrGasto = gastos.filter(g => g.servico_id === servico.id).reduce((a, g) => a + parseFloat(g.valor || 0), 0)
+  // Base "viva" pra medição: mão de obra mede em cima do custo de mão de obra do serviço
+  // (não do valor cobrado do cliente); cliente mede em cima do valor cobrado. Cai pro valor
+  // cobrado se o serviço ainda não tem o custo de mão de obra preenchido (dado antigo/manual).
+  function baseParaMedicao(item: any, tipo: string) {
+    if (tipo === 'fornecedor') {
+      const mo = parseFloat(item.valor_mao_obra_previsto || 0)
+      return mo > 0 ? mo : parseFloat(item.valor_previsto || 0)
+    }
+    return parseFloat(item.valor_previsto || 0)
+  }
+  // Custo "vivo" de mão de obra de um serviço: maior valor entre lançamentos/gastos com
+  // categoria diferente de Material vinculados a ele e a última medição de fornecedor
+  // registrada nele.
+  function custoMaoObraServicoAuto(servico: any) {
+    const vrLanc = lancs.filter(l => l.servico_id === servico.id && l.tipo === 'saida' && l.categoria !== 'Material').reduce((a, l) => a + parseFloat(l.valor || 0), 0)
+    const vrGasto = gastos.filter(g => g.servico_id === servico.id && g.categoria !== 'Material').reduce((a, g) => a + parseFloat(g.valor || 0), 0)
     const registro = medItens
       .filter(mi => mi.servico_id === servico.id)
       .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
       .filter((mi): mi is any => !!mi.medicao && mi.medicao.tipo === 'fornecedor')
       .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0]
     const vrMedicao = registro ? registro.valor_base * registro.percentual_acumulado : 0
-    const vrAuto = Math.max(vrLanc + vrGasto, vrMedicao)
+    return Math.max(vrLanc + vrGasto, vrMedicao)
+  }
+  // Custo "vivo" de material de um serviço: soma dos lançamentos/gastos com categoria
+  // Material vinculados a ele (compras de material descontam direto daqui, sem medição).
+  function custoMaterialServicoAuto(servico: any) {
+    const vrLanc = lancs.filter(l => l.servico_id === servico.id && l.tipo === 'saida' && l.categoria === 'Material').reduce((a, l) => a + parseFloat(l.valor || 0), 0)
+    const vrGasto = gastos.filter(g => g.servico_id === servico.id && g.categoria === 'Material').reduce((a, g) => a + parseFloat(g.valor || 0), 0)
+    return vrLanc + vrGasto
+  }
+  // Custo "vivo" total de um serviço: mão de obra + material; cai para o valor manual só
+  // se nada disso existir.
+  function custoServicoAuto(servico: any) {
+    const vrAuto = custoMaoObraServicoAuto(servico) + custoMaterialServicoAuto(servico)
     return vrAuto > 0 ? vrAuto : parseFloat(servico.valor_realizado || 0)
   }
   // Valor "vivo" cobrado do cliente num serviço: última medição de cliente registrada nele.
@@ -1251,6 +1275,8 @@ export default function Obras() {
       nome: fServ.nome.trim(),
       valor_previsto: parseFloat(fServ.valor_previsto || '0'),
       valor_realizado: parseFloat(fServ.valor_realizado || '0'),
+      valor_mao_obra_previsto: parseFloat(fServ.valor_mao_obra_previsto || '0'),
+      valor_material_previsto: parseFloat(fServ.valor_material_previsto || '0'),
       status: fServ.status,
       observacao: fServ.observacao.trim(),
       fornecedor: fServ.fornecedor.trim() || null,
@@ -1287,7 +1313,7 @@ export default function Obras() {
   }
 
   function abrirNovoServico() {
-    setFServ({ nome: '', valor_previsto: '', valor_realizado: '', status: 'pendente', observacao: '', fornecedor: '' })
+    setFServ({ nome: '', valor_previsto: '', valor_realizado: '', valor_mao_obra_previsto: '', valor_material_previsto: '', status: 'pendente', observacao: '', fornecedor: '' })
     setServicoEditando(null)
     setJanela('novo_servico')
   }
@@ -1297,6 +1323,8 @@ export default function Obras() {
       nome: sv.nome || '',
       valor_previsto: sv.valor_previsto != null ? String(sv.valor_previsto) : '',
       valor_realizado: sv.valor_realizado != null ? String(sv.valor_realizado) : '',
+      valor_mao_obra_previsto: sv.valor_mao_obra_previsto != null ? String(sv.valor_mao_obra_previsto) : '',
+      valor_material_previsto: sv.valor_material_previsto != null ? String(sv.valor_material_previsto) : '',
       status: sv.status || 'pendente',
       observacao: sv.observacao || '',
       fornecedor: sv.fornecedor || '',
@@ -1613,6 +1641,8 @@ export default function Obras() {
                     <tbody>
                       {svs.map(sv => {
                         const vp = parseFloat(sv.valor_previsto || 0)
+                        const vrMao = custoMaoObraServicoAuto(sv)
+                        const vrMat = custoMaterialServicoAuto(sv)
                         const vr = custoServicoAuto(sv)
                         const vCliente = cobradoClienteServicoAuto(sv.id)
                         const dif = vp - vr
@@ -1630,7 +1660,10 @@ export default function Obras() {
                             </td>
                             <td className="px-3 py-3 font-semibold text-tertiary">{moeda(vp)}</td>
                             <td className="px-3 py-3 font-semibold text-primary-container">{moeda(vCliente)}</td>
-                            <td className={`px-3 py-3 font-semibold ${vr > vp && vp > 0 ? 'text-error' : 'text-on-surface'}`}>{moeda(vr)}</td>
+                            <td className={`px-3 py-3 font-semibold ${vr > vp && vp > 0 ? 'text-error' : 'text-on-surface'}`}>
+                              {moeda(vr)}
+                              {(vrMao > 0 || vrMat > 0) && <div className="text-[10px] text-on-surface-variant font-normal">M.O: {moeda(vrMao)} · Mat: {moeda(vrMat)}</div>}
+                            </td>
                             <td className="px-3 py-3">
                               <div className={`font-bold ${dif >= 0 ? 'text-primary-container' : 'text-error'}`}>{dif >= 0 ? '▼ ' : '▲ '}{moeda(Math.abs(dif))}</div>
                               <div className="text-[10px] text-on-surface-variant">{dif >= 0 ? 'sob controle' : 'acima do prev.'}</div>
@@ -1663,7 +1696,7 @@ export default function Obras() {
                   <div><div className="text-[10px] text-on-surface-variant mb-1">MARGEM</div><div className={`text-lg font-bold ${margem >= 0 ? 'text-primary-container' : 'text-error'}`}>{moeda(margem)}</div><div className="text-[10px] text-on-surface-variant mt-0.5">{svs.filter(s => s.status === 'concluido').length}/{svs.length} concluído(s)</div></div>
                 </div>
                 <div className="mt-3 px-3 py-2 bg-primary/5 rounded-lg text-body-sm text-on-surface-variant">
-                  💡 <strong className="text-primary-container">Cobrado do Cliente</strong> = última medição de cliente registrada no serviço. <strong className="text-primary">Nosso Custo</strong> = maior valor entre os lançamentos/gastos vinculados ao serviço e a última medição de fornecedor registrada nele. Os dois atualizam sozinhos ao salvar uma medição — também somam lançamentos: no Financeiro, selecione a obra e a <strong className="text-on-surface">Categoria da Obra</strong> para vincular manualmente.
+                  💡 <strong className="text-primary-container">Cobrado do Cliente</strong> mede em cima do valor cobrado do cliente. <strong className="text-primary">Nosso Custo</strong> soma mão de obra (medição de fornecedor, base = custo de mão de obra previsto) + material (lançamentos/gastos vinculados ao serviço com categoria "Material"). No Financeiro, selecione a obra, a <strong className="text-on-surface">Categoria da Obra</strong> (serviço) e a categoria "Material" ou "Mão de obra" para o lançamento entrar na conta certa.
                 </div>
               </>
             )}
@@ -1942,7 +1975,7 @@ export default function Obras() {
           const retPct = parseFloat(orcamentoObra?.retencao_percentual || 0)
           let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
           const linhas = itensFiltrados.map(item => {
-            const p = preenchimento[item.id] || { valor_base: String(parseFloat(item.valor_previsto || 0)), percentual: '0' }
+            const p = preenchimento[item.id] || { valor_base: String(baseParaMedicao(item, medicaoAtiva.tipo)), percentual: '0' }
             const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor)
             const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
             const valorBase = parseFloat(p.valor_base || '0')
@@ -2264,9 +2297,21 @@ export default function Obras() {
               </div>
               <div className="grid grid-cols-2 gap-3 mb-3.5">
                 <div>
-                  <label className={labelCls}>Valor Previsto (R$)</label>
+                  <label className={labelCls}>Custo Mão de Obra Previsto (R$)</label>
+                  <input className={inputCls} type="number" placeholder="0,00" value={fServ.valor_mao_obra_previsto} onChange={e => setFServ({ ...fServ, valor_mao_obra_previsto: e.target.value })} />
+                  <div className="text-[11px] text-on-surface-variant mt-1">Base usada na medição de fornecedor</div>
+                </div>
+                <div>
+                  <label className={labelCls}>Custo Material Previsto (R$)</label>
+                  <input className={inputCls} type="number" placeholder="0,00" value={fServ.valor_material_previsto} onChange={e => setFServ({ ...fServ, valor_material_previsto: e.target.value })} />
+                  <div className="text-[11px] text-on-surface-variant mt-1">Descontado ao lançar compras de material</div>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-3.5">
+                <div>
+                  <label className={labelCls}>Valor Cobrado do Cliente (R$)</label>
                   <input className={inputCls} type="number" placeholder="0,00" value={fServ.valor_previsto} onChange={e => setFServ({ ...fServ, valor_previsto: e.target.value })} />
-                  <div className="text-[11px] text-on-surface-variant mt-1">Quanto foi orçado</div>
+                  <div className="text-[11px] text-on-surface-variant mt-1">Base usada na medição de cliente</div>
                 </div>
                 <div>
                   <label className={labelCls}>Valor Realizado (R$)</label>

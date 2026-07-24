@@ -286,20 +286,26 @@ export default function Orcamento() {
   // Nunca apaga linha orfa: pode ter valor_realizado/status preenchido manualmente depois.
   async function sincronizarServicosObra(orcamentoId: string, obraId: string) {
     const itensOrc = await buscar('orcamento_itens', '?orcamento_id=eq.' + orcamentoId)
-    const grupos = new Map<string, number>()
+    const grupos = new Map<string, { previsto: number; maoObra: number; material: number }>()
     for (const item of itensOrc) {
       if (!item.servico) continue
-      grupos.set(item.servico, (grupos.get(item.servico) || 0) + calcularTotalItem(item))
+      const qtd = parseFloat(item.quantidade || 1)
+      const atual = grupos.get(item.servico) || { previsto: 0, maoObra: 0, material: 0 }
+      atual.previsto += calcularTotalItem(item)
+      atual.maoObra += parseFloat(item.preco_mao_obra || 0) * qtd
+      atual.material += parseFloat(item.preco_material || 0) * qtd
+      grupos.set(item.servico, atual)
     }
     const servicosExistentes = await buscar('obra_servicos', '?obra_id=eq.' + obraId)
     let maxOrdem = Math.max(0, ...servicosExistentes.map((s: any) => s.ordem || 0))
     let criouNovo = false
-    for (const [nome, valorPrevisto] of grupos) {
+    for (const [nome, totais] of grupos) {
       const existente = servicosExistentes.find((s: any) => s.nome === nome)
-      if (existente) await editar('obra_servicos', existente.id, { valor_previsto: valorPrevisto })
+      const dados = { valor_previsto: totais.previsto, valor_mao_obra_previsto: totais.maoObra, valor_material_previsto: totais.material }
+      if (existente) await editar('obra_servicos', existente.id, dados)
       else {
         maxOrdem += 1
-        await criar('obra_servicos', { obra_id: obraId, nome, valor_previsto: valorPrevisto, valor_realizado: 0, status: 'pendente', observacao: '', ordem: maxOrdem })
+        await criar('obra_servicos', { obra_id: obraId, nome, ...dados, valor_realizado: 0, status: 'pendente', observacao: '', ordem: maxOrdem })
         criouNovo = true
       }
     }

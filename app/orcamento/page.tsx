@@ -283,10 +283,46 @@ export default function Orcamento() {
       grupos.set(item.servico, (grupos.get(item.servico) || 0) + calcularTotalItem(item))
     }
     const servicosExistentes = await buscar('obra_servicos', '?obra_id=eq.' + obraId)
+    let maxOrdem = Math.max(0, ...servicosExistentes.map((s: any) => s.ordem || 0))
+    let criouNovo = false
     for (const [nome, valorPrevisto] of grupos) {
       const existente = servicosExistentes.find((s: any) => s.nome === nome)
       if (existente) await editar('obra_servicos', existente.id, { valor_previsto: valorPrevisto })
-      else await criar('obra_servicos', { obra_id: obraId, nome, valor_previsto: valorPrevisto, valor_realizado: 0, status: 'pendente', observacao: '' })
+      else {
+        maxOrdem += 1
+        await criar('obra_servicos', { obra_id: obraId, nome, valor_previsto: valorPrevisto, valor_realizado: 0, status: 'pendente', observacao: '', ordem: maxOrdem })
+        criouNovo = true
+      }
+    }
+    if (criouNovo) await distribuirCronogramaObra(obraId)
+  }
+
+  // Preenche automaticamente as datas do cronograma a partir do periodo da obra (mesma logica
+  // usada em app/obras/page.tsx) — so cria etapa pra servico que ainda nao tem uma.
+  async function distribuirCronogramaObra(obraId: string) {
+    const obraRows = await buscar('obras', '?id=eq.' + obraId)
+    const obra = obraRows[0]
+    if (!obra?.data_inicio || !obra?.data_previsao) return
+    const svsObra = (await buscar('obra_servicos', '?obra_id=eq.' + obraId))
+      .sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    if (svsObra.length === 0) return
+    const etapasAtuais = await buscar('cronograma_etapas', '?obra_id=eq.' + obraId)
+    const inicio = new Date(obra.data_inicio + 'T00:00:00')
+    const fim = new Date(obra.data_previsao + 'T00:00:00')
+    const totalDias = Math.max(Math.round((fim.getTime() - inicio.getTime()) / 86400000), svsObra.length)
+    const fatia = totalDias / svsObra.length
+    for (let i = 0; i < svsObra.length; i++) {
+      const s = svsObra[i]
+      if (etapasAtuais.find((e: any) => e.servico_id === s.id)) continue
+      const dIni = new Date(inicio.getTime() + Math.round(i * fatia) * 86400000)
+      const dFim = new Date(inicio.getTime() + (Math.round((i + 1) * fatia) - 1) * 86400000)
+      await criar('cronograma_etapas', {
+        obra_id: obraId,
+        servico_id: s.id,
+        data_inicio_prevista: dIni.toISOString().slice(0, 10),
+        data_fim_prevista: dFim.toISOString().slice(0, 10),
+        status: 'pendente',
+      })
     }
   }
 

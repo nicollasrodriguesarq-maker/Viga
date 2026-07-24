@@ -36,6 +36,7 @@ const moeda = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'cu
 const dataBR = (v: string) => v ? new Date(v + 'T00:00:00').toLocaleDateString('pt-BR') : '—'
 const STATUS_NOME: Record<string, string> = { captacao: 'Em Captação', em_execucao: 'Em Execução', pausada: 'Pausada', concluida: 'Concluída', cancelada: 'Cancelada' }
 const SERV_STATUS: Record<string, string> = { pendente: 'Pendente', em_execucao: 'Em Execução', concluido: 'Concluído', cancelado: 'Cancelado' }
+const ETAPA_STATUS: Record<string, string> = { pendente: 'Pendente', em_andamento: 'Em Andamento', concluida: 'Concluída', atrasada: 'Atrasada' }
 const CLIMA_OPCOES = [{ v: 'ensolarado', l: '☀️ Ensolarado' }, { v: 'nublado', l: '☁️ Nublado' }, { v: 'chuva', l: '🌧️ Chuva' }, { v: 'sem_expediente', l: '🚫 Sem expediente' }]
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -56,6 +57,7 @@ export default function ObrasMobile() {
   const [orcItens, setOrcItens] = useState<any[]>([])
   const [medicoes, setMedicoes] = useState<any[]>([])
   const [medItens, setMedItens] = useState<any[]>([])
+  const [etapas, setEtapas] = useState<any[]>([])
   const [relatorios, setRelatorios] = useState<any[]>([])
   const [funcionarios, setFuncionarios] = useState<any[]>([])
   const [funcionarioArquivos, setFuncionarioArquivos] = useState<any[]>([])
@@ -88,7 +90,7 @@ export default function ObrasMobile() {
   }, [])
 
   async function carregar() {
-    const [o, l, g, s, orc, orcIt, med, medIt, rv, fu, fua] = await Promise.all([
+    const [o, l, g, s, orc, orcIt, med, medIt, et, rv, fu, fua] = await Promise.all([
       buscar('obras', '?order=created_at.desc'),
       buscar('lancamentos', '?order=data.desc'),
       buscar('gastos_cartao', '?order=data.desc'),
@@ -97,12 +99,13 @@ export default function ObrasMobile() {
       buscar('orcamento_itens', '?order=created_at'),
       buscar('medicoes', '?order=data.desc'),
       buscar('medicao_itens', '?order=created_at'),
+      buscar('cronograma_etapas', '?order=created_at'),
       buscar('obra_relatorios_visita', '?order=data.desc'),
       buscar('obra_funcionarios', '?order=created_at'),
       buscar('obra_funcionario_arquivos', '?order=created_at'),
     ])
     setObras(o); setLancs(l); setGastos(g); setServicos(s); setOrcamentos(orc); setOrcItens(orcIt)
-    setMedicoes(med); setMedItens(medIt); setRelatorios(rv); setFuncionarios(fu); setFuncionarioArquivos(fua)
+    setMedicoes(med); setMedItens(medIt); setEtapas(et); setRelatorios(rv); setFuncionarios(fu); setFuncionarioArquivos(fua)
   }
 
   function custosObra(id: string) {
@@ -163,9 +166,9 @@ export default function ObrasMobile() {
   }
 
   // ── Medições ──────────────────────────────────────────────────
-  function ultimoRegistro(orcamentoItemId: string, medicaoIdAtual: string | undefined, tipo: string, fornecedor?: string | null) {
+  function ultimoRegistro(servicoId: string, medicaoIdAtual: string | undefined, tipo: string, fornecedor?: string | null) {
     return medItens
-      .filter(mi => mi.orcamento_item_id === orcamentoItemId && mi.medicao_id !== medicaoIdAtual)
+      .filter(mi => mi.servico_id === servicoId && mi.medicao_id !== medicaoIdAtual)
       .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
       .filter(mi => mi.medicao && mi.medicao.tipo === tipo && (tipo !== 'fornecedor' || mi.medicao.fornecedor === fornecedor))
       .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0] || null
@@ -173,10 +176,10 @@ export default function ObrasMobile() {
   function abrirPreenchimentoMedicao(medicao: any, itensFiltrados: any[]) {
     const preench: Record<string, { valor_base: string; percentual: string }> = {}
     itensFiltrados.forEach(item => {
-      const existente = medItens.find(mi => mi.medicao_id === medicao.id && mi.orcamento_item_id === item.id)
+      const existente = medItens.find(mi => mi.medicao_id === medicao.id && mi.servico_id === item.id)
       const ultimo = ultimoRegistro(item.id, medicao.id, medicao.tipo, medicao.fornecedor)
       preench[item.id] = {
-        valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(parseFloat(item.total_item || 0))),
+        valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(parseFloat(item.valor_previsto || 0))),
         percentual: existente ? String(existente.percentual_acumulado * 100) : (ultimo ? String(ultimo.percentual_acumulado * 100) : '0'),
       }
     })
@@ -184,12 +187,13 @@ export default function ObrasMobile() {
     setMedicaoAtiva(medicao)
     setTela('medicaoPreenchimento')
   }
-  async function criarMedicao(orcamentoId: string) {
+  async function criarMedicao() {
     const ano = new Date().getFullYear()
     const medicoesObraAno = medicoes.filter(m => m.obra_id === detalhe.id && m.numero?.startsWith('MED-' + ano))
     const numero = 'MED-' + ano + '-' + String(medicoesObraAno.length + 1).padStart(3, '0')
+    const orcVinculado = orcamentos.find(o => o.obra_id === detalhe.id)
     const nova = await criar('medicoes', {
-      obra_id: detalhe.id, orcamento_id: orcamentoId, tipo: fMedicao.tipo,
+      obra_id: detalhe.id, orcamento_id: orcVinculado?.id || null, tipo: fMedicao.tipo,
       fornecedor: fMedicao.tipo === 'fornecedor' ? (fMedicao.fornecedor || null) : null,
       numero, data: fMedicao.data, observacao: fMedicao.observacao, status: 'rascunho',
     })
@@ -197,8 +201,8 @@ export default function ObrasMobile() {
     if (nova?.id) {
       const [med, medIt] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('medicao_itens', '?order=created_at')])
       setMedicoes(med); setMedItens(medIt)
-      const itensOrc = orcItens.filter(i => i.orcamento_id === orcamentoId)
-      const itensFiltrados = itensOrc.filter(i => nova.tipo !== 'fornecedor' || !nova.fornecedor || i.fornecedor === nova.fornecedor)
+      const svsObra = servicosObra(detalhe.id)
+      const itensFiltrados = svsObra.filter(s => nova.tipo !== 'fornecedor' || !nova.fornecedor || s.fornecedor === nova.fornecedor)
       abrirPreenchimentoMedicao(nova, itensFiltrados)
     }
   }
@@ -206,14 +210,57 @@ export default function ObrasMobile() {
     for (const item of itensFiltrados) {
       const p = preenchimento[item.id]
       if (!p) continue
-      const existente = medItens.find(mi => mi.medicao_id === medicaoAtiva.id && mi.orcamento_item_id === item.id)
-      const dados = { medicao_id: medicaoAtiva.id, orcamento_item_id: item.id, valor_base: parseFloat(p.valor_base || '0'), percentual_acumulado: parseFloat(p.percentual || '0') / 100 }
+      const existente = medItens.find(mi => mi.medicao_id === medicaoAtiva.id && mi.servico_id === item.id)
+      const dados = { medicao_id: medicaoAtiva.id, servico_id: item.id, valor_base: parseFloat(p.valor_base || '0'), percentual_acumulado: parseFloat(p.percentual || '0') / 100 }
       if (existente) await editar('medicao_itens', existente.id, dados)
       else await criar('medicao_itens', dados)
     }
     const medIt = await buscar('medicao_itens', '?order=created_at')
     setMedItens(medIt)
     alert('Medição salva!')
+  }
+
+  // Mesma logica de app/obras/page.tsx: distribui os servicos (por `ordem`) em fatias
+  // sequenciais dentro do periodo da obra, gerando/atualizando cronograma_etapas por servico.
+  async function distribuirCronograma(obraId: string, forceAll: boolean = false) {
+    const obraRows = await buscar('obras', '?id=eq.' + obraId)
+    const obra = obraRows[0]
+    if (!obra?.data_inicio || !obra?.data_previsao) return
+    const svsObra = (await buscar('obra_servicos', '?obra_id=eq.' + obraId))
+      .sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    if (svsObra.length === 0) return
+    const etapasAtuais = await buscar('cronograma_etapas', '?obra_id=eq.' + obraId)
+    const inicio = new Date(obra.data_inicio + 'T00:00:00')
+    const fim = new Date(obra.data_previsao + 'T00:00:00')
+    const totalDias = Math.max(Math.round((fim.getTime() - inicio.getTime()) / 86400000), svsObra.length)
+    const fatia = totalDias / svsObra.length
+    for (let i = 0; i < svsObra.length; i++) {
+      const s = svsObra[i]
+      const existente = etapasAtuais.find((e: any) => e.servico_id === s.id)
+      if (existente && !forceAll) continue
+      const dIni = new Date(inicio.getTime() + Math.round(i * fatia) * 86400000)
+      const dFim = new Date(inicio.getTime() + (Math.round((i + 1) * fatia) - 1) * 86400000)
+      const dados = { obra_id: obraId, servico_id: s.id, data_inicio_prevista: dIni.toISOString().slice(0, 10), data_fim_prevista: dFim.toISOString().slice(0, 10) }
+      if (existente) await editar('cronograma_etapas', existente.id, dados)
+      else await criar('cronograma_etapas', { ...dados, status: 'pendente' })
+    }
+    const et = await buscar('cronograma_etapas', '?order=created_at')
+    setEtapas(et)
+  }
+
+  async function reordenarServico(servico: any, direcao: -1 | 1) {
+    const svsObra = servicosObra(servico.obra_id).slice().sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    const idx = svsObra.findIndex(s => s.id === servico.id)
+    const vizinho = svsObra[idx + direcao]
+    if (!vizinho) return
+    const ordemAtual = servico.ordem ?? idx
+    const ordemVizinho = vizinho.ordem ?? (idx + direcao)
+    await Promise.all([
+      editar('obra_servicos', servico.id, { ordem: ordemVizinho }),
+      editar('obra_servicos', vizinho.id, { ordem: ordemAtual }),
+    ])
+    await carregar()
+    await distribuirCronograma(servico.obra_id, true)
   }
 
   async function confirmarProgramarPagamento(totalLiquido: number) {
@@ -240,9 +287,7 @@ export default function ObrasMobile() {
 
   // ── Tela: Nova Medição ──────────────────────────────────────────
   if (tela === 'novaMedicao' && detalhe) {
-    const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
-    const itensDoOrcamento = orcamentoObra ? orcItens.filter(i => i.orcamento_id === orcamentoObra.id) : []
-    const fornecedoresDisponiveis = Array.from(new Set(itensDoOrcamento.map(i => i.fornecedor).filter(Boolean))) as string[]
+    const fornecedoresDisponiveis = Array.from(new Set(servicosObra(detalhe.id).map(s => s.fornecedor).filter(Boolean))) as string[]
     return (
       <MobileShell title="Nova Medição">
         <div className="p-4 flex flex-col gap-3.5 pb-8">
@@ -271,7 +316,7 @@ export default function ObrasMobile() {
             <input className={inputCls} value={fMedicao.observacao} onChange={e => setFMedicao({ ...fMedicao, observacao: e.target.value })} />
           </div>
           <div className="flex flex-col gap-2 mt-2">
-            <button className={btnPrimaryCls} onClick={() => orcamentoObra && criarMedicao(orcamentoObra.id)}>Criar e Preencher</button>
+            <button className={btnPrimaryCls} onClick={() => criarMedicao()}>Criar e Preencher</button>
             <button className={btnSecondaryCls} onClick={() => setTela('detalhe')}>Cancelar</button>
           </div>
         </div>
@@ -282,12 +327,11 @@ export default function ObrasMobile() {
   // ── Tela: Preenchimento de Medição ────────────────────────────
   if (tela === 'medicaoPreenchimento' && detalhe && medicaoAtiva) {
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
-    const itensDoOrcamento = orcamentoObra ? orcItens.filter(i => i.orcamento_id === orcamentoObra.id) : []
-    const itensFiltrados = itensDoOrcamento.filter(i => medicaoAtiva.tipo !== 'fornecedor' || !medicaoAtiva.fornecedor || i.fornecedor === medicaoAtiva.fornecedor)
+    const itensFiltrados = servicosObra(detalhe.id).filter(s => medicaoAtiva.tipo !== 'fornecedor' || !medicaoAtiva.fornecedor || s.fornecedor === medicaoAtiva.fornecedor)
     const retPct = parseFloat(orcamentoObra?.retencao_percentual || 0)
     let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
     const linhas = itensFiltrados.map(item => {
-      const p = preenchimento[item.id] || { valor_base: String(parseFloat(item.total_item || 0)), percentual: '0' }
+      const p = preenchimento[item.id] || { valor_base: String(parseFloat(item.valor_previsto || 0)), percentual: '0' }
       const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor)
       const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
       const valorBase = parseFloat(p.valor_base || '0')
@@ -320,7 +364,7 @@ export default function ObrasMobile() {
             <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum item para medir</div>
           ) : linhas.map(({ item, p, acumAtual, valorPeriodo, retencao, liquido }) => (
             <div key={item.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
-              <div className="font-semibold text-sm text-on-surface mb-2">{item.servico}</div>
+              <div className="font-semibold text-sm text-on-surface mb-2">{item.nome}{item.fornecedor && <span className="text-on-surface-variant font-normal"> · {item.fornecedor}</span>}</div>
               <div className="grid grid-cols-2 gap-2.5 mb-2">
                 <div>
                   <label className={labelCls}>Valor Base</label>
@@ -489,7 +533,7 @@ export default function ObrasMobile() {
           </div>
 
           <div className="flex gap-2 overflow-x-auto pb-1">
-            {[['resumo', '📋 Resumo'], ['visitas', '📷 Visitas'], ['medicoes', '📐 Medições'], ['servicos', '🔧 Serviços'], ['funcionarios', '🪪 Funcionários'], ['nf', '🧾 NF']].map(([id, nome]) => (
+            {[['resumo', '📋 Resumo'], ['visitas', '📷 Visitas'], ['medicoes', '📐 Medições'], ['servicos', '🔧 Serviços'], ['cronograma', '📅 Cronograma'], ['funcionarios', '🪪 Funcionários'], ['nf', '🧾 NF']].map(([id, nome]) => (
               <button key={id} onClick={() => setAba(id)}
                 className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${aba === id ? 'bg-primary/10 text-primary border-primary/30' : 'bg-surface-container text-on-surface-variant border-outline-variant'}`}>
                 {nome}
@@ -612,8 +656,8 @@ export default function ObrasMobile() {
           })()}
 
           {aba === 'medicoes' && (
-            !orcamentoObra ? (
-              <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum orçamento vinculado a esta obra</div>
+            svs.length === 0 ? (
+              <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado nesta obra ainda</div>
             ) : (
               <div className="flex flex-col gap-3">
                 <button className={btnPrimaryCls} onClick={() => { setFMedicao(FMED_VAZIO); setTela('novaMedicao') }}>+ Nova Medição</button>
@@ -621,8 +665,7 @@ export default function ObrasMobile() {
                 {medicoesObra.filter(m => !buscaMed || ((m.numero || '') + ' ' + (m.fornecedor || '')).toLowerCase().includes(buscaMed.toLowerCase())).length === 0 ? (
                   <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhuma medição encontrada</div>
                 ) : medicoesObra.filter(m => !buscaMed || ((m.numero || '') + ' ' + (m.fornecedor || '')).toLowerCase().includes(buscaMed.toLowerCase())).map(med => {
-                  const itensDoOrcamento = orcItens.filter(i => i.orcamento_id === orcamentoObra.id)
-                  const itensFiltrados = itensDoOrcamento.filter(i => med.tipo !== 'fornecedor' || !med.fornecedor || i.fornecedor === med.fornecedor)
+                  const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor)
                   return (
                     <button key={med.id} className="text-left bg-surface-container border border-outline-variant rounded-xl p-4" onClick={() => abrirPreenchimentoMedicao(med, itensFiltrados)}>
                       <div className="font-semibold text-sm text-on-surface">{med.numero} · {med.tipo === 'fornecedor' ? `Fornecedor: ${med.fornecedor || '—'}` : 'Cliente'}</div>
@@ -633,6 +676,67 @@ export default function ObrasMobile() {
               </div>
             )
           )}
+
+          {aba === 'cronograma' && (() => {
+            const svsOrdenados = svs.slice().sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+            const etapasObra = etapas.filter(e => e.obra_id === detalhe.id)
+            const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+            if (svs.length === 0) return <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado nesta obra</div>
+            if (!detalhe.data_inicio || !detalhe.data_previsao) return <div className="text-center py-8 text-on-surface-variant text-body-sm">Informe as datas de início e fim da obra no desktop para o sistema distribuir os serviços automaticamente.</div>
+            if (etapasObra.length === 0) return <div className="text-center py-8 text-on-surface-variant text-body-sm">Gerando cronograma...</div>
+            return (
+              <div className="flex flex-col gap-3">
+                {svsOrdenados.map((servico, idx) => {
+                  const et = etapasObra.find(e => e.servico_id === servico.id)
+                  if (!et) return null
+                  const atrasadaEtapa = !!(et.data_fim_prevista && new Date(et.data_fim_prevista) < hoje && et.status !== 'concluida')
+                  return (
+                    <div key={et.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
+                      <div className="flex justify-between items-start gap-2 mb-2">
+                        <div>
+                          <div className="font-semibold text-sm text-on-surface">{servico.nome}</div>
+                          {servico.fornecedor && <div className="text-[11px] text-on-surface-variant">{servico.fornecedor}</div>}
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button disabled={idx === 0} className="text-on-surface-variant disabled:opacity-20" onClick={() => reordenarServico(servico, -1)}>▲</button>
+                          <button disabled={idx === svsOrdenados.length - 1} className="text-on-surface-variant disabled:opacity-20" onClick={() => reordenarServico(servico, 1)}>▼</button>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2.5 mb-2">
+                        <div>
+                          <label className={labelCls}>Início Previsto</label>
+                          <input type="date" className={inputCls} value={et.data_inicio_prevista || ''}
+                            onChange={e => {
+                              const v = e.target.value
+                              setEtapas(etapas.map(x => x.id === et.id ? { ...x, data_inicio_prevista: v } : x))
+                              editar('cronograma_etapas', et.id, { data_inicio_prevista: v || null })
+                            }} />
+                        </div>
+                        <div>
+                          <label className={labelCls}>Fim Previsto</label>
+                          <input type="date" className={inputCls} value={et.data_fim_prevista || ''}
+                            onChange={e => {
+                              const v = e.target.value
+                              setEtapas(etapas.map(x => x.id === et.id ? { ...x, data_fim_prevista: v } : x))
+                              editar('cronograma_etapas', et.id, { data_fim_prevista: v || null })
+                            }} />
+                        </div>
+                      </div>
+                      <select className={inputCls} value={et.status}
+                        onChange={e => {
+                          const v = e.target.value
+                          setEtapas(etapas.map(x => x.id === et.id ? { ...x, status: v } : x))
+                          editar('cronograma_etapas', et.id, { status: v })
+                        }}>
+                        {Object.entries(ETAPA_STATUS).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+                      </select>
+                      {atrasadaEtapa && <div className="text-[11px] text-error mt-1.5">⚠️ prazo vencido</div>}
+                    </div>
+                  )
+                })}
+              </div>
+            )
+          })()}
 
           {aba === 'nf' && (
             <div className="bg-surface-container border border-outline-variant rounded-xl p-5 text-center">

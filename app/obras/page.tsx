@@ -965,20 +965,47 @@ export default function Obras() {
   }
 
   // ── cálculos ──────────────────────────────────────────────
+  // Custo "vivo" de um serviço: maior valor entre lançamentos/gastos vinculados a ele e a
+  // última medição de fornecedor registrada nele; cai para o valor manual só se nada disso existir.
+  function custoServicoAuto(servico: any) {
+    const vrLanc = lancs.filter(l => l.servico_id === servico.id && l.tipo === 'saida').reduce((a, l) => a + parseFloat(l.valor || 0), 0)
+    const vrGasto = gastos.filter(g => g.servico_id === servico.id).reduce((a, g) => a + parseFloat(g.valor || 0), 0)
+    const registro = medItens
+      .filter(mi => mi.servico_id === servico.id)
+      .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
+      .filter((mi): mi is any => !!mi.medicao && mi.medicao.tipo === 'fornecedor')
+      .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0]
+    const vrMedicao = registro ? registro.valor_base * registro.percentual_acumulado : 0
+    const vrAuto = Math.max(vrLanc + vrGasto, vrMedicao)
+    return vrAuto > 0 ? vrAuto : parseFloat(servico.valor_realizado || 0)
+  }
+  // Valor "vivo" cobrado do cliente num serviço: última medição de cliente registrada nele.
+  function cobradoClienteServicoAuto(servicoId: string) {
+    const registro = medItens
+      .filter(mi => mi.servico_id === servicoId)
+      .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
+      .filter((mi): mi is any => !!mi.medicao && mi.medicao.tipo === 'cliente')
+      .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0]
+    return registro ? registro.valor_base * registro.percentual_acumulado : 0
+  }
   function custosObra(id: string) {
-    const l = lancs.filter(x => x.obra_id === id && x.tipo === 'saida')
-      .reduce((a, x) => a + parseFloat(x.valor || 0), 0)
-    const g = gastos.filter(x => x.obra_id === id)
-      .reduce((a, x) => a + parseFloat(x.valor || 0), 0)
-    return l + g
+    const svsObra = servicosObra(id)
+    const porServico = svsObra.reduce((a, s) => a + custoServicoAuto(s), 0)
+    const idsLancDeMedicao = new Set(medicoes.filter(m => m.obra_id === id && m.lancamento_id).map(m => m.lancamento_id))
+    const indireto = lancs.filter(x => x.obra_id === id && x.tipo === 'saida' && !x.servico_id && !idsLancDeMedicao.has(x.id)).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    const cartao = gastos.filter(x => x.obra_id === id && !x.servico_id).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    return porServico + indireto + cartao
   }
   function receitasObra(id: string) {
-    return lancs.filter(x => x.obra_id === id && x.tipo === 'entrada')
-      .reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    const svsObra = servicosObra(id)
+    const porServico = svsObra.reduce((a, s) => a + cobradoClienteServicoAuto(s.id), 0)
+    const idsLancDeMedicao = new Set(medicoes.filter(m => m.obra_id === id && m.lancamento_id).map(m => m.lancamento_id))
+    const semMedicao = lancs.filter(x => x.obra_id === id && x.tipo === 'entrada' && !idsLancDeMedicao.has(x.id)).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    return porServico + semMedicao
   }
   function servicosObra(id: string) { return servicos.filter(s => s.obra_id === id) }
   function totalPrevisto(id: string) { return servicosObra(id).reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0) }
-  function totalRealizado(id: string) { return servicosObra(id).reduce((a, s) => a + parseFloat(s.valor_realizado || 0), 0) }
+  function totalRealizado(id: string) { return servicosObra(id).reduce((a, s) => a + custoServicoAuto(s), 0) }
 
   // ── salvar obra ───────────────────────────────────────────
   // Distribui os obra_servicos (ordenados por `ordem`) em fatias sequenciais dentro do
@@ -1206,7 +1233,7 @@ export default function Obras() {
             ['Custos Reais', moeda(custos), 'text-error'],
             ['Margem Atual', moeda(margem), margem >= 0 ? 'text-primary-container' : 'text-error'],
             ['Prev. Serviços', moeda(prevTotal), 'text-tertiary'],
-            ['Gasto Serviços', moeda(custos), custos > prevTotal && prevTotal > 0 ? 'text-error' : custos > 0 ? 'text-primary' : 'text-on-surface-variant'],
+            ['Gasto Serviços', moeda(realTotal), realTotal > prevTotal && prevTotal > 0 ? 'text-error' : realTotal > 0 ? 'text-primary' : 'text-on-surface-variant'],
           ] as [string, string, string][]).map(([lbl, val, cor]) => (
             <div key={lbl} className="bg-surface-container-high border border-outline-variant rounded-lg p-3 min-w-0">
               <div className="text-[10px] text-on-surface-variant uppercase tracking-widest mb-2">{lbl}</div>
@@ -1235,7 +1262,7 @@ export default function Obras() {
             {prevTotal > 0 && (
               <>
                 <div className="flex justify-between text-body-sm text-on-surface-variant mb-1.5">
-                  <span>Orçamento serviços — Previsto: {moeda(prevTotal)} · Lançado: {moeda(custos)}</span>
+                  <span>Orçamento serviços — Previsto: {moeda(prevTotal)} · Lançado: {moeda(realTotal)}</span>
                   <span className={pctServ > 100 ? 'text-error' : 'text-tertiary'}>{pctServ.toFixed(1)}%</span>
                 </div>
                 <div className="h-[7px] bg-surface-variant rounded overflow-hidden">
@@ -1429,7 +1456,7 @@ export default function Obras() {
                   <table className="w-full border-collapse text-sm">
                     <thead>
                       <tr className="border-b border-outline-variant">
-                        {['Serviço', 'Status', 'Previsto', 'Realizado (auto)', 'Diferença', 'Progresso', ''].map(h => (
+                        {['Serviço', 'Status', 'Previsto', 'Cobrado do Cliente', 'Nosso Custo', 'Diferença', 'Progresso', ''].map(h => (
                           <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -1437,17 +1464,8 @@ export default function Obras() {
                     <tbody>
                       {svs.map(sv => {
                         const vp = parseFloat(sv.valor_previsto || 0)
-                        const vrLanc = lancs.filter(l => l.servico_id === sv.id && l.tipo === 'saida').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0)
-                        const vrGasto = gastos.filter(g => g.servico_id === sv.id).reduce((a: number, g: any) => a + parseFloat(g.valor || 0), 0)
-                        const registroMedicaoFornecedor = medItens
-                          .filter(mi => mi.servico_id === sv.id)
-                          .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
-                          .filter((mi): mi is any => !!mi.medicao && mi.medicao.tipo === 'fornecedor')
-                          .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0]
-                        const vrMedicao = registroMedicaoFornecedor ? registroMedicaoFornecedor.valor_base * registroMedicaoFornecedor.percentual_acumulado : 0
-                        const vrAuto = Math.max(vrLanc + vrGasto, vrMedicao)
-                        const vrManual = parseFloat(sv.valor_realizado || 0)
-                        const vr = vrAuto > 0 ? vrAuto : vrManual
+                        const vr = custoServicoAuto(sv)
+                        const vCliente = cobradoClienteServicoAuto(sv.id)
                         const dif = vp - vr
                         const pp = pct(vr, vp)
                         const badge = SERV_BADGE[sv.status] || SERV_BADGE.pendente
@@ -1462,6 +1480,7 @@ export default function Obras() {
                               <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${badge}`}>{SERV_STATUS[sv.status] || sv.status}</span>
                             </td>
                             <td className="px-3 py-3 font-semibold text-tertiary">{moeda(vp)}</td>
+                            <td className="px-3 py-3 font-semibold text-primary-container">{moeda(vCliente)}</td>
                             <td className={`px-3 py-3 font-semibold ${vr > vp && vp > 0 ? 'text-error' : 'text-on-surface'}`}>{moeda(vr)}</td>
                             <td className="px-3 py-3">
                               <div className={`font-bold ${dif >= 0 ? 'text-primary-container' : 'text-error'}`}>{dif >= 0 ? '▼ ' : '▲ '}{moeda(Math.abs(dif))}</div>
@@ -1495,7 +1514,7 @@ export default function Obras() {
                   <div><div className="text-[10px] text-on-surface-variant mb-1">MARGEM</div><div className={`text-lg font-bold ${margem >= 0 ? 'text-primary-container' : 'text-error'}`}>{moeda(margem)}</div><div className="text-[10px] text-on-surface-variant mt-0.5">{svs.filter(s => s.status === 'concluido').length}/{svs.length} concluído(s)</div></div>
                 </div>
                 <div className="mt-3 px-3 py-2 bg-primary/5 rounded-lg text-body-sm text-on-surface-variant">
-                  💡 <strong className="text-primary">Realizado (auto)</strong> = maior valor entre os lançamentos vinculados ao serviço e a última medição de fornecedor registrada nele (atualiza sozinho ao salvar uma medição). Também soma lançamentos: no Financeiro, selecione a obra e a <strong className="text-on-surface">Categoria da Obra</strong> para vincular manualmente.
+                  💡 <strong className="text-primary-container">Cobrado do Cliente</strong> = última medição de cliente registrada no serviço. <strong className="text-primary">Nosso Custo</strong> = maior valor entre os lançamentos/gastos vinculados ao serviço e a última medição de fornecedor registrada nele. Os dois atualizam sozinhos ao salvar uma medição — também somam lançamentos: no Financeiro, selecione a obra e a <strong className="text-on-surface">Categoria da Obra</strong> para vincular manualmente.
                 </div>
               </>
             )}

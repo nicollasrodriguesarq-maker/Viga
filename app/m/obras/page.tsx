@@ -108,16 +108,46 @@ export default function ObrasMobile() {
     setMedicoes(med); setMedItens(medIt); setEtapas(et); setRelatorios(rv); setFuncionarios(fu); setFuncionarioArquivos(fua)
   }
 
+  // Mesma logica "viva" de app/obras/page.tsx: custo/recebido por servico via medicoes,
+  // com fallback pro lancamento/gasto vinculado ou pro valor manual.
+  function custoServicoAuto(servico: any) {
+    const vrLanc = lancs.filter(l => l.servico_id === servico.id && l.tipo === 'saida').reduce((a, l) => a + parseFloat(l.valor || 0), 0)
+    const vrGasto = gastos.filter(g => g.servico_id === servico.id).reduce((a, g) => a + parseFloat(g.valor || 0), 0)
+    const registro = medItens
+      .filter(mi => mi.servico_id === servico.id)
+      .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
+      .filter((mi): mi is any => !!mi.medicao && mi.medicao.tipo === 'fornecedor')
+      .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0]
+    const vrMedicao = registro ? registro.valor_base * registro.percentual_acumulado : 0
+    const vrAuto = Math.max(vrLanc + vrGasto, vrMedicao)
+    return vrAuto > 0 ? vrAuto : parseFloat(servico.valor_realizado || 0)
+  }
+  function cobradoClienteServicoAuto(servicoId: string) {
+    const registro = medItens
+      .filter(mi => mi.servico_id === servicoId)
+      .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
+      .filter((mi): mi is any => !!mi.medicao && mi.medicao.tipo === 'cliente')
+      .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0]
+    return registro ? registro.valor_base * registro.percentual_acumulado : 0
+  }
   function custosObra(id: string) {
-    const l = lancs.filter(x => x.obra_id === id && x.tipo === 'saida').reduce((a, x) => a + parseFloat(x.valor || 0), 0)
-    const g = gastos.filter(x => x.obra_id === id).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
-    return l + g
+    const svsObra = servicosObra(id)
+    const porServico = svsObra.reduce((a, s) => a + custoServicoAuto(s), 0)
+    const idsLancDeMedicao = new Set(medicoes.filter(m => m.obra_id === id && m.lancamento_id).map(m => m.lancamento_id))
+    const indireto = lancs.filter(x => x.obra_id === id && x.tipo === 'saida' && !x.servico_id && !idsLancDeMedicao.has(x.id)).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    const cartao = gastos.filter(x => x.obra_id === id && !x.servico_id).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    return porServico + indireto + cartao
   }
   function receitasObra(id: string) {
-    return lancs.filter(x => x.obra_id === id && x.tipo === 'entrada').reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    const svsObra = servicosObra(id)
+    const porServico = svsObra.reduce((a, s) => a + cobradoClienteServicoAuto(s.id), 0)
+    const idsLancDeMedicao = new Set(medicoes.filter(m => m.obra_id === id && m.lancamento_id).map(m => m.lancamento_id))
+    const semMedicao = lancs.filter(x => x.obra_id === id && x.tipo === 'entrada' && !idsLancDeMedicao.has(x.id)).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    return porServico + semMedicao
   }
   function servicosObra(id: string) { return servicos.filter(s => s.obra_id === id) }
   function totalPrevisto(id: string) { return servicosObra(id).reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0) }
+  function totalRealizado(id: string) { return servicosObra(id).reduce((a, s) => a + custoServicoAuto(s), 0) }
 
   const filtrados = obras.filter(o => {
     if (filtro !== 'todos' && o.status !== filtro) return false
@@ -649,7 +679,8 @@ export default function ObrasMobile() {
                 <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado</div>
               ) : svs.map(sv => {
                 const vp = parseFloat(sv.valor_previsto || 0)
-                const vr = parseFloat(sv.valor_realizado || 0)
+                const vr = custoServicoAuto(sv)
+                const vCliente = cobradoClienteServicoAuto(sv.id)
                 return (
                   <div key={sv.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
                     <div className="flex justify-between items-start gap-2 mb-1.5">
@@ -658,9 +689,10 @@ export default function ObrasMobile() {
                     </div>
                     {sv.fornecedor && <div className="text-[11px] text-primary mb-1.5">{sv.fornecedor}</div>}
                     {sv.observacao && <div className="text-[11px] text-on-surface-variant mb-1.5">{sv.observacao}</div>}
-                    <div className="flex justify-between text-[11px] text-on-surface-variant">
-                      <span>Previsto: {moeda(vp)}</span>
-                      <span>Realizado: {moeda(vr)}</span>
+                    <div className="grid grid-cols-3 gap-2 text-[11px] text-on-surface-variant text-center">
+                      <div><div>Previsto</div><div className="font-semibold text-tertiary">{moeda(vp)}</div></div>
+                      <div><div>Cobrado Cliente</div><div className="font-semibold text-primary-container">{moeda(vCliente)}</div></div>
+                      <div><div>Nosso Custo</div><div className="font-semibold text-on-surface">{moeda(vr)}</div></div>
                     </div>
                   </div>
                 )

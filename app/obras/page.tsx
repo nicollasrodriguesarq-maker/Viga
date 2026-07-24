@@ -194,7 +194,7 @@ export default function Obras() {
 
   const [fServ, setFServ] = useState({
     nome: '', valor_previsto: '', valor_realizado: '',
-    status: 'pendente', observacao: ''
+    status: 'pendente', observacao: '', fornecedor: ''
   })
 
   const [obraEditando,   setObraEditando]   = useState<any>(null)
@@ -937,6 +937,7 @@ export default function Obras() {
       valor_realizado: parseFloat(fServ.valor_realizado || '0'),
       status: fServ.status,
       observacao: fServ.observacao.trim(),
+      fornecedor: fServ.fornecedor.trim() || null,
     }
     if (servicoEditando) {
       await editar('obra_servicos', servicoEditando.id, dados)
@@ -967,7 +968,7 @@ export default function Obras() {
   }
 
   function abrirNovoServico() {
-    setFServ({ nome: '', valor_previsto: '', valor_realizado: '', status: 'pendente', observacao: '' })
+    setFServ({ nome: '', valor_previsto: '', valor_realizado: '', status: 'pendente', observacao: '', fornecedor: '' })
     setServicoEditando(null)
     setJanela('novo_servico')
   }
@@ -979,6 +980,7 @@ export default function Obras() {
       valor_realizado: sv.valor_realizado != null ? String(sv.valor_realizado) : '',
       status: sv.status || 'pendente',
       observacao: sv.observacao || '',
+      fornecedor: sv.fornecedor || '',
     })
     setServicoEditando(sv)
     setJanela('editar_servico')
@@ -1307,6 +1309,7 @@ export default function Obras() {
                           <tr key={sv.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
                             <td className="px-3 py-3">
                               <div className="font-semibold text-sm text-on-surface">{sv.nome}</div>
+                              {sv.fornecedor && <div className="text-[11px] text-primary mt-0.5">{sv.fornecedor}</div>}
                               {sv.observacao && <div className="text-[11px] text-on-surface-variant mt-0.5">{sv.observacao}</div>}
                             </td>
                             <td className="px-3 py-3">
@@ -1861,6 +1864,10 @@ export default function Obras() {
               <div className="mb-3.5">
                 <label className={labelCls}>Nome do Serviço *</label>
                 <input className={inputCls} placeholder="Ex: Hidráulica, Elétrica, Pintura..." value={fServ.nome} onChange={e => setFServ({ ...fServ, nome: e.target.value })} />
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Fornecedor / Equipe Responsável (opcional)</label>
+                <input className={inputCls} placeholder="Ex: Pedreiro João, Instaladora XPTO Ar-Condicionado" value={fServ.fornecedor} onChange={e => setFServ({ ...fServ, fornecedor: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3 mb-3.5">
                 <div>

@@ -528,6 +528,7 @@ export default function ObrasMobile() {
                       <span className="font-semibold text-sm text-on-surface">{sv.nome}</span>
                       <span className="text-[10px] font-semibold text-on-surface-variant uppercase shrink-0">{SERV_STATUS[sv.status] || sv.status}</span>
                     </div>
+                    {sv.fornecedor && <div className="text-[11px] text-primary mb-1.5">{sv.fornecedor}</div>}
                     {sv.observacao && <div className="text-[11px] text-on-surface-variant mb-1.5">{sv.observacao}</div>}
                     <div className="flex justify-between text-[11px] text-on-surface-variant">
                       <span>Previsto: {moeda(vp)}</span>

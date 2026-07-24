@@ -101,7 +101,7 @@ export default function Orcamento() {
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
 
   const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '' })
-  const [fItem, setFItem] = useState({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' })
+  const [fItem, setFItem] = useState({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' })
   const [editItem, setEditItem] = useState<any>(null)
   const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '' })
   const [composicao, setComposicao] = useState<any[]>([])
@@ -247,7 +247,6 @@ export default function Orcamento() {
       lucro_percentual: lucro,
       imposto_percentual: imposto,
       total_item: total,
-      fornecedor: fItem.fornecedor || null,
       banco_item_id: fItem.banco_item_id || null,
       categoria: fItem.categoria || null,
     }
@@ -262,7 +261,7 @@ export default function Orcamento() {
     await atualizarTotais(detalhe.id)
     if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id)
     setJanela(null); setEditItem(null)
-    setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' })
+    setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' })
     carregar()
   }
 
@@ -473,7 +472,7 @@ export default function Orcamento() {
 
   async function usarItemBanco(item: any) {
     if (!ambienteAtivo) return alert('Selecione um ambiente primeiro')
-    setFItem({ servico: item.nome, descricao: '', categoria: item.categoria || '', banco_item_id: item.id, quantidade: '1', unidade: item.unidade, preco_material: String(item.preco_material), preco_mao_obra: String(item.preco_mao_obra), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), fornecedor: '' })
+    setFItem({ servico: item.nome, descricao: '', categoria: item.categoria || '', banco_item_id: item.id, quantidade: '1', unidade: item.unidade, preco_material: String(item.preco_material), preco_mao_obra: String(item.preco_mao_obra), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0) })
     setJanela('item')
   }
 
@@ -814,7 +813,7 @@ export default function Orcamento() {
               <div className="text-sm font-bold text-on-surface">📋 Itens por Ambiente</div>
               <div className="flex gap-2">
                 {podeEditar && <button className={btnSecondaryCls} onClick={() => { setFAmb(''); setJanela('ambiente') }}>+ Ambiente</button>}
-                {podeEditar && ambienteAtivo && <button className={btnPrimaryCls} onClick={() => { setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', fornecedor: '' }); setEditItem(null); setMostrarSugestoes(false); setJanela('item') }}>+ Item</button>}
+                {podeEditar && ambienteAtivo && <button className={btnPrimaryCls} onClick={() => { setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' }); setEditItem(null); setMostrarSugestoes(false); setJanela('item') }}>+ Item</button>}
               </div>
             </div>
 
@@ -888,7 +887,7 @@ export default function Orcamento() {
                                           {podeEditar && (
                                             <div className="flex gap-1">
                                               <button className={btnEditSmCls} onClick={() => {
-                                                setFItem({ servico: item.servico, descricao: item.descricao||'', categoria: item.categoria || '', banco_item_id: item.banco_item_id || '', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), fornecedor: item.fornecedor || '' })
+                                                setFItem({ servico: item.servico, descricao: item.descricao||'', categoria: item.categoria || '', banco_item_id: item.banco_item_id || '', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0) })
                                                 setEditItem(item); setMostrarSugestoes(false); setJanela('item')
                                               }}>✏️</button>
                                               <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id); carregar() }}>×</button>
@@ -1100,10 +1099,6 @@ export default function Orcamento() {
                   <label className={labelCls}>Imposto (%)</label>
                   <input className={inputCls} type="number" placeholder="0" value={fItem.imposto_percentual} onChange={e => setFItem({ ...fItem, imposto_percentual: e.target.value })} />
                 </div>
-              </div>
-              <div className="mb-4">
-                <label className={labelCls}>Fornecedor / Equipe Responsável (opcional)</label>
-                <input className={inputCls} placeholder="Ex: Pedreiro João, Instaladora XPTO Ar-Condicionado" value={fItem.fornecedor} onChange={e => setFItem({ ...fItem, fornecedor: e.target.value })} />
               </div>
               {(fItem.quantidade && (fItem.preco_material || fItem.preco_mao_obra)) ? (
                 <div className="bg-surface-container-low rounded-lg p-3.5 mb-4">

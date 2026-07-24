@@ -59,6 +59,10 @@ function corHexEtapa(status: string) {
   if (status === 'em_andamento') return '#ffcbac'
   return '#69736f'
 }
+// Mesma cor de app/obras/page.tsx: verde até 80%, laranja de 80-100%, vermelho acima de 100%.
+function corProgresso(pctValor: number) {
+  return pctValor > 100 ? 'bg-error' : pctValor > 80 ? 'bg-tertiary' : 'bg-primary'
+}
 function htmlGantt(inicio: Date, fim: Date, linhas: { nome: string; fornecedor?: string | null; inicioPrevisto?: string | null; fimPrevisto?: string | null; status: string }[]) {
   const linhasHtml = linhas.map(l => {
     const { xPct, larguraPct } = calcularBarraGantt(inicio, fim, l.inicioPrevisto, l.fimPrevisto)
@@ -558,6 +562,11 @@ export default function ObrasMobile() {
                   <input className={inputCls} type="number" min="0" max="100" value={p.percentual} onChange={e => setPreenchimento({ ...preenchimento, [item.id]: { ...p, percentual: e.target.value } })} />
                 </div>
               </div>
+              <div className="mb-2">
+                <div className="h-1.5 bg-surface-variant rounded overflow-hidden mb-1">
+                  <div className={`h-full rounded ${corProgresso(parseFloat(p.percentual || '0'))}`} style={{ width: Math.min(parseFloat(p.percentual || '0'), 100) + '%' }} />
+                </div>
+              </div>
               <div className="grid grid-cols-3 gap-2 text-center text-[11px]">
                 <div><div className="text-on-surface-variant">Acumulado</div><div className="font-semibold text-on-surface">{moeda(acumAtual)}</div></div>
                 <div><div className="text-on-surface-variant">Período</div><div className="font-semibold text-primary">{moeda(valorPeriodo)}</div></div>
@@ -748,10 +757,13 @@ export default function ObrasMobile() {
                 <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado</div>
               ) : svs.map(sv => {
                 const vp = parseFloat(sv.valor_previsto || 0)
+                const matPrev = parseFloat(sv.valor_material_previsto || 0)
+                const maoPrev = parseFloat(sv.valor_mao_obra_previsto || 0)
                 const vrMao = custoMaoObraServicoAuto(sv)
                 const vrMat = custoMaterialServicoAuto(sv)
-                const vr = custoServicoAuto(sv)
-                const vCliente = cobradoClienteServicoAuto(sv.id)
+                const custoPrevTotal = matPrev + maoPrev
+                const custoRealTotal = vrMao + vrMat
+                const ppRaw = custoPrevTotal > 0 ? (custoRealTotal / custoPrevTotal) * 100 : 0
                 return (
                   <div key={sv.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
                     <div className="flex justify-between items-start gap-2 mb-1.5">
@@ -760,12 +772,21 @@ export default function ObrasMobile() {
                     </div>
                     {sv.fornecedor && <div className="text-[11px] text-primary mb-1.5">{sv.fornecedor}</div>}
                     {sv.observacao && <div className="text-[11px] text-on-surface-variant mb-1.5">{sv.observacao}</div>}
-                    <div className="grid grid-cols-3 gap-2 text-[11px] text-on-surface-variant text-center">
-                      <div><div>Previsto</div><div className="font-semibold text-tertiary">{moeda(vp)}</div></div>
-                      <div><div>Cobrado Cliente</div><div className="font-semibold text-primary-container">{moeda(vCliente)}</div></div>
-                      <div><div>Nosso Custo</div><div className="font-semibold text-on-surface">{moeda(vr)}</div></div>
+                    <div className="text-[11px] text-on-surface-variant mb-1.5">{sv.unidade || '—'} {sv.quantidade != null ? `· ${Number(sv.quantidade).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}` : ''}</div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-on-surface-variant text-center mb-1.5">
+                      <div><div>Valor Contratado</div><div className="font-semibold text-tertiary">{moeda(vp)}</div></div>
+                      <div><div>Custo Previsto (M.O+Mat)</div><div className="font-semibold text-on-surface">{moeda(custoPrevTotal)}</div></div>
                     </div>
-                    {(vrMao > 0 || vrMat > 0) && <div className="text-[10px] text-on-surface-variant text-center mt-1">M.O: {moeda(vrMao)} · Mat: {moeda(vrMat)}</div>}
+                    <div className="grid grid-cols-2 gap-2 text-[11px] text-on-surface-variant text-center">
+                      <div><div>Material Realizado</div><div className={`font-semibold ${vrMat > matPrev && matPrev > 0 ? 'text-error' : 'text-primary-container'}`}>{moeda(vrMat)}</div><div className="text-[10px]">de {moeda(matPrev)}</div></div>
+                      <div><div>M.O. Realizada</div><div className={`font-semibold ${vrMao > maoPrev && maoPrev > 0 ? 'text-error' : 'text-primary-container'}`}>{moeda(vrMao)}</div><div className="text-[10px]">de {moeda(maoPrev)}</div></div>
+                    </div>
+                    <div className="mt-2">
+                      <div className="h-1.5 bg-surface-variant rounded overflow-hidden mb-1">
+                        <div className={`h-full rounded ${corProgresso(ppRaw)}`} style={{ width: Math.min(ppRaw, 100) + '%' }} />
+                      </div>
+                      <div className="text-[10px] text-on-surface-variant text-right">{ppRaw.toFixed(0)}%</div>
+                    </div>
                   </div>
                 )
               })}
@@ -919,11 +940,12 @@ export default function ObrasMobile() {
                       const et = etapasObra.find(e => e.servico_id === servico.id)
                       if (!et) return null
                       const { xPct, larguraPct } = calcularBarraGantt(inicioObra, fimObra, et.data_inicio_prevista, et.data_fim_prevista)
+                      const statusVisual = (et.status !== 'concluida' && et.data_fim_prevista && new Date(et.data_fim_prevista) < new Date()) ? 'atrasada' : et.status
                       return (
                         <div key={servico.id}>
                           <div className="text-[10px] text-on-surface-variant truncate mb-0.5">{servico.nome}</div>
                           <div className="relative h-4 bg-surface-container-low rounded overflow-hidden">
-                            <div className={`absolute top-0 h-full rounded ${corBarraEtapa(et.status)}`} style={{ left: xPct + '%', width: larguraPct + '%' }} />
+                            <div className={`absolute top-0 h-full rounded ${corBarraEtapa(statusVisual)}`} style={{ left: xPct + '%', width: larguraPct + '%' }} />
                             {hojeDentro && <div className="absolute top-0 h-full w-px bg-primary" style={{ left: hojeGantt + '%' }} />}
                           </div>
                         </div>

@@ -158,6 +158,13 @@ const SERV_BADGE: Record<string, string> = {
   cancelado: 'bg-error/10 text-error border-error/20',
 }
 
+const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
+// Cor compartilhada de barra de progresso (Serviços/Medição/Cronograma): verde até 80%,
+// laranja de 80 a 100%, vermelho acima de 100% (estourou o previsto/atrasado).
+function corProgresso(pctValor: number) {
+  return pctValor > 100 ? 'bg-error' : pctValor > 80 ? 'bg-tertiary' : 'bg-primary'
+}
+
 const TIPOS_OBRA = ['Obra Nova', 'Reforma', 'Retrofit', 'Projeto Arquitetura', 'Projeto Engenharia', 'Consultoria', 'Outro']
 // Classificação macro pedida pelo usuário: execução física da obra x execução só do projeto
 // (arquitetônico/engenharia) — separado do campo "Tipo" acima, que já existia.
@@ -256,7 +263,7 @@ export default function Obras() {
   })
 
   const [fServ, setFServ] = useState({
-    nome: '', valor_previsto: '', valor_realizado: '',
+    nome: '', unidade: 'm²', quantidade: '1', valor_previsto: '', valor_realizado: '',
     valor_mao_obra_previsto: '', valor_material_previsto: '',
     status: 'pendente', observacao: '', fornecedor: ''
   })
@@ -1273,6 +1280,8 @@ export default function Obras() {
     const dados = {
       obra_id: detalhe.id,
       nome: fServ.nome.trim(),
+      unidade: fServ.unidade,
+      quantidade: parseFloat(fServ.quantidade || '1'),
       valor_previsto: parseFloat(fServ.valor_previsto || '0'),
       valor_realizado: parseFloat(fServ.valor_realizado || '0'),
       valor_mao_obra_previsto: parseFloat(fServ.valor_mao_obra_previsto || '0'),
@@ -1313,7 +1322,7 @@ export default function Obras() {
   }
 
   function abrirNovoServico() {
-    setFServ({ nome: '', valor_previsto: '', valor_realizado: '', valor_mao_obra_previsto: '', valor_material_previsto: '', status: 'pendente', observacao: '', fornecedor: '' })
+    setFServ({ nome: '', unidade: 'm²', quantidade: '1', valor_previsto: '', valor_realizado: '', valor_mao_obra_previsto: '', valor_material_previsto: '', status: 'pendente', observacao: '', fornecedor: '' })
     setServicoEditando(null)
     setJanela('novo_servico')
   }
@@ -1321,6 +1330,8 @@ export default function Obras() {
   function abrirEditarServico(sv: any) {
     setFServ({
       nome: sv.nome || '',
+      unidade: sv.unidade || 'm²',
+      quantidade: sv.quantidade != null ? String(sv.quantidade) : '1',
       valor_previsto: sv.valor_previsto != null ? String(sv.valor_previsto) : '',
       valor_realizado: sv.valor_realizado != null ? String(sv.valor_realizado) : '',
       valor_mao_obra_previsto: sv.valor_mao_obra_previsto != null ? String(sv.valor_mao_obra_previsto) : '',
@@ -1627,13 +1638,20 @@ export default function Obras() {
                 <div className="text-body-sm text-on-surface-variant mb-5">Exemplo: Hidráulica · Elétrica · Pintura · Forro</div>
                 <button className={btnPrimaryCls} onClick={abrirNovoServico}>+ Adicionar primeiro serviço</button>
               </div>
-            ) : (
+            ) : (() => {
+              const totalContratado = svs.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
+              const totalMatPrevisto = svs.reduce((a, s) => a + parseFloat(s.valor_material_previsto || 0), 0)
+              const totalMaoPrevisto = svs.reduce((a, s) => a + parseFloat(s.valor_mao_obra_previsto || 0), 0)
+              const totalMatGasto = svs.reduce((a, s) => a + custoMaterialServicoAuto(s), 0)
+              const totalMaoGasto = svs.reduce((a, s) => a + custoMaoObraServicoAuto(s), 0)
+              const lucroPrejuizo = totalContratado - totalMatGasto - totalMaoGasto
+              return (
               <>
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm">
                     <thead>
                       <tr className="border-b border-outline-variant">
-                        {['Serviço', 'Status', 'Previsto', 'Cobrado do Cliente', 'Nosso Custo', 'Diferença', 'Progresso', ''].map(h => (
+                        {['Serviço', 'Unid.', 'Qtd.', 'Valor Contratado', 'Custo Material Prev.', 'Custo M.O. Prev.', 'Material Realizado', 'M.O. Realizada', 'Status', 'Progresso', ''].map(h => (
                           <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -1641,12 +1659,13 @@ export default function Obras() {
                     <tbody>
                       {svs.map(sv => {
                         const vp = parseFloat(sv.valor_previsto || 0)
+                        const matPrev = parseFloat(sv.valor_material_previsto || 0)
+                        const maoPrev = parseFloat(sv.valor_mao_obra_previsto || 0)
                         const vrMao = custoMaoObraServicoAuto(sv)
                         const vrMat = custoMaterialServicoAuto(sv)
-                        const vr = custoServicoAuto(sv)
-                        const vCliente = cobradoClienteServicoAuto(sv.id)
-                        const dif = vp - vr
-                        const pp = pct(vr, vp)
+                        const custoPrevTotal = matPrev + maoPrev
+                        const custoRealTotal = vrMao + vrMat
+                        const ppRaw = custoPrevTotal > 0 ? (custoRealTotal / custoPrevTotal) * 100 : 0
                         const badge = SERV_BADGE[sv.status] || SERV_BADGE.pendente
                         return (
                           <tr key={sv.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
@@ -1655,24 +1674,21 @@ export default function Obras() {
                               {sv.fornecedor && <div className="text-[11px] text-primary mt-0.5">{sv.fornecedor}</div>}
                               {sv.observacao && <div className="text-[11px] text-on-surface-variant mt-0.5">{sv.observacao}</div>}
                             </td>
+                            <td className="px-3 py-3 text-on-surface-variant">{sv.unidade || '—'}</td>
+                            <td className="px-3 py-3 text-on-surface-variant">{sv.quantidade != null ? Number(sv.quantidade).toLocaleString('pt-BR', { maximumFractionDigits: 2 }) : '—'}</td>
+                            <td className="px-3 py-3 font-semibold text-tertiary">{moeda(vp)}</td>
+                            <td className="px-3 py-3 font-semibold text-on-surface">{moeda(matPrev)}</td>
+                            <td className="px-3 py-3 font-semibold text-on-surface">{moeda(maoPrev)}</td>
+                            <td className={`px-3 py-3 font-semibold ${vrMat > matPrev && matPrev > 0 ? 'text-error' : 'text-primary-container'}`}>{moeda(vrMat)}</td>
+                            <td className={`px-3 py-3 font-semibold ${vrMao > maoPrev && maoPrev > 0 ? 'text-error' : 'text-primary-container'}`}>{moeda(vrMao)}</td>
                             <td className="px-3 py-3">
                               <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${badge}`}>{SERV_STATUS[sv.status] || sv.status}</span>
                             </td>
-                            <td className="px-3 py-3 font-semibold text-tertiary">{moeda(vp)}</td>
-                            <td className="px-3 py-3 font-semibold text-primary-container">{moeda(vCliente)}</td>
-                            <td className={`px-3 py-3 font-semibold ${vr > vp && vp > 0 ? 'text-error' : 'text-on-surface'}`}>
-                              {moeda(vr)}
-                              {(vrMao > 0 || vrMat > 0) && <div className="text-[10px] text-on-surface-variant font-normal">M.O: {moeda(vrMao)} · Mat: {moeda(vrMat)}</div>}
-                            </td>
-                            <td className="px-3 py-3">
-                              <div className={`font-bold ${dif >= 0 ? 'text-primary-container' : 'text-error'}`}>{dif >= 0 ? '▼ ' : '▲ '}{moeda(Math.abs(dif))}</div>
-                              <div className="text-[10px] text-on-surface-variant">{dif >= 0 ? 'sob controle' : 'acima do prev.'}</div>
-                            </td>
                             <td className="px-3 py-3 min-w-[100px]">
                               <div className="h-1.5 bg-surface-variant rounded overflow-hidden mb-1">
-                                <div className={`h-full rounded ${pp > 100 ? 'bg-error' : pp > 80 ? 'bg-tertiary' : 'bg-primary'}`} style={{ width: pp + '%' }} />
+                                <div className={`h-full rounded ${corProgresso(ppRaw)}`} style={{ width: Math.min(ppRaw, 100) + '%' }} />
                               </div>
-                              <div className="text-[10px] text-on-surface-variant">{pp.toFixed(0)}%</div>
+                              <div className="text-[10px] text-on-surface-variant">{ppRaw.toFixed(0)}%</div>
                             </td>
                             <td className="px-3 py-3">
                               <div className="flex gap-1.5">
@@ -1690,16 +1706,29 @@ export default function Obras() {
                   </table>
                 </div>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mt-4 p-4 bg-surface-container-low rounded-lg">
-                  <div><div className="text-[10px] text-on-surface-variant mb-1">TOTAL PREVISTO</div><div className="text-lg font-bold text-tertiary">{moeda(prevTotal)}</div><div className="text-[10px] text-on-surface-variant mt-0.5">orçamento total</div></div>
-                  <div><div className="text-[10px] text-on-surface-variant mb-1">GASTOS REAIS</div><div className={`text-lg font-bold ${custos > prevTotal && prevTotal > 0 ? 'text-error' : 'text-primary'}`}>{moeda(custos)}</div><div className="text-[10px] text-on-surface-variant mt-0.5">lançamentos da obra</div></div>
-                  <div><div className="text-[10px] text-on-surface-variant mb-1">DIFERENÇA</div><div className={`text-lg font-bold ${(prevTotal - custos) >= 0 ? 'text-primary-container' : 'text-error'}`}>{moeda(prevTotal - custos)}</div><div className={`text-[10px] mt-0.5 ${(prevTotal - custos) >= 0 ? 'text-primary-container' : 'text-error'}`}>{(prevTotal - custos) >= 0 ? 'sob controle' : 'estourou!'}</div></div>
-                  <div><div className="text-[10px] text-on-surface-variant mb-1">MARGEM</div><div className={`text-lg font-bold ${margem >= 0 ? 'text-primary-container' : 'text-error'}`}>{moeda(margem)}</div><div className="text-[10px] text-on-surface-variant mt-0.5">{svs.filter(s => s.status === 'concluido').length}/{svs.length} concluído(s)</div></div>
+                  <div><div className="text-[10px] text-on-surface-variant mb-1">CONTRATO (SERVIÇOS)</div><div className="text-lg font-bold text-tertiary">{moeda(totalContratado)}</div><div className="text-[10px] text-on-surface-variant mt-0.5">valor cobrado do cliente</div></div>
+                  <div>
+                    <div className="text-[10px] text-on-surface-variant mb-1">MATERIAL</div>
+                    <div className={`text-lg font-bold ${totalMatGasto > totalMatPrevisto && totalMatPrevisto > 0 ? 'text-error' : 'text-primary'}`}>{moeda(totalMatGasto)}</div>
+                    <div className="text-[10px] text-on-surface-variant mt-0.5">de {moeda(totalMatPrevisto)} previsto</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-on-surface-variant mb-1">MÃO DE OBRA</div>
+                    <div className={`text-lg font-bold ${totalMaoGasto > totalMaoPrevisto && totalMaoPrevisto > 0 ? 'text-error' : 'text-primary'}`}>{moeda(totalMaoGasto)}</div>
+                    <div className="text-[10px] text-on-surface-variant mt-0.5">de {moeda(totalMaoPrevisto)} previsto</div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-on-surface-variant mb-1">{lucroPrejuizo >= 0 ? 'LUCRO' : 'PREJUÍZO'}</div>
+                    <div className={`text-lg font-bold ${lucroPrejuizo >= 0 ? 'text-primary-container' : 'text-error'}`}>{moeda(lucroPrejuizo)}</div>
+                    <div className="text-[10px] text-on-surface-variant mt-0.5">{svs.filter(s => s.status === 'concluido').length}/{svs.length} concluído(s)</div>
+                  </div>
                 </div>
                 <div className="mt-3 px-3 py-2 bg-primary/5 rounded-lg text-body-sm text-on-surface-variant">
-                  💡 <strong className="text-primary-container">Cobrado do Cliente</strong> mede em cima do valor cobrado do cliente. <strong className="text-primary">Nosso Custo</strong> soma mão de obra (medição de fornecedor, base = custo de mão de obra previsto) + material (lançamentos/gastos vinculados ao serviço com categoria "Material"). No Financeiro, selecione a obra, a <strong className="text-on-surface">Categoria da Obra</strong> (serviço) e a categoria "Material" ou "Mão de obra" para o lançamento entrar na conta certa.
+                  💡 <strong className="text-on-surface">Material Realizado</strong> = compras lançadas no Financeiro com categoria "Material" vinculadas ao serviço. <strong className="text-on-surface">M.O. Realizada</strong> = última medição de fornecedor registrada no serviço, com base no custo de mão de obra previsto (não no valor cobrado do cliente). No Financeiro, selecione a obra, a <strong className="text-on-surface">Categoria da Obra</strong> (serviço) e a categoria "Material" ou "Mão de obra" para o lançamento entrar na conta certa.
                 </div>
               </>
-            )}
+              )
+            })()}
           </div>
         )}
 
@@ -1816,11 +1845,12 @@ export default function Obras() {
                     const et = etapasObra.find(e => e.servico_id === servico.id)
                     if (!et) return null
                     const { xPct, larguraPct } = calcularBarraGantt(inicioObra, fimObra, et.data_inicio_prevista, et.data_fim_prevista)
+                    const statusVisual = (et.status !== 'concluida' && et.data_fim_prevista && new Date(et.data_fim_prevista) < new Date()) ? 'atrasada' : et.status
                     return (
                       <div key={servico.id} className="flex items-center gap-3">
                         <div className="w-32 shrink-0 text-[11px] text-on-surface truncate" title={servico.nome}>{servico.nome}</div>
                         <div className="relative flex-1 h-5 bg-surface-container rounded overflow-hidden">
-                          <div className={`absolute top-0 h-full rounded ${corBarraEtapa(et.status)}`} style={{ left: xPct + '%', width: larguraPct + '%' }} title={`${dataBR(et.data_inicio_prevista)} — ${dataBR(et.data_fim_prevista)}`} />
+                          <div className={`absolute top-0 h-full rounded ${corBarraEtapa(statusVisual)}`} style={{ left: xPct + '%', width: larguraPct + '%' }} title={`${dataBR(et.data_inicio_prevista)} — ${dataBR(et.data_fim_prevista)}`} />
                           {hojeDentro && <div className="absolute top-0 h-full w-px bg-primary" style={{ left: hojeGantt + '%' }} />}
                         </div>
                       </div>
@@ -2026,7 +2056,7 @@ export default function Obras() {
                   <table className="w-full border-collapse text-sm">
                     <thead>
                       <tr className="border-b border-outline-variant">
-                        {['Serviço', 'Valor Base', '% Acumulado', 'Valor Acum.', 'Valor Período', 'Retenção', 'Líquido'].map(h => (
+                        {['Serviço', 'Valor Base', '% Acumulado', 'Progresso', 'Valor Acum.', 'Valor Período', 'Retenção', 'Líquido'].map(h => (
                           <th key={h} className="text-left px-2.5 py-2 text-[10px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
                         ))}
                       </tr>
@@ -2046,6 +2076,12 @@ export default function Obras() {
                             <input className={inputCls + ' text-xs py-1.5 w-20'} type="number" min="0" max="100" value={p.percentual}
                               onChange={e => setPreenchimento({ ...preenchimento, [item.id]: { ...p, percentual: e.target.value } })} />
                           </td>
+                          <td className="px-2.5 py-2.5 min-w-[90px]">
+                            <div className="h-1.5 bg-surface-variant rounded overflow-hidden mb-1">
+                              <div className={`h-full rounded ${corProgresso(parseFloat(p.percentual || '0'))}`} style={{ width: Math.min(parseFloat(p.percentual || '0'), 100) + '%' }} />
+                            </div>
+                            <div className="text-[10px] text-on-surface-variant">{parseFloat(p.percentual || '0').toFixed(0)}%</div>
+                          </td>
                           <td className="px-2.5 py-2.5 text-on-surface-variant">{moeda(acumAtual)}</td>
                           <td className="px-2.5 py-2.5 font-semibold text-primary">{moeda(valorPeriodo)}</td>
                           <td className="px-2.5 py-2.5 text-error">{moeda(retencao)}</td>
@@ -2055,7 +2091,7 @@ export default function Obras() {
                     </tbody>
                     <tfoot>
                       <tr className="bg-surface-container-low">
-                        <td colSpan={4} className="px-2.5 py-2.5 font-bold text-on-surface">Total desta medição</td>
+                        <td colSpan={5} className="px-2.5 py-2.5 font-bold text-on-surface">Total desta medição</td>
                         <td className="px-2.5 py-2.5 font-black text-primary">{moeda(totalPeriodo)}</td>
                         <td className="px-2.5 py-2.5 font-bold text-error">{moeda(totalRetencao)}</td>
                         <td className="px-2.5 py-2.5 font-black text-primary-container">{moeda(totalLiquido)}</td>
@@ -2294,6 +2330,18 @@ export default function Obras() {
               <div className="mb-3.5">
                 <label className={labelCls}>Fornecedor / Equipe Responsável (opcional)</label>
                 <input className={inputCls} placeholder="Ex: Pedreiro João, Instaladora XPTO Ar-Condicionado" value={fServ.fornecedor} onChange={e => setFServ({ ...fServ, fornecedor: e.target.value })} />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-3.5">
+                <div>
+                  <label className={labelCls}>Unidade</label>
+                  <select className={inputCls} value={fServ.unidade} onChange={e => setFServ({ ...fServ, unidade: e.target.value })}>
+                    {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Quantidade</label>
+                  <input className={inputCls} type="number" placeholder="1" value={fServ.quantidade} onChange={e => setFServ({ ...fServ, quantidade: e.target.value })} />
+                </div>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-3.5">
                 <div>

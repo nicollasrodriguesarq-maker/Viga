@@ -286,14 +286,15 @@ export default function Orcamento() {
   // Nunca apaga linha orfa: pode ter valor_realizado/status preenchido manualmente depois.
   async function sincronizarServicosObra(orcamentoId: string, obraId: string) {
     const itensOrc = await buscar('orcamento_itens', '?orcamento_id=eq.' + orcamentoId)
-    const grupos = new Map<string, { previsto: number; maoObra: number; material: number }>()
+    const grupos = new Map<string, { previsto: number; maoObra: number; material: number; qtd: number; unidade: string }>()
     for (const item of itensOrc) {
       if (!item.servico) continue
       const qtd = parseFloat(item.quantidade || 1)
-      const atual = grupos.get(item.servico) || { previsto: 0, maoObra: 0, material: 0 }
+      const atual = grupos.get(item.servico) || { previsto: 0, maoObra: 0, material: 0, qtd: 0, unidade: item.unidade || '' }
       atual.previsto += calcularTotalItem(item)
       atual.maoObra += parseFloat(item.preco_mao_obra || 0) * qtd
       atual.material += parseFloat(item.preco_material || 0) * qtd
+      atual.qtd += qtd
       grupos.set(item.servico, atual)
     }
     const servicosExistentes = await buscar('obra_servicos', '?obra_id=eq.' + obraId)
@@ -301,7 +302,7 @@ export default function Orcamento() {
     let criouNovo = false
     for (const [nome, totais] of grupos) {
       const existente = servicosExistentes.find((s: any) => s.nome === nome)
-      const dados = { valor_previsto: totais.previsto, valor_mao_obra_previsto: totais.maoObra, valor_material_previsto: totais.material }
+      const dados = { valor_previsto: totais.previsto, valor_mao_obra_previsto: totais.maoObra, valor_material_previsto: totais.material, unidade: totais.unidade, quantidade: totais.qtd }
       if (existente) await editar('obra_servicos', existente.id, dados)
       else {
         maxOrdem += 1

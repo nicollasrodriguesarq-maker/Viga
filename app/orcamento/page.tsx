@@ -675,7 +675,7 @@ export default function Orcamento() {
             <option value="house_flipping">🏠 House Flipping</option>
           </select>
         </div>
-        <div className="grid grid-cols-3 gap-3 mb-3.5">
+        <div className="grid grid-cols-2 gap-3 mb-3.5">
           <div>
             <label className={labelCls}>Unidade</label>
             <select className={inputCls} value={fBanco.unidade} onChange={e => setFBanco({ ...fBanco, unidade: e.target.value })}>
@@ -689,15 +689,15 @@ export default function Orcamento() {
               {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
-          <div>
-            <label className={labelCls}>Tempo Execução</label>
-            <div className="flex gap-1.5">
-              <input className={inputCls + ' flex-1'} type="number" placeholder="0" value={fBanco.tempo_execucao} onChange={e => setFBanco({ ...fBanco, tempo_execucao: e.target.value })} />
-              <select className={inputCls + ' w-[85px] shrink-0'} value={fBanco.tempo_execucao_unidade} onChange={e => setFBanco({ ...fBanco, tempo_execucao_unidade: e.target.value })}>
-                <option value="dias">dias</option>
-                <option value="horas">horas</option>
-              </select>
-            </div>
+        </div>
+        <div className="mb-3.5">
+          <label className={labelCls}>Tempo Execução</label>
+          <div className="grid grid-cols-2 gap-3">
+            <input className={inputCls} type="number" placeholder="0" value={fBanco.tempo_execucao} onChange={e => setFBanco({ ...fBanco, tempo_execucao: e.target.value })} />
+            <select className={inputCls} value={fBanco.tempo_execucao_unidade} onChange={e => setFBanco({ ...fBanco, tempo_execucao_unidade: e.target.value })}>
+              <option value="dias">dias</option>
+              <option value="horas">horas</option>
+            </select>
           </div>
         </div>
 

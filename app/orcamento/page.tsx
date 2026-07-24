@@ -111,7 +111,7 @@ export default function Orcamento() {
   const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra' })
   const [fItem, setFItem] = useState({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' })
   const [editItem, setEditItem] = useState<any>(null)
-  const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tipo_banco: 'obras' })
+  const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias', tipo_banco: 'obras' })
   const [composicao, setComposicao] = useState<any[]>([])
   const [fComp, setFComp] = useState({ material_nome: '', quantidade: '1', unidade: 'un', preco_unitario: '' })
   const [usarComposicao, setUsarComposicao] = useState(false)
@@ -348,14 +348,14 @@ export default function Orcamento() {
   }
   function abrirNovoBanco() {
     setEditBanco(null)
-    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tipo_banco: abaBanco })
+    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias', tipo_banco: abaBanco })
     setComposicao([]); setUsarComposicao(false)
     setFComp({ material_nome: '', quantidade: '1', unidade: 'un', preco_unitario: '' })
     setJanela('banco')
   }
   async function abrirEditarBanco(item: any) {
     setEditBanco(item)
-    setFBanco({ nome: item.nome, unidade: item.unidade, categoria: item.categoria || '', preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '', tipo_banco: item.tipo_banco || 'obras' })
+    setFBanco({ nome: item.nome, unidade: item.unidade, categoria: item.categoria || '', preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '', tempo_execucao_unidade: item.tempo_execucao_unidade || 'dias', tipo_banco: item.tipo_banco || 'obras' })
     const comp = await buscar('banco_itens_composicao', '?banco_item_id=eq.' + item.id + '&order=created_at')
     setComposicao(comp)
     setUsarComposicao(comp.length > 0)
@@ -376,6 +376,7 @@ export default function Orcamento() {
       lucro_percentual: parseFloat(fBanco.lucro_percentual || '0'),
       imposto_percentual: parseFloat(fBanco.imposto_percentual || '0'),
       tempo_execucao: fBanco.tempo_execucao ? parseFloat(fBanco.tempo_execucao) : null,
+      tempo_execucao_unidade: fBanco.tempo_execucao_unidade,
       tipo_banco: fBanco.tipo_banco,
     }
     let bancoId = editBanco?.id
@@ -391,7 +392,7 @@ export default function Orcamento() {
       }
     }
     setJanela(null); setEditBanco(null); setComposicao([]); setUsarComposicao(false)
-    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tipo_banco: abaBanco })
+    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias', tipo_banco: abaBanco })
     carregar()
   }
 
@@ -418,10 +419,12 @@ export default function Orcamento() {
   }
 
   // ── Transformar orçamento aprovado em Obra + cronograma automático ──
+  // Cronograma trabalha em dias; itens medidos em horas são convertidos assumindo jornada de 8h.
   function tempoExecucaoItem(item: any): number {
     const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
-    const t = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
-    return t > 0 ? t : 1
+    const valor = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
+    const dias = bi?.tempo_execucao_unidade === 'horas' ? valor / 8 : valor
+    return dias > 0 ? dias : 1
   }
   function diaValido(d: Date, pattern: string): boolean {
     const dow = d.getDay()
@@ -687,8 +690,14 @@ export default function Orcamento() {
             </select>
           </div>
           <div>
-            <label className={labelCls}>Tempo Execução (dias)</label>
-            <input className={inputCls} type="number" placeholder="0" value={fBanco.tempo_execucao} onChange={e => setFBanco({ ...fBanco, tempo_execucao: e.target.value })} />
+            <label className={labelCls}>Tempo Execução</label>
+            <div className="flex gap-1.5">
+              <input className={inputCls + ' flex-1'} type="number" placeholder="0" value={fBanco.tempo_execucao} onChange={e => setFBanco({ ...fBanco, tempo_execucao: e.target.value })} />
+              <select className={inputCls + ' w-[85px] shrink-0'} value={fBanco.tempo_execucao_unidade} onChange={e => setFBanco({ ...fBanco, tempo_execucao_unidade: e.target.value })}>
+                <option value="dias">dias</option>
+                <option value="horas">horas</option>
+              </select>
+            </div>
           </div>
         </div>
 

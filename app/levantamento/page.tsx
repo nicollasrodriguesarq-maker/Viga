@@ -87,6 +87,12 @@ const STATUS_BADGE: Record<string, string> = {
   concluido: 'bg-primary-container/10 text-primary-container border-primary-container/20',
   cancelado: 'bg-error/10 text-error border-error/20',
 }
+const TIPOS_EXECUCAO = [{ v: 'obra', l: '🏗️ Execução de Obra' }, { v: 'projeto', l: '📐 Execução de Projeto' }]
+const EXECUCAO_NOME: Record<string, string> = { obra: '🏗️ Obra', projeto: '📐 Projeto' }
+const EXECUCAO_BADGE: Record<string, string> = {
+  obra: 'bg-primary/10 text-primary border-primary/20',
+  projeto: 'bg-secondary/10 text-secondary border-secondary/20',
+}
 
 const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
 const AMBIENTES_COMUNS = ['Sala de Estar', 'Sala de Jantar', 'Cozinha', 'Quarto 1', 'Quarto 2', 'Quarto 3', 'Banheiro Social', 'Banheiro Suíte', 'Área de Serviço', 'Varanda', 'Fachada', 'Área Externa', 'Corredor', 'Hall', 'Escritório', 'Garagem']
@@ -134,11 +140,12 @@ export default function Levantamento() {
   const [janela, setJanela] = useState<string | null>(null)
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState('todos')
+  const [filtroExecucao, setFiltroExecucao] = useState('todos')
   const [userEmail, setUserEmail] = useState('')
   const [meuId, setMeuId] = useState('')
   const [souAdmin, setSouAdmin] = useState(false)
 
-  const [fLev, setFLev] = useState({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '' })
+  const [fLev, setFLev] = useState({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' })
   const [fAmb, setFAmb] = useState({ nome: '', nomeCustom: '' })
   const [fItem, setFItem] = useState({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
   const [editItem, setEditItem] = useState<any>(null)
@@ -191,11 +198,12 @@ export default function Levantamento() {
       obra_id: fLev.obra_id || null,
       cliente_email: fLev.cliente_email,
       cliente_telefone: fLev.cliente_telefone,
+      tipo_execucao: fLev.tipo_execucao,
       criado_por: meuId || null,
     }
     const novo = await criar('levantamentos', dados)
     setJanela(null)
-    setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '' })
+    setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' })
     const [l, a, it] = await Promise.all([
       buscar('levantamentos', '?order=created_at.desc'),
       buscar('levantamento_ambientes', '?order=ordem'),
@@ -694,6 +702,7 @@ export default function Levantamento() {
 
   const lista = levantamentos.filter(l => {
     if (filtro !== 'todos' && l.status !== filtro) return false
+    if (filtroExecucao !== 'todos' && (l.tipo_execucao || 'obra') !== filtroExecucao) return false
     if (!busca) return true
     const termo = busca.toLowerCase().trim()
     const obraNome = obras.find(o => o.id === l.obra_id)?.nome
@@ -744,6 +753,7 @@ export default function Levantamento() {
             <button onClick={() => { setDetalhe(null); setAmbienteAtivo(null) }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-body-sm text-on-surface-variant font-semibold">{detalhe.codigo}</span>
+              <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${EXECUCAO_BADGE[detalhe.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[detalhe.tipo_execucao || 'obra']}</span>
               <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_BADGE[detalhe.status] || STATUS_BADGE.em_andamento}`}>{STATUS_LEVA[detalhe.status] || detalhe.status}</span>
               {!podeEditar && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20">🔒 Somente leitura</span>}
             </div>
@@ -1204,7 +1214,7 @@ export default function Levantamento() {
       topbarSlot={
         <>
           <button
-            onClick={() => { setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '' }); setJanela('levantamento') }}
+            onClick={() => { setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }); setJanela('levantamento') }}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20"
           >
             <span className="material-symbols-outlined text-[20px]">add_circle</span>
@@ -1218,12 +1228,21 @@ export default function Levantamento() {
           <h2 className="font-headline text-headline-lg text-on-surface">Levantamento Técnico</h2>
           <p className="text-body-md text-on-surface-variant max-w-2xl">Gerencie e visualize as vistorias de campo, medições e registros técnicos de todas as suas obras ativas.</p>
         </div>
-        <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
-          {([['todos', 'Todos'], ...Object.entries(STATUS_LEVA)] as [string, string][]).map(([v, n]) => (
-            <button key={v}
-              className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtro === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
-              onClick={() => setFiltro(v)}>{n}</button>
-          ))}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
+            {([['todos', 'Todos'], ...Object.entries(STATUS_LEVA)] as [string, string][]).map(([v, n]) => (
+              <button key={v}
+                className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtro === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+                onClick={() => setFiltro(v)}>{n}</button>
+            ))}
+          </div>
+          <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
+            {([['todos', 'Todos'], ['obra', '🏗️ Obra'], ['projeto', '📐 Projeto']] as [string, string][]).map(([v, n]) => (
+              <button key={v}
+                className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtroExecucao === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+                onClick={() => setFiltroExecucao(v)}>{n}</button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1258,6 +1277,7 @@ export default function Levantamento() {
                 <div className="p-lg">
                   <div className="flex items-center justify-between gap-2 mb-1.5 flex-wrap">
                     <div className="flex items-center gap-2 flex-wrap">
+                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${EXECUCAO_BADGE[lev.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[lev.tipo_execucao || 'obra']}</span>
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border uppercase ${STATUS_BADGE[lev.status] || STATUS_BADGE.em_andamento}`}>{STATUS_LEVA[lev.status] || lev.status}</span>
                       <span className="font-data-mono text-on-surface-variant text-body-sm">#{lev.codigo}</span>
                     </div>
@@ -1325,6 +1345,12 @@ export default function Levantamento() {
                   {Object.entries(STATUS_LEVA).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
                 </select>
               </div>
+            </div>
+            <div className="mb-3.5">
+              <label className={labelCls}>Execução *</label>
+              <select className={inputCls} value={fLev.tipo_execucao} onChange={e => setFLev({ ...fLev, tipo_execucao: e.target.value })}>
+                {TIPOS_EXECUCAO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+              </select>
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Nome do Levantamento</label>

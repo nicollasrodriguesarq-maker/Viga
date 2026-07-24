@@ -56,7 +56,9 @@ const labelCls = 'text-[11px] text-on-surface-variant font-semibold uppercase tr
 const btnPrimaryCls = 'bg-primary text-on-primary rounded-lg px-4 py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer w-full'
 const btnSecondaryCls = 'bg-surface-container-low border border-outline-variant text-on-surface-variant rounded-lg px-4 py-3 text-sm cursor-pointer w-full'
 
-const FLEV_VAZIO = { codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', obra_id: '', cliente_email: '', cliente_telefone: '' }
+const FLEV_VAZIO = { codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }
+const TIPOS_EXECUCAO = [{ v: 'obra', l: '🏗️ Execução de Obra' }, { v: 'projeto', l: '📐 Execução de Projeto' }]
+const EXECUCAO_NOME: Record<string, string> = { obra: '🏗️ Obra', projeto: '📐 Projeto' }
 const FITEM_VAZIO = { servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' }
 const FAMB_VAZIO = { nome: '', nomeCustom: '' }
 
@@ -69,6 +71,7 @@ export default function LevantamentoMobile() {
   const [meuId, setMeuId] = useState('')
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState('todos')
+  const [filtroExecucao, setFiltroExecucao] = useState('todos')
   const [detalhe, setDetalhe] = useState<any>(null)
   const [ambienteAtivo, setAmbienteAtivo] = useState<any>(null)
   const [tela, setTela] = useState<string | null>(null)
@@ -102,6 +105,7 @@ export default function LevantamentoMobile() {
 
   const filtrados = levantamentos.filter(l => {
     if (filtro !== 'todos' && l.status !== filtro) return false
+    if (filtroExecucao !== 'todos' && (l.tipo_execucao || 'obra') !== filtroExecucao) return false
     if (!busca) return true
     const alvo = (l.codigo + ' ' + l.nome + ' ' + l.cliente).toLowerCase()
     return alvo.includes(busca.toLowerCase())
@@ -254,6 +258,12 @@ export default function LevantamentoMobile() {
     return (
       <MobileShell title="Novo Levantamento">
         <div className="p-4 flex flex-col gap-3.5 pb-8">
+          <div>
+            <label className={labelCls}>Execução *</label>
+            <select className={inputCls} value={fLev.tipo_execucao} onChange={e => setFLev({ ...fLev, tipo_execucao: e.target.value })}>
+              {TIPOS_EXECUCAO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+            </select>
+          </div>
           <div>
             <label className={labelCls}>Cliente *</label>
             <input className={inputCls} placeholder="Nome do cliente" value={fLev.cliente} onChange={e => setFLev({ ...fLev, cliente: e.target.value })} />
@@ -453,6 +463,7 @@ export default function LevantamentoMobile() {
             <div className="text-body-sm text-on-surface-variant mt-1">{detalhe.cliente}</div>
             {detalhe.endereco && <div className="text-[11px] text-on-surface-variant mt-1">📍 {detalhe.endereco}</div>}
             <div className="text-[11px] text-on-surface-variant mt-1">Status: {STATUS_LEVA[detalhe.status] || detalhe.status}</div>
+            <div className="text-[11px] text-primary mt-1">{EXECUCAO_NOME[detalhe.tipo_execucao || 'obra']}</div>
           </div>
 
           <button className={btnPrimaryCls} onClick={() => setTela('novoAmbiente')}>+ Ambiente</button>
@@ -522,6 +533,14 @@ export default function LevantamentoMobile() {
             </button>
           ))}
         </div>
+        <div className="flex gap-2 overflow-x-auto pb-1">
+          {[['todos', 'Todos'], ['obra', '🏗️ Obra'], ['projeto', '📐 Projeto']].map(([v, n]) => (
+            <button key={v} onClick={() => setFiltroExecucao(v)}
+              className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold border ${filtroExecucao === v ? 'bg-primary/10 text-primary border-primary/30' : 'bg-surface-container text-on-surface-variant border-outline-variant'}`}>
+              {n}
+            </button>
+          ))}
+        </div>
         <button className={btnPrimaryCls} onClick={() => setTela('novoLevantamento')}>+ Novo Levantamento</button>
 
         {filtrados.length === 0 ? (
@@ -541,7 +560,8 @@ export default function LevantamentoMobile() {
                   <button className="text-error text-xs font-semibold" onClick={e => { e.stopPropagation(); excluirLevantamento(l) }}>🗑️</button>
                 </div>
               </div>
-              <div className="text-[11px] text-on-surface-variant mt-2">{qtdItens} serviço{qtdItens === 1 ? '' : 's'} registrado{qtdItens === 1 ? '' : 's'}</div>
+              <div className="text-[11px] text-primary mt-1">{EXECUCAO_NOME[l.tipo_execucao || 'obra']}</div>
+              <div className="text-[11px] text-on-surface-variant mt-1">{qtdItens} serviço{qtdItens === 1 ? '' : 's'} registrado{qtdItens === 1 ? '' : 's'}</div>
             </div>
           )
         })}

@@ -1127,6 +1127,26 @@ export default function Obras() {
   function totalPrevisto(id: string) { return servicosObra(id).reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0) }
   function totalRealizado(id: string) { return servicosObra(id).reduce((a, s) => a + custoServicoAuto(s), 0) }
 
+  // Apaga a obra inteira. obra_servicos/cronograma_etapas/medicoes/medicao_itens/
+  // obra_funcionarios/obra_funcionario_arquivos/obra_relatorios_visita/obra_atribuicoes já têm
+  // "on delete cascade" no banco; orcamentos vinculados só perdem o vínculo (obra_id vira null).
+  // lancamentos e gastos_cartao NÃO têm cascade (de propósito, são registros financeiros) — por
+  // isso o delete direto da obra falhava em silêncio sempre que havia algum lançamento ou gasto
+  // de cartão vinculado. Apagamos os dois explicitamente antes, e checamos o resultado final.
+  async function excluirObra(obra: any) {
+    if (!confirm(`Excluir a obra ${obra.codigo}? Isso apaga também os lançamentos e gastos de cartão vinculados a ela. Esta ação não pode ser desfeita.`)) return
+    await fetch(BASE + '/lancamentos?obra_id=eq.' + obra.id, { method: 'DELETE', headers: HDR })
+    await fetch(BASE + '/gastos_cartao?obra_id=eq.' + obra.id, { method: 'DELETE', headers: HDR })
+    const r = await fetch(BASE + '/obras?id=eq.' + obra.id, { method: 'DELETE', headers: HDR })
+    if (!r.ok) {
+      const errText = await r.text()
+      alert('Não foi possível excluir a obra: ' + errText.slice(0, 300))
+      return
+    }
+    setDetalhe(null)
+    carregar()
+  }
+
   // ── salvar obra ───────────────────────────────────────────
   // Distribui os obra_servicos (ordenados por `ordem`) em fatias sequenciais dentro do
   // periodo data_inicio..data_previsao da obra, gerando/atualizando uma cronograma_etapas por
@@ -1420,11 +1440,7 @@ export default function Obras() {
               ))}
             </div>
             <div className="mt-4 pt-4 border-t border-outline-variant">
-              <button className={btnDangerSmCls} onClick={async () => {
-                if (!confirm('Excluir esta obra? Esta ação não pode ser desfeita.')) return
-                await remover('obras', detalhe.id)
-                setDetalhe(null); carregar()
-              }}>🗑️ Excluir Obra</button>
+              <button className={btnDangerSmCls} onClick={() => excluirObra(detalhe)}>🗑️ Excluir Obra</button>
             </div>
           </div>
         )}

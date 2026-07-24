@@ -393,6 +393,27 @@ export default function Obras() {
       .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0] || null
   }
 
+  // Total período (bruto) e líquido (após retenção) de uma medição já salva — usado no
+  // painel de crédito/débito do contrato e na lista de medições.
+  function totalsMedicao(med: any) {
+    const svsObra = servicosObra(med.obra_id)
+    const itensFiltrados = svsObra.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor)
+    const orcVinculado = orcamentos.find(o => o.obra_id === med.obra_id)
+    const retPct = parseFloat(orcVinculado?.retencao_percentual || 0)
+    let totalPeriodo = 0, totalLiquido = 0
+    itensFiltrados.forEach(item => {
+      const mi = medItens.find(x => x.medicao_id === med.id && x.servico_id === item.id)
+      if (!mi) return
+      const ultimo = ultimoRegistro(item.id, med.id, med.tipo, med.fornecedor)
+      const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
+      const acumAtual = mi.valor_base * mi.percentual_acumulado
+      const valorPeriodo = acumAtual - acumAnterior
+      totalPeriodo += valorPeriodo
+      totalLiquido += valorPeriodo - valorPeriodo * retPct
+    })
+    return { totalPeriodo, totalLiquido }
+  }
+
   function abrirPreenchimentoMedicao(medicao: any, itensFiltrados: any[]) {
     const preench: Record<string, { valor_base: string; percentual: string }> = {}
     itensFiltrados.forEach(item => {
@@ -1580,6 +1601,34 @@ export default function Obras() {
               </div>
               <button className={btnPrimaryCls} onClick={() => { setFMedicao({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '' }); setJanela('nova_medicao') }}>+ Nova Medição</button>
             </div>
+            {(() => {
+              const recebidoCliente = medicoesObra.filter(m => m.tipo === 'cliente').reduce((a, m) => a + totalsMedicao(m).totalPeriodo, 0)
+              const pagoFornecedores = medicoesObra.filter(m => m.tipo === 'fornecedor').reduce((a, m) => a + totalsMedicao(m).totalLiquido, 0)
+              const lucroPrevisto = contrato - prevTotal
+              const faltaReceber = contrato - recebidoCliente
+              const faltaPagar = prevTotal - pagoFornecedores
+              return (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-5">
+                  <div className="bg-surface-container-low border border-outline-variant rounded-lg p-4">
+                    <div className="text-[11px] font-bold text-primary uppercase mb-3">💰 Cliente</div>
+                    <div className="flex flex-col gap-2 text-sm">
+                      <div className="flex justify-between"><span className="text-on-surface-variant">Contrato</span><span className="font-semibold text-on-surface">{moeda(contrato)}</span></div>
+                      <div className="flex justify-between"><span className="text-on-surface-variant">Recebido</span><span className="font-semibold text-primary-container">{moeda(recebidoCliente)}</span></div>
+                      <div className="flex justify-between border-t border-outline-variant pt-2"><span className="text-on-surface-variant">Falta Receber</span><span className="font-bold text-on-surface">{moeda(faltaReceber)}</span></div>
+                    </div>
+                  </div>
+                  <div className="bg-surface-container-low border border-outline-variant rounded-lg p-4">
+                    <div className="text-[11px] font-bold text-tertiary uppercase mb-3">🧱 Custo × Lucro</div>
+                    <div className="flex flex-col gap-2 text-sm">
+                      <div className="flex justify-between"><span className="text-on-surface-variant">Custo Previsto</span><span className="font-semibold text-on-surface">{moeda(prevTotal)}</span></div>
+                      <div className="flex justify-between"><span className="text-on-surface-variant">Lucro Previsto</span><span className={`font-semibold ${lucroPrevisto >= 0 ? 'text-primary-container' : 'text-error'}`}>{moeda(lucroPrevisto)}</span></div>
+                      <div className="flex justify-between"><span className="text-on-surface-variant">Pago a Fornecedores</span><span className="font-semibold text-error">{moeda(pagoFornecedores)}</span></div>
+                      <div className="flex justify-between border-t border-outline-variant pt-2"><span className="text-on-surface-variant">Falta Pagar</span><span className="font-bold text-on-surface">{moeda(faltaPagar)}</span></div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
             {medicoesObra.length === 0 ? (
               <div className="text-center py-8 text-on-surface-variant">Nenhuma medição ainda</div>
             ) : (

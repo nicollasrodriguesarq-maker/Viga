@@ -37,6 +37,12 @@ const STATUS_BADGE: Record<string, string> = {
   reprovado: 'bg-error/10 text-error border-error/20',
   expirado: 'bg-tertiary/10 text-tertiary border-tertiary/20',
 }
+const TIPOS_EXECUCAO = [{ v: 'obra', l: '🏗️ Execução de Obra' }, { v: 'projeto', l: '📐 Execução de Projeto' }]
+const EXECUCAO_NOME: Record<string, string> = { obra: '🏗️ Obra', projeto: '📐 Projeto' }
+const EXECUCAO_BADGE: Record<string, string> = {
+  obra: 'bg-primary/10 text-primary border-primary/20',
+  projeto: 'bg-secondary/10 text-secondary border-secondary/20',
+}
 const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
 const CATEGORIAS = ['Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Climatização (AC)', 'Forro', 'Revestimento de Parede', 'Revestimento de Piso', 'Pintura', 'Esquadrias', 'Marcenaria', 'Serralheria', 'Vidraçaria', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
 
@@ -93,6 +99,7 @@ export default function Orcamento() {
   const [buscaBanco, setBuscaBanco] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [filtro, setFiltro] = useState('todos')
+  const [filtroExecucao, setFiltroExecucao] = useState('todos')
   const [meuId, setMeuId] = useState('')
   const [souAdmin, setSouAdmin] = useState(false)
   const [solicitacoes, setSolicitacoes] = useState<any[]>([])
@@ -101,7 +108,7 @@ export default function Orcamento() {
   const [abaBanco, setAbaBanco] = useState<'obras' | 'house_flipping'>('obras')
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
 
-  const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '' })
+  const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra' })
   const [fItem, setFItem] = useState({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' })
   const [editItem, setEditItem] = useState<any>(null)
   const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tipo_banco: 'obras' })
@@ -166,6 +173,7 @@ export default function Orcamento() {
       condicao_pagamento: fOrc.condicao_pagamento,
       validade_dias: parseInt(fOrc.validade_dias || '30'),
       observacao: fOrc.observacao,
+      tipo_execucao: fOrc.tipo_execucao,
       status: 'rascunho',
       total_material: 0,
       total_mao_obra: 0,
@@ -179,7 +187,7 @@ export default function Orcamento() {
       await criar('orcamento_ambientes', { orcamento_id: orcId, nome: 'Geral', ordem: 0 })
     }
     setJanela(null)
-    setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '' })
+    setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra' })
     const [o, a, it, b] = await Promise.all([
       buscar('orcamentos', '?order=created_at.desc'),
       buscar('orcamento_ambientes', '?order=ordem'),
@@ -639,6 +647,7 @@ export default function Orcamento() {
 
   const lista = orcamentos.filter(o =>
     (filtro === 'todos' || o.status === filtro) &&
+    (filtroExecucao === 'todos' || (o.tipo_execucao || 'obra') === filtroExecucao) &&
     (!busca || [o.cliente_nome, o.codigo, o.endereco].some(v => v?.toLowerCase().includes(busca.toLowerCase())))
   )
 
@@ -797,6 +806,7 @@ export default function Orcamento() {
             <button onClick={() => { setDetalhe(null); setAmbienteAtivo(null) }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
             <div className="flex items-center gap-2 mb-1">
               <span className="text-body-sm text-on-surface-variant font-semibold">{detalhe.codigo}</span>
+              <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${EXECUCAO_BADGE[detalhe.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[detalhe.tipo_execucao || 'obra']}</span>
               <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_BADGE[detalhe.status] || STATUS_BADGE.rascunho}`}>{STATUS_ORC[detalhe.status] || detalhe.status}</span>
               {!podeEditar && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20">🔒 Somente leitura</span>}
             </div>
@@ -1303,7 +1313,7 @@ export default function Orcamento() {
             Banco de Itens
           </button>
           <button
-            onClick={() => { setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '' }); setJanela('orcamento') }}
+            onClick={() => { setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra' }); setJanela('orcamento') }}
             className="flex items-center gap-2 px-4 py-2 bg-primary-container text-on-primary-container rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary-container/20"
           >
             <span className="material-symbols-outlined text-[20px]">post_add</span>
@@ -1317,12 +1327,21 @@ export default function Orcamento() {
           <h2 className="font-headline text-headline-lg text-on-surface">Orçamento & Propostas</h2>
           <p className="text-body-md text-on-surface-variant">Gerenciamento centralizado de ofertas comerciais e faturamento previsto.</p>
         </div>
-        <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
-          {([['todos', 'Todos'], ...Object.entries(STATUS_ORC)] as [string, string][]).map(([v, n]) => (
-            <button key={v}
-              className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtro === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
-              onClick={() => setFiltro(v)}>{n}</button>
-          ))}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
+            {([['todos', 'Todos'], ...Object.entries(STATUS_ORC)] as [string, string][]).map(([v, n]) => (
+              <button key={v}
+                className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtro === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+                onClick={() => setFiltro(v)}>{n}</button>
+            ))}
+          </div>
+          <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
+            {([['todos', 'Todos'], ['obra', '🏗️ Obra'], ['projeto', '📐 Projeto']] as [string, string][]).map(([v, n]) => (
+              <button key={v}
+                className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtroExecucao === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+                onClick={() => setFiltroExecucao(v)}>{n}</button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -1359,6 +1378,7 @@ export default function Orcamento() {
                   <div>
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-body-sm text-on-surface-variant font-semibold">{orc.codigo}</span>
+                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${EXECUCAO_BADGE[orc.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[orc.tipo_execucao || 'obra']}</span>
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_BADGE[orc.status] || STATUS_BADGE.rascunho}`}>{STATUS_ORC[orc.status] || orc.status}</span>
                       {!podeEditarOrcamento(orc) && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20">🔒</span>}
                     </div>
@@ -1417,6 +1437,12 @@ export default function Orcamento() {
             <div className="mb-3.5">
               <label className={labelCls}>Cliente *</label>
               <input className={inputCls} placeholder="Nome do cliente" value={fOrc.cliente_nome} onChange={e => setFOrc({ ...fOrc, cliente_nome: e.target.value })} />
+            </div>
+            <div className="mb-3.5">
+              <label className={labelCls}>Execução *</label>
+              <select className={inputCls} value={fOrc.tipo_execucao} onChange={e => setFOrc({ ...fOrc, tipo_execucao: e.target.value })}>
+                {TIPOS_EXECUCAO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+              </select>
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Endereço</label>

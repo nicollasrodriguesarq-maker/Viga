@@ -37,6 +37,57 @@ const dataBR = (v: string) => v ? new Date(v + 'T00:00:00').toLocaleDateString('
 const STATUS_NOME: Record<string, string> = { captacao: 'Em Captação', em_execucao: 'Em Execução', pausada: 'Pausada', concluida: 'Concluída', cancelada: 'Cancelada' }
 const SERV_STATUS: Record<string, string> = { pendente: 'Pendente', em_execucao: 'Em Execução', concluido: 'Concluído', cancelado: 'Cancelado' }
 const ETAPA_STATUS: Record<string, string> = { pendente: 'Pendente', em_andamento: 'Em Andamento', concluida: 'Concluída', atrasada: 'Atrasada' }
+// Mesma logica de app/obras/page.tsx: posicao/largura (%) de uma barra de Gantt no periodo da obra.
+function calcularBarraGantt(inicio: Date, fim: Date, dataIniStr?: string | null, dataFimStr?: string | null) {
+  const totalMs = Math.max(fim.getTime() - inicio.getTime(), 86400000)
+  const ini = dataIniStr ? new Date(dataIniStr + 'T00:00:00') : inicio
+  const fimEtapa = dataFimStr ? new Date(dataFimStr + 'T00:00:00') : ini
+  const xPct = Math.max(0, Math.min(100, ((ini.getTime() - inicio.getTime()) / totalMs) * 100))
+  const fimPct = Math.max(0, Math.min(100, ((fimEtapa.getTime() - inicio.getTime()) / totalMs) * 100))
+  const larguraPct = Math.max(fimPct - xPct, 0.8)
+  return { xPct, larguraPct }
+}
+function corBarraEtapa(status: string) {
+  if (status === 'concluida') return 'bg-primary-container'
+  if (status === 'atrasada') return 'bg-error'
+  if (status === 'em_andamento') return 'bg-tertiary'
+  return 'bg-on-surface-variant/50'
+}
+function corHexEtapa(status: string) {
+  if (status === 'concluida') return '#6ee9e0'
+  if (status === 'atrasada') return '#ffb4ab'
+  if (status === 'em_andamento') return '#ffcbac'
+  return '#69736f'
+}
+function htmlGantt(inicio: Date, fim: Date, linhas: { nome: string; fornecedor?: string | null; inicioPrevisto?: string | null; fimPrevisto?: string | null; status: string }[]) {
+  const linhasHtml = linhas.map(l => {
+    const { xPct, larguraPct } = calcularBarraGantt(inicio, fim, l.inicioPrevisto, l.fimPrevisto)
+    return `
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
+        <div style="width:140px;flex-shrink:0;font-size:11px;color:#dee2ec;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.nome}</div>
+        <div style="position:relative;flex:1;height:16px;background:#1b2027;border-radius:4px;overflow:hidden">
+          <div style="position:absolute;top:0;height:100%;border-radius:4px;left:${xPct}%;width:${larguraPct}%;background:${corHexEtapa(l.status)}"></div>
+        </div>
+      </div>`
+  }).join('')
+  return `
+    <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px;margin-bottom:20px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Cronograma (Gantt)</span>
+        <div style="display:flex;gap:10px;font-size:9px;color:#869391">
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#69736f;margin-right:4px"></span>Pendente</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ffcbac;margin-right:4px"></span>Em Andamento</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#6ee9e0;margin-right:4px"></span>Concluída</span>
+          <span><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:#ffb4ab;margin-right:4px"></span>Atrasada</span>
+        </div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:9px;color:#869391;margin-bottom:8px;padding-left:150px">
+        <span>${inicio.toLocaleDateString('pt-BR')}</span>
+        <span>${fim.toLocaleDateString('pt-BR')}</span>
+      </div>
+      ${linhasHtml}
+    </div>`
+}
 const CLIMA_OPCOES = [{ v: 'ensolarado', l: '☀️ Ensolarado' }, { v: 'nublado', l: '☁️ Nublado' }, { v: 'chuva', l: '🌧️ Chuva' }, { v: 'sem_expediente', l: '🚫 Sem expediente' }]
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -358,6 +409,7 @@ export default function ObrasMobile() {
           <p style="font-size:15px;font-weight:700;margin-top:4px">${obra.data_inicio ? new Date(obra.data_inicio).toLocaleDateString('pt-BR') : '—'} — ${obra.data_previsao ? new Date(obra.data_previsao).toLocaleDateString('pt-BR') : '—'}</p>
         </div>
       </div>
+      ${obra.data_inicio && obra.data_previsao ? htmlGantt(new Date(obra.data_inicio + 'T00:00:00'), new Date(obra.data_previsao + 'T00:00:00'), linhas.map(({ servico, etapa }) => ({ nome: servico.nome, fornecedor: servico.fornecedor, inicioPrevisto: etapa?.data_inicio_prevista, fimPrevisto: etapa?.data_fim_prevista, status: etapa?.status || 'pendente' }))) : ''}
       <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
         <thead>
           <tr style="background:#252a32">
@@ -828,9 +880,37 @@ export default function ObrasMobile() {
             if (svs.length === 0) return <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado nesta obra</div>
             if (!detalhe.data_inicio || !detalhe.data_previsao) return <div className="text-center py-8 text-on-surface-variant text-body-sm">Informe as datas de início e fim da obra no desktop para o sistema distribuir os serviços automaticamente.</div>
             if (etapasObra.length === 0) return <div className="text-center py-8 text-on-surface-variant text-body-sm">Gerando cronograma...</div>
+            const inicioObra = new Date(detalhe.data_inicio + 'T00:00:00')
+            const fimObra = new Date(detalhe.data_previsao + 'T00:00:00')
+            const totalMsObra = Math.max(fimObra.getTime() - inicioObra.getTime(), 86400000)
+            const hojeGantt = Math.max(0, Math.min(100, ((new Date().getTime() - inicioObra.getTime()) / totalMsObra) * 100))
+            const hojeDentro = new Date() >= inicioObra && new Date() <= fimObra
             return (
               <div className="flex flex-col gap-3">
                 <button className={btnSecondaryCls} onClick={() => gerarPDFCronograma(detalhe, svsOrdenados.map(servico => ({ servico, etapa: etapasObra.find(e => e.servico_id === servico.id) })).filter(l => l.etapa))}>🖨️ Gerar Cronograma PDF</button>
+                <div className="bg-surface-container border border-outline-variant rounded-xl p-3.5">
+                  <div className="text-[11px] font-bold text-on-surface-variant uppercase mb-2">📊 Gantt</div>
+                  <div className="flex justify-between text-[10px] text-on-surface-variant mb-2">
+                    <span>{dataBR(detalhe.data_inicio)}</span>
+                    <span>{dataBR(detalhe.data_previsao)}</span>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {svsOrdenados.map(servico => {
+                      const et = etapasObra.find(e => e.servico_id === servico.id)
+                      if (!et) return null
+                      const { xPct, larguraPct } = calcularBarraGantt(inicioObra, fimObra, et.data_inicio_prevista, et.data_fim_prevista)
+                      return (
+                        <div key={servico.id}>
+                          <div className="text-[10px] text-on-surface-variant truncate mb-0.5">{servico.nome}</div>
+                          <div className="relative h-4 bg-surface-container-low rounded overflow-hidden">
+                            <div className={`absolute top-0 h-full rounded ${corBarraEtapa(et.status)}`} style={{ left: xPct + '%', width: larguraPct + '%' }} />
+                            {hojeDentro && <div className="absolute top-0 h-full w-px bg-primary" style={{ left: hojeGantt + '%' }} />}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
                 {svsOrdenados.map((servico, idx) => {
                   const et = etapasObra.find(e => e.servico_id === servico.id)
                   if (!et) return null

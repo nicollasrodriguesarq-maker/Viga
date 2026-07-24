@@ -98,12 +98,13 @@ export default function Orcamento() {
   const [solicitacoes, setSolicitacoes] = useState<any[]>([])
 
   const [telaBanco, setTelaBanco] = useState(false)
+  const [abaBanco, setAbaBanco] = useState<'obras' | 'house_flipping'>('obras')
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
 
   const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '' })
   const [fItem, setFItem] = useState({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' })
   const [editItem, setEditItem] = useState<any>(null)
-  const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '' })
+  const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tipo_banco: 'obras' })
   const [composicao, setComposicao] = useState<any[]>([])
   const [fComp, setFComp] = useState({ material_nome: '', quantidade: '1', unidade: 'un', preco_unitario: '' })
   const [usarComposicao, setUsarComposicao] = useState(false)
@@ -339,14 +340,14 @@ export default function Orcamento() {
   }
   function abrirNovoBanco() {
     setEditBanco(null)
-    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '' })
+    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tipo_banco: abaBanco })
     setComposicao([]); setUsarComposicao(false)
     setFComp({ material_nome: '', quantidade: '1', unidade: 'un', preco_unitario: '' })
     setJanela('banco')
   }
   async function abrirEditarBanco(item: any) {
     setEditBanco(item)
-    setFBanco({ nome: item.nome, unidade: item.unidade, categoria: item.categoria || '', preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '' })
+    setFBanco({ nome: item.nome, unidade: item.unidade, categoria: item.categoria || '', preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '', tipo_banco: item.tipo_banco || 'obras' })
     const comp = await buscar('banco_itens_composicao', '?banco_item_id=eq.' + item.id + '&order=created_at')
     setComposicao(comp)
     setUsarComposicao(comp.length > 0)
@@ -367,6 +368,7 @@ export default function Orcamento() {
       lucro_percentual: parseFloat(fBanco.lucro_percentual || '0'),
       imposto_percentual: parseFloat(fBanco.imposto_percentual || '0'),
       tempo_execucao: fBanco.tempo_execucao ? parseFloat(fBanco.tempo_execucao) : null,
+      tipo_banco: fBanco.tipo_banco,
     }
     let bancoId = editBanco?.id
     if (editBanco) { await editar('banco_itens', editBanco.id, dados) }
@@ -381,7 +383,7 @@ export default function Orcamento() {
       }
     }
     setJanela(null); setEditBanco(null); setComposicao([]); setUsarComposicao(false)
-    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '' })
+    setFBanco({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tipo_banco: abaBanco })
     carregar()
   }
 
@@ -653,6 +655,13 @@ export default function Orcamento() {
         <div className="mb-3.5">
           <label className={labelCls}>Nome do Serviço/Item *</label>
           <input className={inputCls} placeholder="Ex: Pintura interna, Instalação elétrica..." value={fBanco.nome} onChange={e => setFBanco({ ...fBanco, nome: e.target.value })} />
+        </div>
+        <div className="mb-3.5">
+          <label className={labelCls}>Base de Preços *</label>
+          <select className={inputCls} value={fBanco.tipo_banco} onChange={e => setFBanco({ ...fBanco, tipo_banco: e.target.value })}>
+            <option value="obras">🏗️ Obras</option>
+            <option value="house_flipping">🏠 House Flipping</option>
+          </select>
         </div>
         <div className="grid grid-cols-3 gap-3 mb-3.5">
           <div>
@@ -1212,7 +1221,8 @@ export default function Orcamento() {
   // ── BANCO DE ITENS (tela global) ───────────────────────────
   if (telaBanco) {
     const bancoBuscaGlobal = bancoItens.filter(b =>
-      !buscaBanco || b.nome.toLowerCase().includes(buscaBanco.toLowerCase()) || (b.categoria || '').toLowerCase().includes(buscaBanco.toLowerCase())
+      (b.tipo_banco || 'obras') === abaBanco &&
+      (!buscaBanco || b.nome.toLowerCase().includes(buscaBanco.toLowerCase()) || (b.categoria || '').toLowerCase().includes(buscaBanco.toLowerCase()))
     )
     return (
       <Layout userEmail={userEmail} onLogout={sair}>
@@ -1223,6 +1233,11 @@ export default function Orcamento() {
             <p className="text-body-sm text-on-surface-variant">Lista de serviços reutilizados em todos os orçamentos — adicione, edite ou exclua quando necessário.</p>
           </div>
           <button className={btnPrimaryCls} onClick={abrirNovoBanco}>+ Novo Item</button>
+        </div>
+
+        <div className="flex gap-2 mb-lg">
+          <button className={abaBanco === 'obras' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaBanco('obras')}>🏗️ Obras</button>
+          <button className={abaBanco === 'house_flipping' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaBanco('house_flipping')}>🏠 House Flipping</button>
         </div>
 
         <input placeholder="🔍 Buscar por nome ou categoria..." value={buscaBanco} onChange={e => setBuscaBanco(e.target.value)} className={inputCls + ' mb-lg max-w-[28rem]'} />

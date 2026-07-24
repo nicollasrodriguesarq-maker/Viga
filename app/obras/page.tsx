@@ -488,7 +488,7 @@ export default function Obras() {
         data: new Date().toISOString().slice(0, 10),
         descricao: 'Medição ' + medicaoProgramando.numero + (medicaoProgramando.fornecedor ? ' — ' + medicaoProgramando.fornecedor : ''),
         tipo: medicaoProgramando.tipo === 'fornecedor' ? 'saida' : 'entrada',
-        valor: totalLiquidoProgramar,
+        valor: Math.abs(totalLiquidoProgramar),
         categoria: 'Medição de obra',
         status: 'pendente',
         data_vencimento: dataProgramar,

@@ -294,7 +294,7 @@ export default function ObrasMobile() {
         data: new Date().toISOString().slice(0, 10),
         descricao: 'Medição ' + medicaoAtiva.numero + (medicaoAtiva.fornecedor ? ' — ' + medicaoAtiva.fornecedor : ''),
         tipo: medicaoAtiva.tipo === 'fornecedor' ? 'saida' : 'entrada',
-        valor: totalLiquido, categoria: 'Medição de obra', status: 'pendente',
+        valor: Math.abs(totalLiquido), categoria: 'Medição de obra', status: 'pendente',
         data_vencimento: dataProgramar, obra_id: detalhe.id,
       }
       const lanc = await criar('lancamentos', dados)

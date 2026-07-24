@@ -819,6 +819,37 @@ export default function Obras() {
 
     const roi = custos > 0 ? (margem / custos) * 100 : 0
 
+    // Curva ABC: serviços ordenados por valor previsto, classificados pelo peso acumulado
+    // no orçamento (A até 80%, B até 95%, C o restante) — ajuda a priorizar o controle.
+    const svsOrdenadosABC = svsObra.slice().sort((a, b) => parseFloat(b.valor_previsto || 0) - parseFloat(a.valor_previsto || 0))
+    const totalPrevistoABC = svsOrdenadosABC.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0) || 1
+    let acumABC = 0
+    const curvaAbcHtml = svsOrdenadosABC.map(s => {
+      const valor = parseFloat(s.valor_previsto || 0)
+      const pctInd = (valor / totalPrevistoABC) * 100
+      const acumAntes = acumABC
+      acumABC += pctInd
+      // classifica pelo acumulado ANTES deste item, para o item que cruza o limite ainda
+      // contar na classe que ele está completando (senão o maior item isolado viraria "C")
+      const classe = acumAntes < 80 ? 'A' : acumAntes < 95 ? 'B' : 'C'
+      const corClasse = classe === 'A' ? '#6ee9e0' : classe === 'B' ? '#ffcbac' : '#869391'
+      return `
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${s.nome}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right">${moeda(valor)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${pctInd.toFixed(1)}%</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${acumABC.toFixed(1)}%</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center"><span style="padding:2px 8px;border-radius:4px;background:${corClasse}22;color:${corClasse};font-weight:700">${classe}</span></td>
+        </tr>`
+    }).join('')
+
+    const ganttObraHtml = obra.data_inicio && obra.data_previsao
+      ? htmlGantt(inicio, fim, svsObra.map(s => {
+          const et = etapasObra.find(e => e.servico_id === s.id)
+          return { nome: s.nome, fornecedor: s.fornecedor, inicioPrevisto: et?.data_inicio_prevista, fimPrevisto: et?.data_fim_prevista, status: et?.status || 'pendente' }
+        }))
+      : '<div class="card" style="text-align:center;color:#869391;padding:30px 0">Informe as datas de início e fim da obra para gerar o Gantt.</div>'
+
     const movimentosHtml = movimentos.map(m => `
       <tr>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:12px">${new Date(m.data).toLocaleDateString('pt-BR')}</td>
@@ -935,11 +966,45 @@ export default function Obras() {
 
       <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
         <span>Documento Confidencial - ${nomeEmpresa} Construction System</span>
-        <span>Página 1 de 2</span>
+        <span>Página 1 de 3</span>
       </div>
     </div>
 
     <!-- PÁGINA 2 -->
+    <div class="page">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #3d4948">
+        <span style="font-size:14px;font-weight:800;color:#6ee9e0">${nomeEmpresa}</span>
+        <span style="font-size:10px;color:#869391;text-transform:uppercase">Cronograma e Curva ABC</span>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Cronograma da Obra</span>
+        <div style="margin-top:8px">${ganttObraHtml}</div>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Curva ABC — Peso dos Serviços no Orçamento</span>
+        <table style="width:100%;border-collapse:collapse;margin-top:8px">
+          <thead>
+            <tr style="background:#252a32">
+              <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Serviço</th>
+              <th style="padding:8px 10px;text-align:right;font-size:9px;color:#869391;text-transform:uppercase">Previsto</th>
+              <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">% Individual</th>
+              <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">% Acumulado</th>
+              <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">Classe</th>
+            </tr>
+          </thead>
+          <tbody>${curvaAbcHtml || '<tr><td colspan="5" style="padding:16px;text-align:center;color:#869391">Nenhum serviço cadastrado</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
+        <span>Documento Confidencial - ${nomeEmpresa} Construction System</span>
+        <span>Página 2 de 3</span>
+      </div>
+    </div>
+
+    <!-- PÁGINA 3 -->
     <div class="page">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #3d4948">
         <span style="font-size:14px;font-weight:800;color:#6ee9e0">${nomeEmpresa}</span>
@@ -1008,7 +1073,7 @@ export default function Obras() {
 
       <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
         <span>${nomeEmpresa} Construction Management System</span>
-        <span>Página 2 de 2</span>
+        <span>Página 3 de 3</span>
       </div>
     </div>
 

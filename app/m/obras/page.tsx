@@ -284,6 +284,69 @@ export default function ObrasMobile() {
     await distribuirCronograma(servico.obra_id, true)
   }
 
+  // Mesmo padrao visual de gerarPDFMedicao/gerarPDFObra (desktop).
+  async function gerarPDFCronograma(obra: any, linhas: { servico: any; etapa: any }[]) {
+    const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
+    const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const linhasHtml = linhas.map(({ servico, etapa }) => `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${servico.nome}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7">${servico.fornecedor || '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${etapa?.data_inicio_prevista ? new Date(etapa.data_inicio_prevista).toLocaleDateString('pt-BR') : '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${etapa?.data_fim_prevista ? new Date(etapa.data_fim_prevista).toLocaleDateString('pt-BR') : '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${ETAPA_STATUS[etapa?.status] || '—'}</td>
+      </tr>`).join('')
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>Cronograma ${obra.codigo} — ${nomeEmpresa}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
+      h1,h2 { font-family:'Manrope',sans-serif; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    </style></head><body>
+    <div style="max-width:900px;margin:0 auto;padding:40px 36px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
+        <div>
+          <h1 style="font-size:24px;font-weight:700;color:#6ee9e0;text-transform:uppercase">Cronograma da Obra</h1>
+          <p style="color:#bcc9c7">Serviços, datas previstas e status</p>
+        </div>
+        <div style="text-align:right">
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:32px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          <p style="font-size:10px;color:#869391">Ref: ${obra.codigo}</p>
+          <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Obra</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${obra?.nome || ''}</p>
+          <p style="font-size:12px;color:#bcc9c7">${obra?.cliente || ''}</p>
+        </div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#869391;text-transform:uppercase">Período Previsto</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${obra.data_inicio ? new Date(obra.data_inicio).toLocaleDateString('pt-BR') : '—'} — ${obra.data_previsao ? new Date(obra.data_previsao).toLocaleDateString('pt-BR') : '—'}</p>
+        </div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <thead>
+          <tr style="background:#252a32">
+            <th style="padding:8px 10px;text-align:left;font-size:10px;color:#869391;text-transform:uppercase">Serviço</th>
+            <th style="padding:8px 10px;text-align:left;font-size:10px;color:#869391;text-transform:uppercase">Fornecedor</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#869391;text-transform:uppercase">Início</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#869391;text-transform:uppercase">Fim</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#869391;text-transform:uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody>${linhasHtml}</tbody>
+      </table>
+    </div>
+    <script>window.onload = () => { window.print() }</script>
+    </body></html>`
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
   async function confirmarProgramarPagamento(totalLiquido: number) {
     if (!medicaoAtiva || !dataProgramar) return
     if (medicaoAtiva.lancamento_id) {
@@ -735,6 +798,7 @@ export default function ObrasMobile() {
             if (etapasObra.length === 0) return <div className="text-center py-8 text-on-surface-variant text-body-sm">Gerando cronograma...</div>
             return (
               <div className="flex flex-col gap-3">
+                <button className={btnSecondaryCls} onClick={() => gerarPDFCronograma(detalhe, svsOrdenados.map(servico => ({ servico, etapa: etapasObra.find(e => e.servico_id === servico.id) })).filter(l => l.etapa))}>🖨️ Gerar Cronograma PDF</button>
                 {svsOrdenados.map((servico, idx) => {
                   const et = etapasObra.find(e => e.servico_id === servico.id)
                   if (!et) return null

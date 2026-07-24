@@ -159,6 +159,14 @@ const SERV_BADGE: Record<string, string> = {
 }
 
 const TIPOS_OBRA = ['Obra Nova', 'Reforma', 'Retrofit', 'Projeto Arquitetura', 'Projeto Engenharia', 'Consultoria', 'Outro']
+// Classificação macro pedida pelo usuário: execução física da obra x execução só do projeto
+// (arquitetônico/engenharia) — separado do campo "Tipo" acima, que já existia.
+const TIPOS_EXECUCAO = [{ v: 'obra', l: '🏗️ Execução de Obra' }, { v: 'projeto', l: '📐 Execução de Projeto' }]
+const EXECUCAO_NOME: Record<string, string> = { obra: '🏗️ Obra', projeto: '📐 Projeto' }
+const EXECUCAO_BADGE: Record<string, string> = {
+  obra: 'bg-primary/10 text-primary border-primary/20',
+  projeto: 'bg-secondary/10 text-secondary border-secondary/20',
+}
 
 const ETAPA_STATUS: Record<string, string> = {
   pendente: 'Pendente',
@@ -237,11 +245,12 @@ export default function Obras() {
   const [totalLiquidoProgramar, setTotalLiquidoProgramar] = useState(0)
   const [observacoesPdf, setObservacoesPdf] = useState('')
   const [filtro,   setFiltro]   = useState('todos')
+  const [filtroExecucao, setFiltroExecucao] = useState('todos')
   const [busca,    setBusca]    = useState('')
   const [userEmail, setUserEmail] = useState('')
 
   const [fObra, setFObra] = useState({
-    codigo: '', nome: '', tipo: 'Reforma', cliente: '',
+    codigo: '', nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '',
     endereco: '', responsavel: '', status: 'em_execucao',
     data_inicio: '', data_previsao: '', valor_contrato: ''
   })
@@ -1207,6 +1216,7 @@ export default function Obras() {
       codigo: fObra.codigo.trim().toUpperCase(),
       nome: fObra.nome.trim(),
       tipo: fObra.tipo,
+      tipo_execucao: fObra.tipo_execucao,
       cliente: fObra.cliente.trim(),
       endereco: fObra.endereco.trim(),
       responsavel: fObra.responsavel.trim(),
@@ -1258,7 +1268,7 @@ export default function Obras() {
   }
 
   function abrirNovaObra() {
-    setFObra({ codigo: gerarCodigo(obras), nome: '', tipo: 'Reforma', cliente: '', endereco: '', responsavel: '', status: 'em_execucao', data_inicio: '', data_previsao: '', valor_contrato: '' })
+    setFObra({ codigo: gerarCodigo(obras), nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '', endereco: '', responsavel: '', status: 'em_execucao', data_inicio: '', data_previsao: '', valor_contrato: '' })
     setObraEditando(null)
     setJanela('nova_obra')
   }
@@ -1266,6 +1276,7 @@ export default function Obras() {
   function abrirEditarObra(obra: any) {
     setFObra({
       codigo: obra.codigo || '', nome: obra.nome || '', tipo: obra.tipo || 'Reforma',
+      tipo_execucao: obra.tipo_execucao || 'obra',
       cliente: obra.cliente || '', endereco: obra.endereco || '',
       responsavel: obra.responsavel || '', status: obra.status || 'em_execucao',
       data_inicio: obra.data_inicio || '', data_previsao: obra.data_previsao || '',
@@ -1296,9 +1307,10 @@ export default function Obras() {
 
   const listaFiltrada = obras.filter(o => {
     const matchStatus = filtro === 'todos' || o.status === filtro
+    const matchExecucao = filtroExecucao === 'todos' || (o.tipo_execucao || 'obra') === filtroExecucao
     const matchBusca = !busca || [o.nome, o.cliente, o.codigo]
       .some(v => v?.toLowerCase().includes(busca.toLowerCase()))
-    return matchStatus && matchBusca
+    return matchStatus && matchExecucao && matchBusca
   })
 
   // ── LOADING ───────────────────────────────────────────────
@@ -1343,6 +1355,7 @@ export default function Obras() {
             <button onClick={() => { setDetalhe(null); setAbaDetalhe('resumo'); setMedicaoAtiva(null) }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-body-sm text-on-surface-variant font-semibold">{detalhe.codigo}</span>
+              <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${EXECUCAO_BADGE[detalhe.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[detalhe.tipo_execucao || 'obra']}</span>
               <Bdg status={detalhe.status} />
               {atrasada && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-error/10 text-error border-error/20">⚠️ Atrasada</span>}
             </div>
@@ -2328,12 +2341,21 @@ export default function Obras() {
           <h2 className="font-headline text-headline-lg text-primary">Obras & Projetos</h2>
           <p className="text-body-md text-on-surface-variant">Monitoramento em tempo real do cronograma físico-financeiro.</p>
         </div>
-        <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
-          {([['todos', 'Todas'], ['em_execucao', 'Em Execução'], ['captacao', 'Captação'], ['pausada', 'Pausada'], ['concluida', 'Concluída'], ['cancelada', 'Cancelada']] as [string, string][]).map(([v, n]) => (
-            <button key={v}
-              className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtro === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
-              onClick={() => setFiltro(v)}>{n}</button>
-          ))}
+        <div className="flex flex-col items-end gap-2">
+          <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
+            {([['todos', 'Todas'], ['em_execucao', 'Em Execução'], ['captacao', 'Captação'], ['pausada', 'Pausada'], ['concluida', 'Concluída'], ['cancelada', 'Cancelada']] as [string, string][]).map(([v, n]) => (
+              <button key={v}
+                className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtro === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+                onClick={() => setFiltro(v)}>{n}</button>
+            ))}
+          </div>
+          <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant flex-wrap">
+            {([['todos', 'Todas'], ['obra', '🏗️ Obra'], ['projeto', '📐 Projeto']] as [string, string][]).map(([v, n]) => (
+              <button key={v}
+                className={`px-4 py-2 rounded-lg text-label-md transition-colors ${filtroExecucao === v ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}
+                onClick={() => setFiltroExecucao(v)}>{n}</button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -2387,6 +2409,7 @@ export default function Obras() {
                   <div className="flex justify-between items-start gap-2 flex-wrap">
                     <span className="font-data-mono text-body-sm text-outline-variant">{o.codigo}</span>
                     <div className="flex gap-1.5 flex-wrap justify-end">
+                      <span className={`text-label-sm px-2 py-0.5 rounded border ${EXECUCAO_BADGE[o.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[o.tipo_execucao || 'obra']}</span>
                       <Bdg status={o.status} />
                       {at && <span className="bg-error/10 text-error border border-error/20 px-2 py-0.5 rounded text-label-sm flex items-center gap-0.5">⚠️ Atrasada</span>}
                       {ns > 0 && <span className="bg-tertiary/10 text-tertiary border border-tertiary/20 px-2 py-0.5 rounded text-label-sm">{ns} serv.</span>}
@@ -2487,11 +2510,17 @@ function FormObra({ f, setF, obras, editando, salvar, cancelar }: {
         <input className={inputCls} placeholder="Ex: Residência Família Silva" value={f.nome} onChange={(e: any) => setF({ ...f, nome: e.target.value })} />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 mb-3.5">
+      <div className="grid grid-cols-3 gap-3 mb-3.5">
         <div>
           <label className={labelCls}>Tipo</label>
           <select className={inputCls} value={f.tipo} onChange={(e: any) => setF({ ...f, tipo: e.target.value })}>
             {TIPOS_OBRA.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </div>
+        <div>
+          <label className={labelCls}>Execução *</label>
+          <select className={inputCls} value={f.tipo_execucao} onChange={(e: any) => setF({ ...f, tipo_execucao: e.target.value })}>
+            {TIPOS_EXECUCAO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
           </select>
         </div>
         <div>

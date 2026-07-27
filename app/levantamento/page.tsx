@@ -1391,6 +1391,75 @@ export default function Levantamento() {
             </div>
           </div>
         )})()}
+
+        {/* Editar Levantamento — precisa existir aqui também: o botão "Editar Levantamento"
+            fica na tela de detalhe, que é um branch de retorno separado da listagem abaixo. */}
+        {janela === 'levantamento' && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[560px] max-h-[92vh] overflow-y-auto">
+              <div className="text-base font-bold text-on-surface mb-5">{levantamentoEditando ? '✏️ Editar Levantamento' : '📐 Novo Levantamento'}</div>
+              <div className="grid grid-cols-2 gap-3 mb-3.5">
+                <div>
+                  <label className={labelCls}>Código</label>
+                  <input className={inputCls} placeholder={gerarCodigo(levantamentos)} value={fLev.codigo} onChange={e => setFLev({ ...fLev, codigo: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Status</label>
+                  <select className={inputCls} value={fLev.status} onChange={e => setFLev({ ...fLev, status: e.target.value })}>
+                    {Object.entries(STATUS_LEVA).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Execução *</label>
+                <select className={inputCls} value={fLev.tipo_execucao} onChange={e => setFLev({ ...fLev, tipo_execucao: e.target.value })}>
+                  {TIPOS_EXECUCAO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
+                </select>
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Nome do Levantamento</label>
+                <input className={inputCls} placeholder="Ex: Levantamento Fachada, Vistoria Reforma Cozinha" value={fLev.nome} onChange={e => setFLev({ ...fLev, nome: e.target.value })} />
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Cliente *</label>
+                <input className={inputCls} placeholder="Nome do cliente" value={fLev.cliente} onChange={e => setFLev({ ...fLev, cliente: e.target.value })} />
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Endereço do imóvel</label>
+                <input className={inputCls} placeholder="Rua, número, bairro, cidade" value={fLev.endereco} onChange={e => setFLev({ ...fLev, endereco: e.target.value })} />
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Obra vinculada (opcional)</label>
+                <select className={inputCls} value={fLev.obra_id} onChange={e => setFLev({ ...fLev, obra_id: e.target.value })}>
+                  <option value="">Nenhuma / cliente novo</option>
+                  {obras.map(o => <option key={o.id} value={o.id}>{o.nome}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
+                <div>
+                  <label className={labelCls}>E-mail do cliente</label>
+                  <input className={inputCls} type="email" placeholder="cliente@empresa.com" value={fLev.cliente_email} onChange={e => setFLev({ ...fLev, cliente_email: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Telefone do cliente</label>
+                  <input className={inputCls} placeholder="(11) 90000-0000" value={fLev.cliente_telefone} onChange={e => setFLev({ ...fLev, cliente_telefone: e.target.value })} />
+                </div>
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Responsável pelo levantamento</label>
+                <input className={inputCls} placeholder="Nome do técnico" value={fLev.responsavel} onChange={e => setFLev({ ...fLev, responsavel: e.target.value })} />
+              </div>
+              <div className="mb-5">
+                <label className={labelCls}>Observações gerais</label>
+                <input className={inputCls} placeholder="Informações relevantes sobre o imóvel" value={fLev.observacao} onChange={e => setFLev({ ...fLev, observacao: e.target.value })} />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setLevantamentoEditando(null) }}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={salvarLevantamento}>{levantamentoEditando ? 'Salvar Alterações' : 'Criar Levantamento'}</button>
+              </div>
+            </div>
+          </div>
+        )}
       </Layout>
     )
   }

@@ -655,6 +655,309 @@ export default function Orcamento() {
     if (win) { win.document.write(html); win.document.close() }
   }
 
+  // ════════════════════════════════════════════════════════════════════
+  // PROPOSTA COMPLETA — modelo de marca Inverso (capa + história + portfólio
+  // fixos, depois levantamento (se houver) + resumo/orçamento/condições reais).
+  // Fontes Cambria/Calibri (nativas do Windows, sem depender de web font) e
+  // paleta extraída do material de marketing da própria Inverso.
+  // ════════════════════════════════════════════════════════════════════
+  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any) {
+    return `
+    <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
+      <div style="width:55%;padding:60px 56px;display:flex;flex-direction:column;justify-content:center">
+        ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="width:110px;height:110px;object-fit:contain;background:#DEDBD6;border-radius:4px;padding:16px;margin-bottom:28px" />` : `<div style="width:110px;height:110px;background:#DEDBD6;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#1A1A1A;font-weight:900;font-family:Cambria,serif;margin-bottom:28px">${(cfg.nome_empresa||'INVERSO').toUpperCase()}</div>`}
+        <div style="border-top:1px solid #555;width:280px;margin-bottom:14px"></div>
+        <div style="font-size:11px;letter-spacing:0.2em;color:#999;margin-bottom:10px">PROPOSTA COMERCIAL</div>
+        <div style="font-family:Cambria,Georgia,serif;font-style:italic;font-weight:700;font-size:42px;line-height:1.1;margin-bottom:14px">${tituloProjeto}</div>
+        <div style="font-size:16px;color:#ccc;margin-bottom:32px">${subtitulo}</div>
+        <table style="font-size:12px;border-collapse:collapse">
+          <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">CLIENTE</td><td style="font-weight:700;padding:5px 0">${cliente}</td></tr>
+          <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">LOCAL</td><td style="font-weight:700;padding:5px 0">${local || '—'}</td></tr>
+          <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">DATA</td><td style="font-weight:700;padding:5px 0">${dataStr}</td></tr>
+          <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">VALIDADE</td><td style="font-weight:700;padding:5px 0">${validadeDias} dias</td></tr>
+        </table>
+      </div>
+      <div style="width:45%;position:relative;background:#2a2a2a">
+        <div style="position:absolute;left:24px;bottom:24px;right:24px;font-family:Cambria,Georgia,serif;font-style:italic;color:#eee;font-size:13px;text-align:right">Construindo mais do que edifícios —<br/>construindo legados duradouros.</div>
+      </div>
+    </div>`
+  }
+
+  function paginaHistoriaInversa(cfg: any) {
+    const areas = ['Residencial', 'Comercial', 'Varejo', 'Projetos', 'Regularização', 'Gestão de Obra']
+    const cards = [
+      ['MISSÃO', 'Viabilizar a construção para todos os públicos com qualidade e economia.'],
+      ['VISÃO', 'Ser referência nacional, trazendo excelência em projetos e obras.'],
+      ['VALORES', 'Transparência, Criatividade, Comprometimento e Ética.'],
+      ['OBJETIVOS', 'Consolidar e quebrar paradigmas no setor de Projetos e Obras.'],
+    ]
+    return `
+    <div class="page" style="background:#fff;display:flex;flex-direction:column">
+      <div style="background:#1A1A1A;color:#fff;padding:14px 40px;font-weight:700;letter-spacing:0.05em">${(cfg.nome_empresa||'INVERSO').toUpperCase()}</div>
+      <div style="flex:1;display:flex">
+        <div style="width:62%;padding:40px 44px">
+          <div style="font-size:11px;letter-spacing:0.15em;color:#888;margin-bottom:6px">QUEM SOMOS</div>
+          <div style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:32px;color:#1A1A1A;margin-bottom:6px">Nossa História</div>
+          <div style="width:48px;border-top:3px solid #1A1A1A;margin-bottom:18px"></div>
+          <p style="color:#444;line-height:1.7;margin-bottom:14px;font-size:13px">Somos uma empresa líder em Projetos e Construção, destacando-nos por oferecer excelência na gestão de obras e na elaboração de projetos inovadores. Com sede estratégica em São Paulo, a ${cfg.nome_empresa||'Inverso'} atende a todo o território brasileiro.</p>
+          <p style="color:#444;line-height:1.7;margin-bottom:22px;font-size:13px">Nossas práticas se fundamentam nos princípios inabaláveis do Custo × Benefício, Comprometimento e Design Inovador — garantindo que cada projeto ultrapasse as expectativas e proporcione resultados duradouros.</p>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+            ${cards.map(([t, d]) => `
+              <div style="background:#F5F4F1;border-radius:4px;padding:14px 12px">
+                <div style="font-size:9px;letter-spacing:0.1em;color:#999;border-bottom:1px solid #DEDBD6;padding-bottom:8px;margin-bottom:8px">${t}</div>
+                <div style="font-size:11px;color:#333;line-height:1.4">${d}</div>
+              </div>`).join('')}
+          </div>
+        </div>
+        <div style="width:38%;background:#1A1A1A;color:#fff;padding:40px 32px">
+          <div style="font-size:10px;letter-spacing:0.15em;color:#999;border-bottom:1px solid #444;padding-bottom:10px;margin-bottom:18px">ÁREAS DE ATUAÇÃO</div>
+          ${areas.map(a => `<div style="border-left:3px solid #fff;padding:8px 0 8px 14px;margin-bottom:14px;font-size:14px">${a}</div>`).join('')}
+        </div>
+      </div>
+      <div style="background:#ECEAE5;color:#666;font-size:10px;padding:10px 40px;text-align:right">${[cfg.emails_gerais, cfg.telefone, cfg.site].filter(Boolean).join(' | ')}</div>
+    </div>`
+  }
+
+  function paginaDivisorPortfolio(cfg: any) {
+    return `
+    <div class="page" style="background:#1A1A1A;color:#fff;display:flex;flex-direction:column;justify-content:center;padding:0 64px;position:relative">
+      <div style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:48px;line-height:1.15;text-transform:uppercase">PROJETOS<br/>REALIZADOS</div>
+      <div style="font-family:Cambria,Georgia,serif;font-style:italic;color:#999;margin-top:24px;font-size:14px">Cada projeto é uma oportunidade única de inovação e excelência.</div>
+      <div style="position:absolute;left:32px;bottom:24px;font-weight:700;letter-spacing:0.05em">${(cfg.nome_empresa||'INVERSO').toUpperCase()}</div>
+    </div>`
+  }
+
+  function paginaPortfolioItem(categoria: string, titulo: string, descricao: string, tags: string[], fotos: string[], origin: string, cfg: any) {
+    const foto = (src: string) => `<div style="flex:1;height:100%;background:#171c23"><img src="${origin}${src}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>`
+    return `
+    <div class="page" style="background:#F5F4F1;display:flex;flex-direction:column">
+      <div style="background:#1A1A1A;color:#fff;padding:14px 40px;display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em">
+        <span>${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span><span style="color:#999;font-size:11px;letter-spacing:0.15em">PORTFÓLIO</span>
+      </div>
+      <div style="display:flex;height:250px">${fotos.map(foto).join('')}</div>
+      <div style="padding:28px 40px;flex:1">
+        <div style="font-size:11px;letter-spacing:0.15em;color:#888;margin-bottom:8px">${categoria}</div>
+        <div style="font-family:Cambria,Georgia,serif;font-style:italic;font-weight:700;font-size:30px;color:#1A1A1A;margin-bottom:12px">${titulo}</div>
+        <p style="color:#444;line-height:1.7;font-size:13px;max-width:640px">${descricao}</p>
+        <div style="display:flex;gap:10px;margin-top:20px">
+          ${tags.map(t => `<div style="background:#1A1A1A;color:#fff;font-weight:700;font-size:12px;padding:10px 18px;border-radius:4px">${t}</div>`).join('')}
+        </div>
+      </div>
+    </div>`
+  }
+
+  function paginasPortfolioInverso(origin: string, cfg: any) {
+    return paginaPortfolioItem('COMERCIAL / CORPORATIVO', 'Makmo Infraestrutura',
+      'Reforma e implantação de infraestrutura do escritório corporativo Makmo. O projeto contemplou layout de open space, divisórias em vidro, painéis de madeira, iluminação linear e área de recepção. Ambiente projetado para estimular a colaboração e produtividade, com acabamentos premium e identidade visual integrada.',
+      ['Open Space', 'Painéis de Madeira', 'Infraestrutura'],
+      ['/proposta/makmo-1.jpg', '/proposta/makmo-2.jpg', '/proposta/makmo-3.jpg', '/proposta/makmo-4.jpg', '/proposta/makmo-5.jpg', '/proposta/makmo-6.jpg'], origin, cfg) +
+      paginaPortfolioItem('RESIDENCIAL / CONSTRUÇÃO', 'Apartamento Sabará',
+      'Projeto de interiores completo com imagens 3D fotorrealistas. Conceito contemporâneo com madeira, neutros quentes e iluminação cuidadosamente projetada. Ambientes integrados e personalizados para máximo conforto e funcionalidade.',
+      ['Projeto Arq.', 'Interiores', 'Imagens 3D'],
+      ['/proposta/sabara-1.jpg', '/proposta/sabara-2.jpg', '/proposta/sabara-3.jpg'], origin, cfg) +
+      paginaPortfolioItem('RESIDENCIAL / CONSTRUÇÃO', 'Residência Aclimação',
+      'Construção residencial completa no bairro Aclimação. Piso em parquet de taco, banheiros com revestimento premium, cozinha integrada e acabamentos de alto padrão. A obra foi gerenciada do início ao fim com controle de prazos e qualidade, entregando um resultado sofisticado e funcional.',
+      ['Construção', 'House Flipping', 'Reforma'],
+      ['/proposta/aclimacao-1.jpg', '/proposta/aclimacao-2.jpg', '/proposta/aclimacao-3.jpg', '/proposta/aclimacao-4.jpg', '/proposta/aclimacao-5.jpg', '/proposta/aclimacao-6.jpg'], origin, cfg) +
+      paginaPortfolioItem('RESIDENCIAL / CONSTRUÇÃO', 'Cobertura Marajoara',
+      'Reforma e projeto de interiores de cobertura com terraço gourmet. Teto de madeira, cozinha integrada com adega embutida, piso de concreto e vista panorâmica da cidade.',
+      ['Projeto', 'Construção', 'Reforma'],
+      ['/proposta/marajoara-1.jpg', '/proposta/marajoara-2.jpg', '/proposta/marajoara-3.jpg', '/proposta/marajoara-4.jpg'], origin, cfg)
+  }
+
+  function paginaResumoOrcamentoInverso(itensOrc: any[], cfg: any) {
+    const porCategoria = new Map<string, { count: number; total: number; nomes: string[] }>()
+    itensOrc.forEach(item => {
+      const cat = item.categoria || 'Outros'
+      const atual = porCategoria.get(cat) || { count: 0, total: 0, nomes: [] }
+      atual.count += 1
+      atual.total += calcularTotalItem(item)
+      atual.nomes.push(item.servico)
+      porCategoria.set(cat, atual)
+    })
+    const grupos = Array.from(porCategoria.entries())
+    const cards = grupos.map(([cat, info], i) => `
+      <div style="background:#F5F4F1;border-radius:4px;padding:22px 20px;flex:1;min-width:200px">
+        <div style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:26px;color:#ccc;margin-bottom:10px">${String(i + 1).padStart(2, '0')}</div>
+        <div style="font-weight:700;font-size:15px;color:#1A1A1A;border-bottom:1px solid #DEDBD6;padding-bottom:10px;margin-bottom:10px">${cat}</div>
+        <div style="color:#444;font-size:12px;line-height:1.6">${info.nomes.join(', ')}</div>
+      </div>`).join('')
+    return `
+    <div class="page" style="background:#fff;display:flex;flex-direction:column">
+      <div style="background:#1A1A1A;color:#fff;padding:14px 40px;display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em">
+        <span>${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span><span style="color:#999;font-size:11px;letter-spacing:0.15em">ESCOPO DO SERVIÇO</span>
+      </div>
+      <div style="padding:36px 40px;flex:1">
+        <div style="font-size:11px;letter-spacing:0.15em;color:#888;margin-bottom:6px">PROPOSTA TÉCNICA</div>
+        <div style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:32px;color:#1A1A1A;margin-bottom:6px">O que vamos entregar</div>
+        <div style="width:48px;border-top:3px solid #1A1A1A;margin-bottom:18px"></div>
+        <p style="color:#444;margin-bottom:24px;font-size:13px">Resumo do orçamento que está sendo entregue nesta proposta:</p>
+        <div style="display:flex;gap:14px;flex-wrap:wrap">${cards || '<p style="color:#888">Nenhum item cadastrado ainda.</p>'}</div>
+      </div>
+      <div style="padding:0 40px 18px;font-size:11px;color:#888;font-style:italic">⚠ Não estão inclusos: impostos, multas, taxas de processo, documentos e serviços da Prefeitura.</div>
+    </div>`
+  }
+
+  function paginaInvestimentoInverso(itensOrc: any[], codigo: string, cfg: any) {
+    const rows = itensOrc.map(item => `
+      <tr>
+        <td style="padding:12px 16px;border-bottom:1px solid #333;color:#eee">${item.servico}${item.descricao ? `<br/><span style="color:#999;font-size:11px">${item.descricao}</span>` : ''}</td>
+        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${item.unidade}</td>
+        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${fmtN(parseFloat(item.quantidade || 1))}</td>
+        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;color:#ccc">${fmt(calcularValorUnitario(parseFloat(item.preco_material||0), parseFloat(item.preco_mao_obra||0), parseFloat(item.lucro_percentual||0), parseFloat(item.imposto_percentual||0)))}</td>
+        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;font-weight:700;color:#fff">${fmt(calcularTotalItem(item))}</td>
+      </tr>`).join('')
+    const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
+    return `
+    <div class="page" style="background:#1A1A1A;color:#fff;display:flex;flex-direction:column">
+      <div style="padding:14px 40px;display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em;border-bottom:1px solid #333">
+        <span>${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span><span style="color:#999;font-size:11px;letter-spacing:0.15em">INVESTIMENTO</span>
+      </div>
+      <div style="padding:36px 40px;flex:1">
+        <div style="font-size:11px;letter-spacing:0.15em;color:#999;margin-bottom:6px">ORÇAMENTO DETALHADO</div>
+        <div style="font-family:Cambria,Georgia,serif;font-style:italic;font-weight:700;font-size:32px;margin-bottom:6px">Investimento</div>
+        <div style="width:48px;border-top:3px solid #fff;margin-bottom:22px"></div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead><tr style="background:#F5F4F1;color:#1A1A1A">
+            <th style="padding:10px 16px;text-align:left">Descrição do Serviço</th>
+            <th style="padding:10px 16px;text-align:center">Unid.</th>
+            <th style="padding:10px 16px;text-align:center">Qtd.</th>
+            <th style="padding:10px 16px;text-align:right">Valor Unit.</th>
+            <th style="padding:10px 16px;text-align:right">Total</th>
+          </tr></thead>
+          <tbody>${rows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:#999">Nenhum item cadastrado ainda.</td></tr>`}</tbody>
+        </table>
+        <div style="display:flex;justify-content:flex-end;margin-top:18px">
+          <div style="background:#fff;color:#1A1A1A;padding:14px 28px;display:flex;align-items:center;gap:18px">
+            <span style="font-size:12px;letter-spacing:0.1em;color:#666">TOTAL GERAL</span>
+            <span style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:22px">${fmt(totalGeral)}</span>
+          </div>
+        </div>
+      </div>
+    </div>`
+  }
+
+  function paginaCondicoesInverso(prazoDias: number, condicaoPagamento: string, validadeDias: number, cfg: any) {
+    return `
+    <div class="page" style="background:#fff;display:flex;flex-direction:column">
+      <div style="background:#1A1A1A;color:#fff;padding:14px 40px;display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em">
+        <span>${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span><span style="color:#999;font-size:11px;letter-spacing:0.15em">CONDIÇÕES COMERCIAIS</span>
+      </div>
+      <div style="padding:36px 40px;flex:1">
+        <div style="font-size:11px;letter-spacing:0.15em;color:#888;margin-bottom:6px">PRAZOS E PAGAMENTO</div>
+        <div style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:32px;color:#1A1A1A;margin-bottom:6px">Condições Comerciais</div>
+        <div style="width:48px;border-top:3px solid #1A1A1A;margin-bottom:22px"></div>
+        <div style="display:flex;gap:16px">
+          <div style="flex:1;background:#F5F4F1;border-radius:4px;padding:22px 24px">
+            <div style="font-size:10px;letter-spacing:0.1em;color:#888;border-bottom:1px solid #DEDBD6;padding-bottom:10px;margin-bottom:16px">PRAZO DE ENTREGA</div>
+            <div style="color:#333;font-size:13px;margin-bottom:10px">Execução dos serviços descritos nesta proposta</div>
+            <div style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:20px;color:#1A1A1A">${prazoDias} dia${prazoDias === 1 ? '' : 's'} corrido${prazoDias === 1 ? '' : 's'}<br/>(após o briefing)</div>
+          </div>
+          <div style="flex:1;background:#1A1A1A;color:#fff;border-radius:4px;padding:22px 24px">
+            <div style="font-size:10px;letter-spacing:0.1em;color:#999;border-bottom:1px solid #444;padding-bottom:10px;margin-bottom:16px">FORMAS DE PAGAMENTO</div>
+            ${condicaoPagamento ? `<div style="font-size:13px;color:#eee;white-space:pre-line;line-height:1.7">${condicaoPagamento}</div>` : `<div style="font-size:13px;color:#777;font-style:italic">A combinar — preencha em "Forma de Pagamento" no orçamento.</div>`}
+          </div>
+        </div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:26px">
+          <div style="background:#1A1A1A;color:#fff;font-weight:700;font-size:12px;padding:12px 20px;border-radius:4px">✦ Validade desta proposta: ${validadeDias} dias</div>
+          <div style="font-size:11px;color:#888;font-style:italic;max-width:420px;text-align:right">* Quaisquer serviços não descritos nesta proposta deverão ser acordados separadamente.</div>
+        </div>
+      </div>
+    </div>`
+  }
+
+  function paginaFechamentoInverso(cfg: any) {
+    return `
+    <div class="page" style="background:#1A1A1A;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:0 40px">
+      <div style="font-family:Cambria,Georgia,serif;font-style:italic;font-weight:700;font-size:38px;line-height:1.25;margin-bottom:28px">Bora começar a<br/>projetar esse sonho?</div>
+      <div style="width:340px;border-top:1px solid #555;margin-bottom:22px"></div>
+      <div style="font-weight:700;font-size:14px;margin-bottom:12px">${cfg.emails_gerais || ''}</div>
+      <div style="color:#999;font-size:13px;margin-bottom:8px">${cfg.telefone || ''}</div>
+      <div style="color:#999;font-size:13px;margin-bottom:32px">${cfg.site || ''}</div>
+      <div style="color:#666;font-size:11px">${(cfg.nome_empresa||'INVERSO').toUpperCase()} STUDIO ${cfg.cnpj ? '| CNPJ: ' + cfg.cnpj : ''}</div>
+    </div>`
+  }
+
+  function envolverPropostaInversa(titulo: string, paginas: string) {
+    return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>${titulo}</title>
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { font-family:Calibri,'Segoe UI',Arial,sans-serif; }
+      @page { size: A4 landscape; margin:0; }
+      .page { width:297mm; height:210mm; overflow:hidden; }
+      @media print {
+        body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+        .page { break-after:page; }
+        .page:last-child { break-after:auto; }
+      }
+    </style></head><body>
+    ${paginas}
+    <script>window.onload = () => { window.print() }</script>
+    </body></html>`
+  }
+
+  // Reaproveita as mesmas páginas de levantamento (estilo escuro do sistema) já usadas em
+  // app/levantamento/page.tsx — inseridas como um encarte entre o portfólio e o orçamento.
+  function paginasLevantamentoEncarte(lev: any, ambs: any[], itensList: any[], cfg: any) {
+    const nomeAmbiente = (ambienteId: string) => ambs.find((a: any) => a.id === ambienteId)?.nome || '—'
+    const itensHtml = itensList.map((item: any, i: number) => `
+      <div style="display:flex;gap:20px;margin-bottom:20px;break-inside:avoid;padding-bottom:20px;border-bottom:1px solid #333">
+        <div style="width:38%;aspect-ratio:1;border-radius:6px;overflow:hidden;background:#171c23;flex-shrink:0;position:relative">
+          <div style="position:absolute;top:10px;left:10px;width:24px;height:24px;border-radius:999px;background:#fff;color:#1A1A1A;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px">${i + 1}</div>
+          ${item.foto_url ? `<img src="${item.foto_url}" style="width:100%;height:100%;object-fit:cover;display:block" />` : ''}
+        </div>
+        <div style="flex:1">
+          <h3 style="font-size:15px;color:#eee;margin-bottom:4px">${item.servico || ''}</h3>
+          <p style="font-size:10px;letter-spacing:0.08em;color:#999;text-transform:uppercase;font-weight:700;margin-bottom:8px">${nomeAmbiente(item.ambiente)}</p>
+          ${item.descricao ? `<p style="font-size:11px;color:#bbb;font-style:italic">"${item.descricao}"</p>` : ''}
+        </div>
+      </div>`).join('')
+    return `
+    <div class="page" style="background:#0f141b;color:#dee2ec;padding:36px 40px;overflow-y:visible">
+      <div style="display:flex;justify-content:space-between;margin-bottom:20px;border-bottom:1px solid #3d4948;padding-bottom:10px">
+        <span style="font-size:11px;color:#6ee9e0;font-weight:700;text-transform:uppercase;letter-spacing:0.08em">Levantamento Técnico — ${lev.codigo}</span>
+        <span style="font-size:10px;color:#869391">${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span>
+      </div>
+      ${itensList.length > 0 ? itensHtml : '<p style="color:#869391;text-align:center;padding:40px 0">Nenhum item de levantamento registrado.</p>'}
+    </div>`
+  }
+
+  async function gerarPropostaCompleta() {
+    if (!detalhe) return
+    const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
+    const itensDoOrc = itens.filter(i => i.orcamento_id === detalhe.id)
+    const origin = window.location.origin
+
+    let paginasLev = ''
+    if (detalhe.levantamento_id) {
+      const [levRows, ambsLev, itensLev] = await Promise.all([
+        buscar('levantamentos', '?id=eq.' + detalhe.levantamento_id),
+        buscar('levantamento_ambientes', '?levantamento_id=eq.' + detalhe.levantamento_id),
+        buscar('levantamento_itens', '?levantamento_id=eq.' + detalhe.levantamento_id),
+      ])
+      if (levRows[0]) paginasLev = paginasLevantamentoEncarte(levRows[0], ambsLev, itensLev, cfg)
+    }
+
+    const prazoDias = Math.round(itensDoOrc.reduce((a, i) => a + tempoExecucaoItem(i), 0))
+    const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
+
+    const paginas =
+      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg) +
+      paginaHistoriaInversa(cfg) +
+      paginaDivisorPortfolio(cfg) +
+      paginasPortfolioInverso(origin, cfg) +
+      paginasLev +
+      paginaResumoOrcamentoInverso(itensDoOrc, cfg) +
+      paginaInvestimentoInverso(itensDoOrc, detalhe.codigo, cfg) +
+      paginaCondicoesInverso(prazoDias, detalhe.condicao_pagamento, parseInt(detalhe.validade_dias || '30'), cfg) +
+      paginaFechamentoInverso(cfg)
+
+    const html = envolverPropostaInversa(`Proposta ${detalhe.codigo} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
   const lista = orcamentos.filter(o =>
     (filtro === 'todos' || o.status === filtro) &&
     (filtroExecucao === 'todos' || (o.tipo_execucao || 'obra') === filtroExecucao) &&
@@ -847,6 +1150,7 @@ export default function Orcamento() {
               <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
             )}
             <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPDF}>🖨️ Gerar Proposta PDF</button>
+            <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPropostaCompleta}>📄 Gerar Proposta Completa</button>
             {detalhe.status === 'aprovado' && podeEditar && (
               detalhe.obra_id ? (
                 <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verObraVinculada}>🔗 Ver Obra Vinculada</button>
@@ -1090,6 +1394,7 @@ export default function Orcamento() {
               <textarea className={inputCls + ' min-h-[80px] resize-y disabled:opacity-50'} disabled={!podeEditar} value={detalhe.observacao || ''} onChange={e => setDetalhe({ ...detalhe, observacao: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { observacao: detalhe.observacao })} placeholder="Ex: Serviço com garantia de 1 ano. Materiais de primeira linha." />
             </div>
             <button className="w-full bg-primary-container text-on-primary-container rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPDF}>🖨️ Gerar Proposta em PDF</button>
+            <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer mt-2" onClick={gerarPropostaCompleta}>📄 Gerar Proposta Completa</button>
           </div>
         )}
 

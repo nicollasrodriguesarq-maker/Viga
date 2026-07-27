@@ -182,6 +182,12 @@ export default function LevantamentoMobile() {
   async function sincronizarItemOrcamento(item: any, ambiente: any) {
     const orcId = await orcamentoVinculado()
     if (!orcId) return
+    // Foto de registro (sem serviço real) não vira item de orçamento.
+    if (item.servico === 'Foto') {
+      const existentesFoto = await buscar('orcamento_itens', `?levantamento_item_id=eq.${item.id}`)
+      for (const oi of existentesFoto) await remover('orcamento_itens', oi.id)
+      return
+    }
     const oaId = await ambienteOrcamentoEspelhado(ambiente, orcId)
     if (!oaId) return
     const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
@@ -364,16 +370,18 @@ export default function LevantamentoMobile() {
         <div className="p-4 flex flex-col gap-3.5 pb-8">
           <div>
             <label className={labelCls}>Serviço *</label>
-            <select className={inputCls} value={fItem.banco_item_id || (fItem.servico ? '__custom__' : '')}
+            <select className={inputCls} value={fItem.banco_item_id || (fItem.servico === 'Foto' ? '__foto__' : (fItem.servico ? '__custom__' : ''))}
               onChange={e => {
                 const v = e.target.value
-                if (v === '' || v === '__custom__') setFItem({ ...fItem, banco_item_id: '', servico: v === '__custom__' ? '' : fItem.servico })
+                if (v === '__foto__') setFItem({ ...fItem, banco_item_id: '', servico: 'Foto', categoria: '' })
+                else if (v === '' || v === '__custom__') setFItem({ ...fItem, banco_item_id: '', servico: v === '__custom__' ? '' : fItem.servico })
                 else {
                   const bi = bancoItens.find(b => b.id === v)
                   if (bi) setFItem({ ...fItem, banco_item_id: bi.id, servico: bi.nome, categoria: bi.categoria || '', unidade: bi.unidade || fItem.unidade })
                 }
               }}>
               <option value="">Selecione do banco de itens ou &quot;Outro&quot;</option>
+              <option value="__foto__">📷 Foto (apenas registro, sem serviço)</option>
               {bancoItens.map(b => <option key={b.id} value={b.id}>{b.nome}{b.categoria ? ' — ' + b.categoria : ''}</option>)}
               <option value="__custom__">+ Outro (digitar)</option>
             </select>

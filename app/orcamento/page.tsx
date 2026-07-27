@@ -661,7 +661,7 @@ export default function Orcamento() {
   // Fontes Cambria/Calibri (nativas do Windows, sem depender de web font) e
   // paleta extraída do material de marketing da própria Inverso.
   // ════════════════════════════════════════════════════════════════════
-  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any) {
+  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string) {
     return `
     <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
       <div style="width:55%;padding:60px 56px;display:flex;flex-direction:column;justify-content:center">
@@ -678,7 +678,8 @@ export default function Orcamento() {
         </table>
       </div>
       <div style="width:45%;position:relative;background:#2a2a2a">
-        <div style="position:absolute;left:24px;bottom:24px;right:24px;font-family:Cambria,Georgia,serif;font-style:italic;color:#eee;font-size:13px;text-align:right">Construindo mais do que edifícios —<br/>construindo legados duradouros.</div>
+        <img src="${origin}/proposta/capa.jpg" style="width:100%;height:100%;object-fit:cover;display:block;opacity:0.9" />
+        <div style="position:absolute;left:24px;bottom:24px;right:24px;font-family:Cambria,Georgia,serif;font-style:italic;color:#fff;font-size:13px;text-align:right;text-shadow:0 2px 8px rgba(0,0,0,0.7)">Construindo mais do que edifícios —<br/>construindo legados duradouros.</div>
       </div>
     </div>`
   }
@@ -765,42 +766,12 @@ export default function Orcamento() {
       ['/proposta/marajoara-1.jpg', '/proposta/marajoara-2.jpg', '/proposta/marajoara-3.jpg', '/proposta/marajoara-4.jpg'], origin, cfg)
   }
 
-  function paginaResumoOrcamentoInverso(itensOrc: any[], cfg: any) {
-    const porCategoria = new Map<string, { count: number; total: number; nomes: string[] }>()
-    itensOrc.forEach(item => {
-      const cat = item.categoria || 'Outros'
-      const atual = porCategoria.get(cat) || { count: 0, total: 0, nomes: [] }
-      atual.count += 1
-      atual.total += calcularTotalItem(item)
-      atual.nomes.push(item.servico)
-      porCategoria.set(cat, atual)
-    })
-    const grupos = Array.from(porCategoria.entries())
-    const cards = grupos.map(([cat, info], i) => `
-      <div style="background:#F5F4F1;border-radius:4px;padding:22px 20px;flex:1;min-width:200px">
-        <div style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:26px;color:#ccc;margin-bottom:10px">${String(i + 1).padStart(2, '0')}</div>
-        <div style="font-weight:700;font-size:15px;color:#1A1A1A;border-bottom:1px solid #DEDBD6;padding-bottom:10px;margin-bottom:10px">${cat}</div>
-        <div style="color:#444;font-size:12px;line-height:1.6">${info.nomes.join(', ')}</div>
-      </div>`).join('')
-    return `
-    <div class="page" style="background:#fff;display:flex;flex-direction:column">
-      <div style="background:#1A1A1A;color:#fff;padding:14px 40px;display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em">
-        <span>${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span><span style="color:#999;font-size:11px;letter-spacing:0.15em">ESCOPO DO SERVIÇO</span>
-      </div>
-      <div style="padding:36px 40px;flex:1">
-        <div style="font-size:11px;letter-spacing:0.15em;color:#888;margin-bottom:6px">PROPOSTA TÉCNICA</div>
-        <div style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:32px;color:#1A1A1A;margin-bottom:6px">O que vamos entregar</div>
-        <div style="width:48px;border-top:3px solid #1A1A1A;margin-bottom:18px"></div>
-        <p style="color:#444;margin-bottom:24px;font-size:13px">Resumo do orçamento que está sendo entregue nesta proposta:</p>
-        <div style="display:flex;gap:14px;flex-wrap:wrap">${cards || '<p style="color:#888">Nenhum item cadastrado ainda.</p>'}</div>
-      </div>
-      <div style="padding:0 40px 18px;font-size:11px;color:#888;font-style:italic">⚠ Não estão inclusos: impostos, multas, taxas de processo, documentos e serviços da Prefeitura.</div>
-    </div>`
-  }
-
+  // Página de Investimento em formato "flow" (sem altura/overflow fixos): itens grandes
+  // demais para uma única página A4 paisagem simplesmente continuam na próxima, em vez de
+  // serem cortados. break-inside:avoid em cada linha evita que uma linha seja partida ao meio.
   function paginaInvestimentoInverso(itensOrc: any[], codigo: string, cfg: any) {
     const rows = itensOrc.map(item => `
-      <tr>
+      <tr style="break-inside:avoid">
         <td style="padding:12px 16px;border-bottom:1px solid #333;color:#eee">${item.servico}${item.descricao ? `<br/><span style="color:#999;font-size:11px">${item.descricao}</span>` : ''}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${item.unidade}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${fmtN(parseFloat(item.quantidade || 1))}</td>
@@ -809,29 +780,27 @@ export default function Orcamento() {
       </tr>`).join('')
     const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
     return `
-    <div class="page" style="background:#1A1A1A;color:#fff;display:flex;flex-direction:column">
-      <div style="padding:14px 40px;display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em;border-bottom:1px solid #333">
+    <div class="page-flow" style="background:#1A1A1A;color:#fff;padding:36px 40px">
+      <div style="display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em;border-bottom:1px solid #333;padding-bottom:14px;margin-bottom:22px">
         <span>${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span><span style="color:#999;font-size:11px;letter-spacing:0.15em">INVESTIMENTO</span>
       </div>
-      <div style="padding:36px 40px;flex:1">
-        <div style="font-size:11px;letter-spacing:0.15em;color:#999;margin-bottom:6px">ORÇAMENTO DETALHADO</div>
-        <div style="font-family:Cambria,Georgia,serif;font-style:italic;font-weight:700;font-size:32px;margin-bottom:6px">Investimento</div>
-        <div style="width:48px;border-top:3px solid #fff;margin-bottom:22px"></div>
-        <table style="width:100%;border-collapse:collapse;font-size:13px">
-          <thead><tr style="background:#F5F4F1;color:#1A1A1A">
-            <th style="padding:10px 16px;text-align:left">Descrição do Serviço</th>
-            <th style="padding:10px 16px;text-align:center">Unid.</th>
-            <th style="padding:10px 16px;text-align:center">Qtd.</th>
-            <th style="padding:10px 16px;text-align:right">Valor Unit.</th>
-            <th style="padding:10px 16px;text-align:right">Total</th>
-          </tr></thead>
-          <tbody>${rows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:#999">Nenhum item cadastrado ainda.</td></tr>`}</tbody>
-        </table>
-        <div style="display:flex;justify-content:flex-end;margin-top:18px">
-          <div style="background:#fff;color:#1A1A1A;padding:14px 28px;display:flex;align-items:center;gap:18px">
-            <span style="font-size:12px;letter-spacing:0.1em;color:#666">TOTAL GERAL</span>
-            <span style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:22px">${fmt(totalGeral)}</span>
-          </div>
+      <div style="font-size:11px;letter-spacing:0.15em;color:#999;margin-bottom:6px">ORÇAMENTO DETALHADO</div>
+      <div style="font-family:Cambria,Georgia,serif;font-style:italic;font-weight:700;font-size:32px;margin-bottom:6px">Investimento</div>
+      <div style="width:48px;border-top:3px solid #fff;margin-bottom:22px"></div>
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:#F5F4F1;color:#1A1A1A">
+          <th style="padding:10px 16px;text-align:left">Descrição do Serviço</th>
+          <th style="padding:10px 16px;text-align:center">Unid.</th>
+          <th style="padding:10px 16px;text-align:center">Qtd.</th>
+          <th style="padding:10px 16px;text-align:right">Valor Unit.</th>
+          <th style="padding:10px 16px;text-align:right">Total</th>
+        </tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:#999">Nenhum item cadastrado ainda.</td></tr>`}</tbody>
+      </table>
+      <div style="display:flex;justify-content:flex-end;margin-top:18px;break-inside:avoid">
+        <div style="background:#fff;color:#1A1A1A;padding:14px 28px;display:flex;align-items:center;gap:18px">
+          <span style="font-size:12px;letter-spacing:0.1em;color:#666">TOTAL GERAL</span>
+          <span style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:22px">${fmt(totalGeral)}</span>
         </div>
       </div>
     </div>`
@@ -886,10 +855,13 @@ export default function Orcamento() {
       body { font-family:Calibri,'Segoe UI',Arial,sans-serif; }
       @page { size: A4 landscape; margin:0; }
       .page { width:297mm; height:210mm; overflow:hidden; }
+      .page-flow { width:297mm; min-height:210mm; }
       @media print {
         body { -webkit-print-color-adjust:exact; print-color-adjust:exact; }
         .page { break-after:page; }
         .page:last-child { break-after:auto; }
+        .page-flow { break-before:page; break-after:page; }
+        .page-flow:last-child { break-after:auto; }
       }
     </style></head><body>
     ${paginas}
@@ -899,6 +871,8 @@ export default function Orcamento() {
 
   // Reaproveita as mesmas páginas de levantamento (estilo escuro do sistema) já usadas em
   // app/levantamento/page.tsx — inseridas como um encarte entre o portfólio e o orçamento.
+  // Formato "flow" (sem altura/overflow fixos): a lista de itens continua em quantas páginas
+  // A4 paisagem forem necessárias em vez de ser cortada dentro de uma única página.
   function paginasLevantamentoEncarte(lev: any, ambs: any[], itensList: any[], cfg: any) {
     const nomeAmbiente = (ambienteId: string) => ambs.find((a: any) => a.id === ambienteId)?.nome || '—'
     const itensHtml = itensList.map((item: any, i: number) => `
@@ -914,7 +888,7 @@ export default function Orcamento() {
         </div>
       </div>`).join('')
     return `
-    <div class="page" style="background:#0f141b;color:#dee2ec;padding:36px 40px;overflow-y:visible">
+    <div class="page-flow" style="background:#0f141b;color:#dee2ec;padding:36px 40px">
       <div style="display:flex;justify-content:space-between;margin-bottom:20px;border-bottom:1px solid #3d4948;padding-bottom:10px">
         <span style="font-size:11px;color:#6ee9e0;font-weight:700;text-transform:uppercase;letter-spacing:0.08em">Levantamento Técnico — ${lev.codigo}</span>
         <span style="font-size:10px;color:#869391">${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span>
@@ -943,12 +917,11 @@ export default function Orcamento() {
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =
-      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg) +
+      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin) +
       paginaHistoriaInversa(cfg) +
       paginaDivisorPortfolio(cfg) +
       paginasPortfolioInverso(origin, cfg) +
       paginasLev +
-      paginaResumoOrcamentoInverso(itensDoOrc, cfg) +
       paginaInvestimentoInverso(itensDoOrc, detalhe.codigo, cfg) +
       paginaCondicoesInverso(prazoDias, detalhe.condicao_pagamento, parseInt(detalhe.validade_dias || '30'), cfg) +
       paginaFechamentoInverso(cfg)

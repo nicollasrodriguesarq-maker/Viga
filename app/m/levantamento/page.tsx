@@ -76,6 +76,7 @@ export default function LevantamentoMobile() {
   const [ambienteAtivo, setAmbienteAtivo] = useState<any>(null)
   const [tela, setTela] = useState<string | null>(null)
   const [fLev, setFLev] = useState(FLEV_VAZIO)
+  const [levantamentoEditando, setLevantamentoEditando] = useState<any>(null)
   const [fAmb, setFAmb] = useState(FAMB_VAZIO)
   const [fItem, setFItem] = useState(FITEM_VAZIO)
   const [editItem, setEditItem] = useState<any>(null)
@@ -114,10 +115,30 @@ export default function LevantamentoMobile() {
   async function salvarLevantamento() {
     if (!fLev.cliente) return alert('Preencha o nome do cliente')
     const codigo = fLev.codigo || gerarCodigo(levantamentos)
+    if (levantamentoEditando) {
+      await editar('levantamentos', levantamentoEditando.id, { ...fLev, codigo, obra_id: fLev.obra_id || null })
+      const editandoId = levantamentoEditando.id
+      setTela('detalhe'); setFLev(FLEV_VAZIO); setLevantamentoEditando(null)
+      const l = await buscar('levantamentos', '?order=created_at.desc')
+      setLevantamentos(l)
+      const atualizado = l.find((x: any) => x.id === editandoId)
+      if (atualizado) setDetalhe(atualizado)
+      return
+    }
     const novo = await criar('levantamentos', { ...fLev, codigo, obra_id: fLev.obra_id || null, criado_por: meuId || null })
     setTela(null); setFLev(FLEV_VAZIO)
     await carregar()
     if (novo?.id) { setDetalhe(novo) }
+  }
+
+  function abrirEditarLevantamento(lev: any) {
+    setFLev({
+      codigo: lev.codigo || '', nome: lev.nome || '', cliente: lev.cliente || '', endereco: lev.endereco || '',
+      responsavel: lev.responsavel || '', status: lev.status || 'em_andamento', obra_id: lev.obra_id || '',
+      cliente_email: lev.cliente_email || '', cliente_telefone: lev.cliente_telefone || '', tipo_execucao: lev.tipo_execucao || 'obra',
+    })
+    setLevantamentoEditando(lev)
+    setTela('novoLevantamento')
   }
 
   async function salvarAmbiente() {
@@ -256,8 +277,16 @@ export default function LevantamentoMobile() {
   // ── Tela: Novo Levantamento ────────────────────────────────────
   if (tela === 'novoLevantamento') {
     return (
-      <MobileShell title="Novo Levantamento">
+      <MobileShell title={levantamentoEditando ? 'Editar Levantamento' : 'Novo Levantamento'}>
         <div className="p-4 flex flex-col gap-3.5 pb-8">
+          {levantamentoEditando && (
+            <div>
+              <label className={labelCls}>Status</label>
+              <select className={inputCls} value={fLev.status} onChange={e => setFLev({ ...fLev, status: e.target.value })}>
+                {Object.entries(STATUS_LEVA).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+              </select>
+            </div>
+          )}
           <div>
             <label className={labelCls}>Execução *</label>
             <select className={inputCls} value={fLev.tipo_execucao} onChange={e => setFLev({ ...fLev, tipo_execucao: e.target.value })}>
@@ -292,8 +321,8 @@ export default function LevantamentoMobile() {
             <input className={inputCls} placeholder="Nome do técnico" value={fLev.responsavel} onChange={e => setFLev({ ...fLev, responsavel: e.target.value })} />
           </div>
           <div className="flex flex-col gap-2 mt-2">
-            <button className={btnPrimaryCls} onClick={salvarLevantamento}>Criar Levantamento</button>
-            <button className={btnSecondaryCls} onClick={() => { setTela(null); setFLev(FLEV_VAZIO) }}>Cancelar</button>
+            <button className={btnPrimaryCls} onClick={salvarLevantamento}>{levantamentoEditando ? 'Salvar Alterações' : 'Criar Levantamento'}</button>
+            <button className={btnSecondaryCls} onClick={() => { setTela(levantamentoEditando ? 'detalhe' : null); setFLev(FLEV_VAZIO); setLevantamentoEditando(null) }}>Cancelar</button>
           </div>
         </div>
       </MobileShell>
@@ -466,6 +495,7 @@ export default function LevantamentoMobile() {
             <div className="text-[11px] text-primary mt-1">{EXECUCAO_NOME[detalhe.tipo_execucao || 'obra']}</div>
           </div>
 
+          <button className={btnSecondaryCls} onClick={() => abrirEditarLevantamento(detalhe)}>✏️ Editar Levantamento</button>
           <button className={btnPrimaryCls} onClick={() => setTela('novoAmbiente')}>+ Ambiente</button>
 
           {ambsDetalhe.length === 0 ? (
@@ -541,7 +571,7 @@ export default function LevantamentoMobile() {
             </button>
           ))}
         </div>
-        <button className={btnPrimaryCls} onClick={() => setTela('novoLevantamento')}>+ Novo Levantamento</button>
+        <button className={btnPrimaryCls} onClick={() => { setFLev(FLEV_VAZIO); setLevantamentoEditando(null); setTela('novoLevantamento') }}>+ Novo Levantamento</button>
 
         {filtrados.length === 0 ? (
           <div className="text-center py-10 text-on-surface-variant text-body-sm">Nenhum levantamento encontrado</div>

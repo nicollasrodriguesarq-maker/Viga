@@ -146,6 +146,7 @@ export default function Levantamento() {
   const [souAdmin, setSouAdmin] = useState(false)
 
   const [fLev, setFLev] = useState({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' })
+  const [levantamentoEditando, setLevantamentoEditando] = useState<any>(null)
   const [fAmb, setFAmb] = useState({ nome: '', nomeCustom: '' })
   const [fItem, setFItem] = useState({ servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' })
   const [editItem, setEditItem] = useState<any>(null)
@@ -188,7 +189,7 @@ export default function Levantamento() {
   async function salvarLevantamento() {
     if (!fLev.cliente) return alert('Preencha o nome do cliente')
     const codigo = fLev.codigo || gerarCodigo(levantamentos)
-    const dados = {
+    const dados: any = {
       codigo,
       nome: fLev.nome,
       cliente: fLev.cliente,
@@ -199,10 +200,18 @@ export default function Levantamento() {
       cliente_email: fLev.cliente_email,
       cliente_telefone: fLev.cliente_telefone,
       tipo_execucao: fLev.tipo_execucao,
-      criado_por: meuId || null,
     }
-    const novo = await criar('levantamentos', dados)
+    if (levantamentoEditando) {
+      const ok = await editar('levantamentos', levantamentoEditando.id, dados)
+      if (!ok) return alert('Não foi possível salvar as alterações. Tente novamente.')
+    } else {
+      dados.criado_por = meuId || null
+      const novo = await criar('levantamentos', dados)
+      if (!novo?.id) return alert('Não foi possível criar o levantamento. Tente novamente.')
+    }
+    const editandoId = levantamentoEditando?.id
     setJanela(null)
+    setLevantamentoEditando(null)
     setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' })
     const [l, a, it] = await Promise.all([
       buscar('levantamentos', '?order=created_at.desc'),
@@ -210,14 +219,33 @@ export default function Levantamento() {
       buscar('levantamento_itens', '?order=created_at'),
     ])
     setLevantamentos(l); setAmbientes(a); setItens(it); setLoading(false)
-    if (novo?.id) {
-      setDetalhe(novo); setAmbienteAtivo(null); setAbaDetalhe('ambientes')
+    if (editandoId) {
+      const atualizado = l.find((x: any) => x.id === editandoId)
+      if (atualizado) setDetalhe(atualizado)
     } else {
       const encontrado = l.find((x: any) => x.codigo === codigo)
       if (encontrado) {
         setDetalhe(encontrado); setAmbienteAtivo(null); setAbaDetalhe('ambientes')
       }
     }
+  }
+
+  function abrirEditarLevantamento(lev: any) {
+    setFLev({
+      codigo: lev.codigo || '',
+      nome: lev.nome || '',
+      cliente: lev.cliente || '',
+      endereco: lev.endereco || '',
+      responsavel: lev.responsavel || '',
+      status: lev.status || 'em_andamento',
+      observacao: lev.observacao || '',
+      obra_id: lev.obra_id || '',
+      cliente_email: lev.cliente_email || '',
+      cliente_telefone: lev.cliente_telefone || '',
+      tipo_execucao: lev.tipo_execucao || 'obra',
+    })
+    setLevantamentoEditando(lev)
+    setJanela('levantamento')
   }
 
   async function salvarAmbiente() {
@@ -939,6 +967,7 @@ export default function Levantamento() {
             ) : (
               <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
             )}
+            {podeEditar && <button className={btnSecondaryCls} onClick={() => abrirEditarLevantamento(detalhe)}>✏️ Editar Levantamento</button>}
             <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>🔗 Ver Orçamento Vinculado</button>
             <button className="bg-surface-container-high border border-outline-variant text-on-surface rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-surface-variant transition-all cursor-pointer" onClick={() => gerarPDFLevantamento(detalhe, ambsDetalhe, itensDetalhe)}>🖨️ Gerar Relatório PDF</button>
             <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPropostaCompleta(detalhe, ambsDetalhe, itensDetalhe)}>📄 Gerar Proposta Completa</button>
@@ -1376,7 +1405,7 @@ export default function Levantamento() {
       topbarSlot={
         <>
           <button
-            onClick={() => { setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }); setJanela('levantamento') }}
+            onClick={() => { setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }); setLevantamentoEditando(null); setJanela('levantamento') }}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20"
           >
             <span className="material-symbols-outlined text-[20px]">add_circle</span>
@@ -1425,7 +1454,7 @@ export default function Levantamento() {
         <div className={sectionCls + ' text-center py-16'}>
           <div className="text-5xl mb-4">📐</div>
           <div className="text-base font-bold text-on-surface mb-4">{levantamentos.length === 0 ? 'Nenhum levantamento ainda' : 'Nenhum resultado'}</div>
-          {levantamentos.length === 0 && <button className={btnPrimaryCls} onClick={() => setJanela('levantamento')}>+ Criar primeiro levantamento</button>}
+          {levantamentos.length === 0 && <button className={btnPrimaryCls} onClick={() => { setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }); setLevantamentoEditando(null); setJanela('levantamento') }}>+ Criar primeiro levantamento</button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
@@ -1495,7 +1524,7 @@ export default function Levantamento() {
       {janela === 'levantamento' && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
           <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[560px] max-h-[92vh] overflow-y-auto">
-            <div className="text-base font-bold text-on-surface mb-5">📐 Novo Levantamento</div>
+            <div className="text-base font-bold text-on-surface mb-5">{levantamentoEditando ? '✏️ Editar Levantamento' : '📐 Novo Levantamento'}</div>
             <div className="grid grid-cols-2 gap-3 mb-3.5">
               <div>
                 <label className={labelCls}>Código</label>
@@ -1552,8 +1581,8 @@ export default function Levantamento() {
               <input className={inputCls} placeholder="Informações relevantes sobre o imóvel" value={fLev.observacao} onChange={e => setFLev({ ...fLev, observacao: e.target.value })} />
             </div>
             <div className="flex gap-2 justify-end">
-              <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
-              <button className={btnPrimaryCls} onClick={salvarLevantamento}>Criar Levantamento</button>
+              <button className={btnSecondaryCls} onClick={() => { setJanela(null); setLevantamentoEditando(null) }}>Cancelar</button>
+              <button className={btnPrimaryCls} onClick={salvarLevantamento}>{levantamentoEditando ? 'Salvar Alterações' : 'Criar Levantamento'}</button>
             </div>
           </div>
         </div>

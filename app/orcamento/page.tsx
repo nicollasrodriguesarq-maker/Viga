@@ -109,7 +109,7 @@ export default function Orcamento() {
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
 
   const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra' })
-  const [fItem, setFItem] = useState({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' })
+  const [fItem, setFItem] = useState({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias' })
   const [editItem, setEditItem] = useState<any>(null)
   const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias', tipo_banco: 'obras' })
   const [composicao, setComposicao] = useState<any[]>([])
@@ -238,7 +238,7 @@ export default function Orcamento() {
 
   async function salvarItem() {
     if (!fItem.servico || !ambienteAtivo) return alert('Preencha o serviço')
-    const mat = parseFloat(fItem.preco_material || '0')
+    const mat = usarComposicao ? somaComposicao() : parseFloat(fItem.preco_material || '0')
     const mao = parseFloat(fItem.preco_mao_obra || '0')
     const qtd = parseFloat(fItem.quantidade || '1')
     const lucro = parseFloat(fItem.lucro_percentual || '0')
@@ -258,19 +258,33 @@ export default function Orcamento() {
       total_item: total,
       banco_item_id: fItem.banco_item_id || null,
       categoria: fItem.categoria || null,
+      tempo_execucao: fItem.tempo_execucao ? parseFloat(fItem.tempo_execucao) : null,
+      tempo_execucao_unidade: fItem.tempo_execucao_unidade,
     }
+    let itemId = editItem?.id
     if (editItem) { await editar('orcamento_itens', editItem.id, dados) }
     else {
-      await criar('orcamento_itens', dados)
+      const novo = await criar('orcamento_itens', dados)
+      itemId = novo?.id
       const existe = bancoItens.find(b => b.nome.toLowerCase() === fItem.servico.toLowerCase())
       if (!existe && fItem.servico) {
-        await criar('banco_itens', { nome: fItem.servico, unidade: fItem.unidade, preco_material: mat, preco_mao_obra: mao, lucro_percentual: lucro, imposto_percentual: imposto, categoria: fItem.categoria || '' })
+        await criar('banco_itens', { nome: fItem.servico, unidade: fItem.unidade, preco_material: mat, preco_mao_obra: mao, lucro_percentual: lucro, imposto_percentual: imposto, categoria: fItem.categoria || '', tempo_execucao: fItem.tempo_execucao ? parseFloat(fItem.tempo_execucao) : null, tempo_execucao_unidade: fItem.tempo_execucao_unidade })
+      }
+    }
+    if (itemId) {
+      const existentesComp = await buscar('orcamento_itens_composicao', '?orcamento_item_id=eq.' + itemId)
+      for (const e of existentesComp) await remover('orcamento_itens_composicao', e.id)
+      if (usarComposicao) {
+        for (const c of composicao) {
+          await criar('orcamento_itens_composicao', { orcamento_item_id: itemId, material_nome: c.material_nome, quantidade: parseFloat(c.quantidade||0), unidade: c.unidade, preco_unitario: parseFloat(c.preco_unitario||0) })
+        }
       }
     }
     await atualizarTotais(detalhe.id)
     if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id)
     setJanela(null); setEditItem(null)
-    setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' })
+    setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias' })
+    setComposicao([]); setUsarComposicao(false)
     carregar()
   }
 
@@ -429,8 +443,11 @@ export default function Orcamento() {
   // Cronograma trabalha em dias; itens medidos em horas são convertidos assumindo jornada de 8h.
   function tempoExecucaoItem(item: any): number {
     const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
-    const valor = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
-    const dias = bi?.tempo_execucao_unidade === 'horas' ? valor / 8 : valor
+    const valorBanco = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
+    const valorProprio = item.tempo_execucao ? parseFloat(item.tempo_execucao) : 0
+    const valor = valorBanco > 0 ? valorBanco : valorProprio
+    const unidade = valorBanco > 0 ? bi?.tempo_execucao_unidade : item.tempo_execucao_unidade
+    const dias = unidade === 'horas' ? valor / 8 : valor
     return dias > 0 ? dias : 1
   }
   function diaValido(d: Date, pattern: string): boolean {
@@ -528,7 +545,24 @@ export default function Orcamento() {
 
   async function usarItemBanco(item: any) {
     if (!ambienteAtivo) return alert('Selecione um ambiente primeiro')
-    setFItem({ servico: item.nome, descricao: '', categoria: item.categoria || '', banco_item_id: item.id, quantidade: '1', unidade: item.unidade, preco_material: String(item.preco_material), preco_mao_obra: String(item.preco_mao_obra), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0) })
+    setFItem({ servico: item.nome, descricao: '', categoria: item.categoria || '', banco_item_id: item.id, quantidade: '1', unidade: item.unidade, preco_material: String(item.preco_material), preco_mao_obra: String(item.preco_mao_obra), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '', tempo_execucao_unidade: item.tempo_execucao_unidade || 'dias' })
+    setComposicao([]); setUsarComposicao(false)
+    setJanela('item')
+  }
+
+  function abrirNovoItem() {
+    setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias' })
+    setEditItem(null); setMostrarSugestoes(false)
+    setComposicao([]); setUsarComposicao(false)
+    setJanela('item')
+  }
+
+  async function abrirEditarItem(item: any) {
+    setFItem({ servico: item.servico, descricao: item.descricao||'', categoria: item.categoria || '', banco_item_id: item.banco_item_id || '', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '', tempo_execucao_unidade: item.tempo_execucao_unidade || 'dias' })
+    setEditItem(item); setMostrarSugestoes(false)
+    const comp = await buscar('orcamento_itens_composicao', '?orcamento_item_id=eq.' + item.id + '&order=created_at')
+    setComposicao(comp)
+    setUsarComposicao(comp.length > 0)
     setJanela('item')
   }
 
@@ -1161,7 +1195,7 @@ export default function Orcamento() {
               <div className="text-sm font-bold text-on-surface">📋 Itens por Ambiente</div>
               <div className="flex gap-2">
                 {podeEditar && <button className={btnSecondaryCls} onClick={() => { setFAmb(''); setJanela('ambiente') }}>+ Ambiente</button>}
-                {podeEditar && ambienteAtivo && <button className={btnPrimaryCls} onClick={() => { setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0' }); setEditItem(null); setMostrarSugestoes(false); setJanela('item') }}>+ Item</button>}
+                {podeEditar && ambienteAtivo && <button className={btnPrimaryCls} onClick={abrirNovoItem}>+ Item</button>}
               </div>
             </div>
 
@@ -1234,10 +1268,7 @@ export default function Orcamento() {
                                         <td className="px-2.5 py-2.5">
                                           {podeEditar && (
                                             <div className="flex gap-1">
-                                              <button className={btnEditSmCls} onClick={() => {
-                                                setFItem({ servico: item.servico, descricao: item.descricao||'', categoria: item.categoria || '', banco_item_id: item.banco_item_id || '', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0) })
-                                                setEditItem(item); setMostrarSugestoes(false); setJanela('item')
-                                              }}>✏️</button>
+                                              <button className={btnEditSmCls} onClick={() => abrirEditarItem(item)}>✏️</button>
                                               <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id); carregar() }}>×</button>
                                             </div>
                                           )}
@@ -1375,9 +1406,12 @@ export default function Orcamento() {
           const sugestoesFiltradas = fItem.servico.trim().length > 0 && !fItem.banco_item_id
             ? bancoItens.filter(b => b.nome.toLowerCase().includes(fItem.servico.toLowerCase())).slice(0, 6)
             : []
-          function selecionarSugestao(item: any) {
-            setFItem({ ...fItem, servico: item.nome, categoria: item.categoria || '', banco_item_id: item.id, unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0) })
+          async function selecionarSugestao(item: any) {
+            setFItem({ ...fItem, servico: item.nome, categoria: item.categoria || '', banco_item_id: item.id, unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '', tempo_execucao_unidade: item.tempo_execucao_unidade || 'dias' })
             setMostrarSugestoes(false)
+            const comp = await buscar('banco_itens_composicao', '?banco_item_id=eq.' + item.id + '&order=created_at')
+            setComposicao(comp)
+            setUsarComposicao(comp.length > 0)
           }
           return (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
@@ -1429,15 +1463,71 @@ export default function Orcamento() {
                   </select>
                 </div>
               </div>
-              <div className="grid grid-cols-2 gap-3 mb-3.5">
-                <div>
-                  <label className={labelCls}>Preço Material (R$ / unidade)</label>
+              <div className="mb-3.5">
+                <label className={labelCls}>Tempo Execução</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <input className={inputCls} type="number" placeholder="0" value={fItem.tempo_execucao} onChange={e => setFItem({ ...fItem, tempo_execucao: e.target.value })} />
+                  <select className={inputCls} value={fItem.tempo_execucao_unidade} onChange={e => setFItem({ ...fItem, tempo_execucao_unidade: e.target.value })}>
+                    <option value="dias">dias</option>
+                    <option value="horas">horas</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between mb-2 mt-4">
+                <label className={labelCls + ' mb-0'}>Custo de Material</label>
+                <div className="flex gap-1 bg-surface-container-low rounded-lg p-1">
+                  <button type="button" className={`px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer ${!usarComposicao ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`} onClick={() => setUsarComposicao(false)}>Valor direto</button>
+                  <button type="button" className={`px-2.5 py-1 rounded-md text-[11px] font-semibold cursor-pointer ${usarComposicao ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`} onClick={() => setUsarComposicao(true)}>Composição</button>
+                </div>
+              </div>
+
+              {!usarComposicao ? (
+                <div className="mb-3.5">
                   <input className={inputCls + ' text-primary'} type="number" placeholder="0,00" value={fItem.preco_material} onChange={e => setFItem({ ...fItem, preco_material: e.target.value })} />
                 </div>
-                <div>
-                  <label className={labelCls}>Preço Mão de Obra (R$ / unidade)</label>
-                  <input className={inputCls + ' text-secondary'} type="number" placeholder="0,00" value={fItem.preco_mao_obra} onChange={e => setFItem({ ...fItem, preco_mao_obra: e.target.value })} />
+              ) : (
+                <div className="bg-surface-container-low rounded-lg p-3.5 mb-3.5">
+                  <div className="text-[11px] text-on-surface-variant mb-2">Ex: 1m² de forro drywall — tabica 1m, perfil U de 3m, tirante de 30cm...</div>
+                  {composicao.length > 0 && (
+                    <div className="flex flex-col gap-1.5 mb-3">
+                      {composicao.map((c, idx) => (
+                        <div key={c.id || idx} className="flex justify-between items-center bg-surface-container px-3 py-2 rounded-md text-xs">
+                          <span className="text-on-surface">{c.material_nome} — {fmtN(parseFloat(c.quantidade||0))} {c.unidade} × {fmt(parseFloat(c.preco_unitario||0))}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-primary">{fmt(parseFloat(c.quantidade||0) * parseFloat(c.preco_unitario||0))}</span>
+                            <button className={btnDangerSmCls} onClick={() => removerComposicao(idx)}>×</button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-[1fr_70px_70px_90px_auto] gap-1.5 items-end">
+                    <div>
+                      <label className={labelCls}>Material</label>
+                      <input className={inputCls} placeholder="Ex: Tabica 1m" value={fComp.material_nome} onChange={e => setFComp({ ...fComp, material_nome: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Qtd</label>
+                      <input className={inputCls} type="number" value={fComp.quantidade} onChange={e => setFComp({ ...fComp, quantidade: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Un</label>
+                      <input className={inputCls} placeholder="un" value={fComp.unidade} onChange={e => setFComp({ ...fComp, unidade: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Preço unit.</label>
+                      <input className={inputCls} type="number" placeholder="0,00" value={fComp.preco_unitario} onChange={e => setFComp({ ...fComp, preco_unitario: e.target.value })} onKeyDown={e => e.key === 'Enter' && adicionarComposicao()} />
+                    </div>
+                    <button className={btnSecondaryCls} onClick={adicionarComposicao}>+</button>
+                  </div>
+                  <div className="text-right text-sm font-bold text-primary mt-3">Total material: {fmt(somaComposicao())}</div>
                 </div>
+              )}
+
+              <div className="mb-3.5">
+                <label className={labelCls}>Custo de Mão de Obra (R$ / unidade)</label>
+                <input className={inputCls + ' text-secondary'} type="number" placeholder="0,00" value={fItem.preco_mao_obra} onChange={e => setFItem({ ...fItem, preco_mao_obra: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3 mb-3.5">
                 <div>
@@ -1449,19 +1539,22 @@ export default function Orcamento() {
                   <input className={inputCls} type="number" placeholder="0" value={fItem.imposto_percentual} onChange={e => setFItem({ ...fItem, imposto_percentual: e.target.value })} />
                 </div>
               </div>
-              {(fItem.quantidade && (fItem.preco_material || fItem.preco_mao_obra)) ? (
-                <div className="bg-surface-container-low rounded-lg p-3.5 mb-4">
-                  <div className="text-[11px] text-on-surface-variant mb-2">PREVIEW DO TOTAL</div>
-                  <div className="flex gap-5 flex-wrap">
-                    <div><div className="text-[10px] text-on-surface-variant">MATERIAL</div><div className="font-bold text-primary">{fmt(parseFloat(fItem.preco_material||'0') * parseFloat(fItem.quantidade||'1'))}</div></div>
-                    <div><div className="text-[10px] text-on-surface-variant">MÃO DE OBRA</div><div className="font-bold text-secondary">{fmt(parseFloat(fItem.preco_mao_obra||'0') * parseFloat(fItem.quantidade||'1'))}</div></div>
-                    <div><div className="text-[10px] text-on-surface-variant">VALOR UNITÁRIO</div><div className="font-bold text-on-surface">{fmt(calcularValorUnitario(parseFloat(fItem.preco_material||'0'), parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')))}</div></div>
-                    <div><div className="text-[10px] text-on-surface-variant">TOTAL</div><div className="font-black text-tertiary text-base">{fmt(calcularValorUnitario(parseFloat(fItem.preco_material||'0'), parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')) * parseFloat(fItem.quantidade||'1'))}</div></div>
+              {(() => {
+                const matPreview = usarComposicao ? somaComposicao() : parseFloat(fItem.preco_material || '0')
+                return (fItem.quantidade && (matPreview || fItem.preco_mao_obra)) ? (
+                  <div className="bg-surface-container-low rounded-lg p-3.5 mb-4">
+                    <div className="text-[11px] text-on-surface-variant mb-2">PREVIEW DO TOTAL</div>
+                    <div className="flex gap-5 flex-wrap">
+                      <div><div className="text-[10px] text-on-surface-variant">MATERIAL</div><div className="font-bold text-primary">{fmt(matPreview * parseFloat(fItem.quantidade||'1'))}</div></div>
+                      <div><div className="text-[10px] text-on-surface-variant">MÃO DE OBRA</div><div className="font-bold text-secondary">{fmt(parseFloat(fItem.preco_mao_obra||'0') * parseFloat(fItem.quantidade||'1'))}</div></div>
+                      <div><div className="text-[10px] text-on-surface-variant">VALOR UNITÁRIO</div><div className="font-bold text-on-surface">{fmt(calcularValorUnitario(matPreview, parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')))}</div></div>
+                      <div><div className="text-[10px] text-on-surface-variant">TOTAL</div><div className="font-black text-tertiary text-base">{fmt(calcularValorUnitario(matPreview, parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')) * parseFloat(fItem.quantidade||'1'))}</div></div>
+                    </div>
                   </div>
-                </div>
-              ) : null}
+                ) : null
+              })()}
               <div className="flex gap-2 justify-end">
-                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setEditItem(null) }}>Cancelar</button>
+                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setEditItem(null); setComposicao([]); setUsarComposicao(false) }}>Cancelar</button>
                 <button className={btnPrimaryCls} onClick={salvarItem}>{editItem ? 'Salvar' : 'Adicionar Item'}</button>
               </div>
             </div>

@@ -119,6 +119,7 @@ export default function Orcamento() {
   const [editBanco, setEditBanco] = useState<any>(null)
   const [fAmb, setFAmb] = useState('')
   const [fTransformar, setFTransformar] = useState({ data_inicio: '', dias_trabalho: 'seg_sex', periodo_trabalho: 'comercial' })
+  const [regimeProposta, setRegimeProposta] = useState('seg_sex')
 
   useEffect(() => {
     if (!localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -151,7 +152,7 @@ export default function Orcamento() {
       buscar('orcamento_ambientes', '?order=ordem'),
       buscar('orcamento_itens', '?order=created_at'),
       buscar('banco_itens', '?order=nome'),
-      buscar('obras', '?select=id,nome&order=nome'),
+      buscar('obras', '?select=id,nome,dias_trabalho&order=nome'),
       buscar('orcamento_solicitacoes', '?order=created_at.desc'),
     ])
     setOrcamentos(o); setAmbientes(a); setItens(it); setBancoItens(b); setObras(ob); setSolicitacoes(s)
@@ -945,6 +946,13 @@ export default function Orcamento() {
     </div>`
   }
 
+  function abrirRegimeProposta() {
+    if (!detalhe) return
+    const obraVinculada = obras.find(o => o.id === detalhe.obra_id)
+    setRegimeProposta(obraVinculada?.dias_trabalho || 'seg_sex')
+    setJanela('regimeProposta')
+  }
+
   async function gerarPropostaCompleta() {
     if (!detalhe) return
     const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
@@ -961,7 +969,11 @@ export default function Orcamento() {
       if (levRows[0]) paginasLev = paginasLevantamentoEncarte(levRows[0], ambsLev, itensLev, cfg)
     }
 
-    const prazoDias = Math.round(itensDoOrc.reduce((a, i) => a + tempoExecucaoItem(i), 0))
+    const totalDiasUteis = Math.max(1, Math.round(itensDoOrc.reduce((a, i) => a + tempoExecucaoItem(i), 0)))
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+    const inicioValido = proximoDiaUtil(hoje, regimeProposta)
+    const fimPrazo = somarDiasUteis(hoje, totalDiasUteis, regimeProposta)
+    const prazoDias = Math.round((fimPrazo.getTime() - inicioValido.getTime()) / 86400000) + 1
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =
@@ -1171,7 +1183,7 @@ export default function Orcamento() {
               <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
             )}
             <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPDF}>🖨️ Gerar Proposta PDF</button>
-            <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPropostaCompleta}>📄 Gerar Proposta Completa</button>
+            <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={abrirRegimeProposta}>📄 Gerar Proposta Completa</button>
             {detalhe.status === 'aprovado' && podeEditar && (
               detalhe.obra_id ? (
                 <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verObraVinculada}>🔗 Ver Obra Vinculada</button>
@@ -1421,7 +1433,7 @@ export default function Orcamento() {
               <textarea className={inputCls + ' min-h-[80px] resize-y disabled:opacity-50'} disabled={!podeEditar} value={detalhe.observacao || ''} onChange={e => setDetalhe({ ...detalhe, observacao: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { observacao: detalhe.observacao })} placeholder="Ex: Serviço com garantia de 1 ano. Materiais de primeira linha." />
             </div>
             <button className="w-full bg-primary-container text-on-primary-container rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPDF}>🖨️ Gerar Proposta em PDF</button>
-            <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer mt-2" onClick={gerarPropostaCompleta}>📄 Gerar Proposta Completa</button>
+            <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer mt-2" onClick={abrirRegimeProposta}>📄 Gerar Proposta Completa</button>
           </div>
         )}
 
@@ -1596,6 +1608,27 @@ export default function Orcamento() {
               <div className="flex gap-2 justify-end">
                 <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
                 <button className={btnPrimaryCls} onClick={salvarAmbiente}>Criar Ambiente</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {janela === 'regimeProposta' && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
+              <div className="text-base font-bold text-on-surface mb-1.5">📄 Gerar Proposta Completa</div>
+              <div className="text-body-sm text-on-surface-variant mb-5">Cada obra roda em um ritmo diferente — escolha o regime de execução para calcular o prazo em dias corridos que vai na proposta.</div>
+              <div className="mb-5">
+                <label className={labelCls}>Regime de Execução</label>
+                <select className={inputCls} value={regimeProposta} onChange={e => setRegimeProposta(e.target.value)}>
+                  <option value="seg_sex">Segunda a Sexta</option>
+                  <option value="seg_sab">Segunda a Sábado</option>
+                  <option value="todos_dias">Todos os dias (dias corridos)</option>
+                </select>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={() => { setJanela(null); gerarPropostaCompleta() }}>Gerar Proposta</button>
               </div>
             </div>
           </div>

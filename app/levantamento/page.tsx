@@ -145,6 +145,8 @@ export default function Levantamento() {
   const [userEmail, setUserEmail] = useState('')
   const [meuId, setMeuId] = useState('')
   const [souAdmin, setSouAdmin] = useState(false)
+  const [regimeProposta, setRegimeProposta] = useState('seg_sex')
+  const [propostaAlvo, setPropostaAlvo] = useState<{ lev: any, ambs: any[], itensList: any[] } | null>(null)
 
   const [fLev, setFLev] = useState({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' })
   const [levantamentoEditando, setLevantamentoEditando] = useState<any>(null)
@@ -178,7 +180,7 @@ export default function Levantamento() {
       buscar('levantamentos', '?order=created_at.desc'),
       buscar('levantamento_ambientes', '?order=ordem'),
       buscar('levantamento_itens', '?order=created_at'),
-      buscar('obras', '?select=id,nome&order=nome'),
+      buscar('obras', '?select=id,nome,dias_trabalho&order=nome'),
       buscar('levantamento_solicitacoes', '?order=created_at.desc'),
       buscar('banco_itens', '?order=nome'),
       buscar('levantamento_arquivos', '?order=created_at.desc'),
@@ -646,6 +648,28 @@ export default function Levantamento() {
     const dias = bi?.tempo_execucao_unidade === 'horas' ? valor / 8 : valor
     return dias > 0 ? dias : 1
   }
+  function diaValidoLev(d: Date, pattern: string): boolean {
+    const dow = d.getDay()
+    if (pattern === 'todos_dias') return true
+    if (pattern === 'seg_sab') return dow >= 1 && dow <= 6
+    return dow >= 1 && dow <= 5
+  }
+  function proximoDiaUtilLev(d: Date, pattern: string): Date {
+    const nd = new Date(d)
+    while (!diaValidoLev(nd, pattern)) nd.setDate(nd.getDate() + 1)
+    return nd
+  }
+  function somarDiasUteisLev(inicio: Date, dias: number, pattern: string): Date {
+    let atual = proximoDiaUtilLev(inicio, pattern)
+    let restante = Math.max(1, dias) - 1
+    while (restante > 0) {
+      atual = new Date(atual)
+      atual.setDate(atual.getDate() + 1)
+      atual = proximoDiaUtilLev(atual, pattern)
+      restante--
+    }
+    return atual
+  }
   function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string) {
     return `
     <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
@@ -872,6 +896,13 @@ export default function Levantamento() {
     </div>`
   }
 
+  function abrirRegimeProposta(lev: any, ambs: any[], itensList: any[]) {
+    const obraVinculada = obras.find(o => o.id === lev.obra_id)
+    setRegimeProposta(obraVinculada?.dias_trabalho || 'seg_sex')
+    setPropostaAlvo({ lev, ambs, itensList })
+    setJanela('regimeProposta')
+  }
+
   async function gerarPropostaCompleta(lev: any, ambs: any[], itensList: any[]) {
     const configRows = await buscar('empresa_config', '?limit=1')
     const cfg = configRows[0] || {}
@@ -881,7 +912,11 @@ export default function Levantamento() {
     const orc = orcs[0]
     const orcItens = orc ? await buscar('orcamento_itens', `?orcamento_id=eq.${orc.id}`) : []
 
-    const prazoDias = Math.round(orcItens.reduce((a: number, i: any) => a + tempoExecucaoItemLev(i), 0))
+    const totalDiasUteis = Math.max(1, Math.round(orcItens.reduce((a: number, i: any) => a + tempoExecucaoItemLev(i), 0)))
+    const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
+    const inicioValido = proximoDiaUtilLev(hoje, regimeProposta)
+    const fimPrazo = somarDiasUteisLev(hoje, totalDiasUteis, regimeProposta)
+    const prazoDias = Math.round((fimPrazo.getTime() - inicioValido.getTime()) / 86400000) + 1
 
     const paginas =
       paginaCapaInversa(lev.nome || lev.cliente, lev.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', lev.cliente, lev.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(orc?.validade_dias || '30'), cfg, origin) +
@@ -978,7 +1013,7 @@ export default function Levantamento() {
             {podeEditar && <button className={btnSecondaryCls} onClick={() => abrirEditarLevantamento(detalhe)}>✏️ Editar Levantamento</button>}
             <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>🔗 Ver Orçamento Vinculado</button>
             <button className="bg-surface-container-high border border-outline-variant text-on-surface rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-surface-variant transition-all cursor-pointer" onClick={() => gerarPDFLevantamento(detalhe, ambsDetalhe, itensDetalhe)}>🖨️ Gerar Relatório PDF</button>
-            <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPropostaCompleta(detalhe, ambsDetalhe, itensDetalhe)}>📄 Gerar Proposta Completa</button>
+            <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => abrirRegimeProposta(detalhe, ambsDetalhe, itensDetalhe)}>📄 Gerar Proposta Completa</button>
           </div>
         </div>
 
@@ -1153,7 +1188,7 @@ export default function Levantamento() {
               <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>
                 🔗 Ver Orçamento Vinculado
               </button>
-              <button className="w-full bg-primary-container text-on-primary-container rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPropostaCompleta(detalhe, ambsDetalhe, itensDetalhe)}>
+              <button className="w-full bg-primary-container text-on-primary-container rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => abrirRegimeProposta(detalhe, ambsDetalhe, itensDetalhe)}>
                 📄 Gerar Proposta Completa
               </button>
             </div>
@@ -1214,6 +1249,27 @@ export default function Levantamento() {
           </div>
           )
         })()}
+
+        {janela === 'regimeProposta' && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
+              <div className="text-base font-bold text-on-surface mb-1.5">📄 Gerar Proposta Completa</div>
+              <div className="text-body-sm text-on-surface-variant mb-5">Cada obra roda em um ritmo diferente — escolha o regime de execução para calcular o prazo em dias corridos que vai na proposta.</div>
+              <div className="mb-5">
+                <label className={labelCls}>Regime de Execução</label>
+                <select className={inputCls} value={regimeProposta} onChange={e => setRegimeProposta(e.target.value)}>
+                  <option value="seg_sex">Segunda a Sexta</option>
+                  <option value="seg_sab">Segunda a Sábado</option>
+                  <option value="todos_dias">Todos os dias (dias corridos)</option>
+                </select>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={() => { setJanela(null); if (propostaAlvo) gerarPropostaCompleta(propostaAlvo.lev, propostaAlvo.ambs, propostaAlvo.itensList) }}>Gerar Proposta</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {janela === 'ambiente' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>

@@ -272,7 +272,7 @@ export default function Obras() {
   const [fObra, setFObra] = useState({
     codigo: '', nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '',
     endereco: '', responsavel: '', status: 'em_execucao',
-    data_inicio: '', data_previsao: '', valor_contrato: ''
+    data_inicio: '', data_previsao: '', valor_contrato: '', dias_trabalho: 'seg_sex'
   })
 
   const [fServ, setFServ] = useState({
@@ -1276,6 +1276,7 @@ export default function Obras() {
       data_inicio: fObra.data_inicio || null,
       data_previsao: fObra.data_previsao || null,
       valor_contrato: parseFloat(fObra.valor_contrato || '0'),
+      dias_trabalho: fObra.dias_trabalho || 'seg_sex',
     }
     let obraId = obraEditando?.id
     if (obraEditando) {
@@ -1325,7 +1326,7 @@ export default function Obras() {
   }
 
   function abrirNovaObra() {
-    setFObra({ codigo: gerarCodigo(obras), nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '', endereco: '', responsavel: '', status: 'em_execucao', data_inicio: '', data_previsao: '', valor_contrato: '' })
+    setFObra({ codigo: gerarCodigo(obras), nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '', endereco: '', responsavel: '', status: 'em_execucao', data_inicio: '', data_previsao: '', valor_contrato: '', dias_trabalho: 'seg_sex' })
     setObraEditando(null)
     setJanela('nova_obra')
   }
@@ -1338,6 +1339,7 @@ export default function Obras() {
       responsavel: obra.responsavel || '', status: obra.status || 'em_execucao',
       data_inicio: obra.data_inicio || '', data_previsao: obra.data_previsao || '',
       valor_contrato: obra.valor_contrato != null ? String(obra.valor_contrato) : '',
+      dias_trabalho: obra.dias_trabalho || 'seg_sex',
     })
     setObraEditando(obra)
     setJanela('editar_obra')
@@ -2696,10 +2698,19 @@ function FormObra({ f, setF, obras, editando, salvar, cancelar }: {
           <label className={labelCls}>Valor do Contrato (R$)</label>
           <input className={inputCls} type="number" placeholder="0,00" value={f.valor_contrato} onChange={(e: any) => setF({ ...f, valor_contrato: e.target.value })} />
         </div>
-        <div className="bg-primary/5 border border-primary/20 rounded-lg px-3.5 py-2.5">
-          <div className="text-[11px] text-primary font-semibold mb-1">💡 CUSTOS POR SERVIÇO</div>
-          <div className="text-body-sm text-on-surface-variant">Após criar a obra, acesse a aba <strong className="text-on-surface">🔧 Serviços</strong> para detalhar: Hidráulica, Elétrica, Pintura...</div>
+        <div>
+          <label className={labelCls}>Dias de Trabalho</label>
+          <select className={inputCls} value={f.dias_trabalho} onChange={(e: any) => setF({ ...f, dias_trabalho: e.target.value })}>
+            <option value="seg_sex">Segunda a Sexta</option>
+            <option value="seg_sab">Segunda a Sábado</option>
+            <option value="todos_dias">Todos os dias (inclusive domingo)</option>
+          </select>
         </div>
+      </div>
+
+      <div className="bg-primary/5 border border-primary/20 rounded-lg px-3.5 py-2.5 mb-3.5">
+        <div className="text-[11px] text-primary font-semibold mb-1">💡 CUSTOS POR SERVIÇO</div>
+        <div className="text-body-sm text-on-surface-variant">Após criar a obra, acesse a aba <strong className="text-on-surface">🔧 Serviços</strong> para detalhar: Hidráulica, Elétrica, Pintura...</div>
       </div>
 
       <div className="flex gap-2 justify-end mt-2">

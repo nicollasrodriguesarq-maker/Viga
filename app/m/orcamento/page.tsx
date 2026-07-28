@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 
@@ -15,7 +15,8 @@ const fmt = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'curr
 const fmtN = (v: number) => Number(v || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })
 
 const STATUS_ORC: Record<string, string> = { rascunho: 'Rascunho', enviado: 'Enviado', aprovado: 'Aprovado', reprovado: 'Reprovado', expirado: 'Expirado' }
-const CATEGORIAS = ['Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Climatização (AC)', 'Forro', 'Revestimento de Parede', 'Revestimento de Piso', 'Pintura', 'Esquadrias', 'Marcenaria', 'Serralheria', 'Vidraçaria', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
+// Ordem = sequência real de execução de obra (usada para ordenar/agrupar itens e etapas).
+const CATEGORIAS = ['Serviços Preliminares', 'Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Instalações de Incêndio', 'Climatização (AC)', 'Revestimento de Parede', 'Revestimento de Piso', 'Forro', 'Esquadrias', 'Vidraçaria', 'Serralheria', 'Marmoraria', 'Louças e Metais', 'Marcenaria', 'Pintura', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
 
 function ordemCategoria(categoria: string | null | undefined) {
   const idx = CATEGORIAS.indexOf(categoria || '')
@@ -86,9 +87,14 @@ export default function OrcamentoMobile() {
       const matAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).material, 0)
       const maoAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).maoObra, 0)
       const totalAmb = itensAmb.reduce((a, i) => a + calcularTotalItem(i), 0)
-      const rows = itensAmb.map(item => {
+      const rows = itensAmb.map((item, idx) => {
         const { material: mat, maoObra: mao } = valoresProposta(item)
-        return `<tr>
+        const categoriaAtual = item.categoria || 'Outros'
+        const categoriaAnterior = idx > 0 ? (itensAmb[idx - 1].categoria || 'Outros') : null
+        const headerCategoria = categoriaAtual !== categoriaAnterior
+          ? `<tr><td colspan="5" style="padding:6px 10px;background:#eef3f8;color:#1B3A5C;font-weight:700;font-size:11px;text-transform:uppercase">${categoriaAtual}</td></tr>`
+          : ''
+        return `${headerCategoria}<tr>
           <td style="padding:8px 10px;border-bottom:1px solid #eee">${item.servico}${item.descricao ? '<br><small style="color:#666">' + item.descricao + '</small>' : ''}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center">${fmtN(parseFloat(item.quantidade || 1))} ${item.unidade}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">${fmt(mat)}</td>
@@ -236,16 +242,25 @@ export default function OrcamentoMobile() {
                 </button>
                 {aberto && (
                   <div className="px-4 pb-4 flex flex-col gap-2">
-                    {itensAmb.map(item => (
-                      <div key={item.id} className="border-t border-outline-variant pt-2.5 first:border-0 first:pt-0">
-                        <div className="text-sm font-semibold text-on-surface">{item.servico}</div>
-                        {item.descricao && <div className="text-[11px] text-on-surface-variant">{item.descricao}</div>}
-                        <div className="flex justify-between text-[11px] mt-1">
-                          <span className="text-on-surface-variant">{fmtN(parseFloat(item.quantidade || 1))} {item.unidade}</span>
-                          <span className="font-bold text-primary">{fmt(calcularTotalItem(item))}</span>
-                        </div>
-                      </div>
-                    ))}
+                    {itensAmb.map((item, idx) => {
+                      const categoriaAtual = item.categoria || 'Outros'
+                      const categoriaAnterior = idx > 0 ? (itensAmb[idx - 1].categoria || 'Outros') : null
+                      return (
+                        <Fragment key={item.id}>
+                          {categoriaAtual !== categoriaAnterior && (
+                            <div className="text-[10px] font-bold text-primary uppercase tracking-wide mt-1 first:mt-0">{categoriaAtual}</div>
+                          )}
+                          <div className="border-t border-outline-variant pt-2.5 first:border-0 first:pt-0">
+                            <div className="text-sm font-semibold text-on-surface">{item.servico}</div>
+                            {item.descricao && <div className="text-[11px] text-on-surface-variant">{item.descricao}</div>}
+                            <div className="flex justify-between text-[11px] mt-1">
+                              <span className="text-on-surface-variant">{fmtN(parseFloat(item.quantidade || 1))} {item.unidade}</span>
+                              <span className="font-bold text-primary">{fmt(calcularTotalItem(item))}</span>
+                            </div>
+                          </div>
+                        </Fragment>
+                      )
+                    })}
                   </div>
                 )}
               </div>

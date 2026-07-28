@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 
@@ -46,6 +46,18 @@ function calcularBarraGantt(inicio: Date, fim: Date, dataIniStr?: string | null,
   const fimPct = Math.max(0, Math.min(100, ((fimEtapa.getTime() - inicio.getTime()) / totalMs) * 100))
   const larguraPct = Math.max(fimPct - xPct, 0.8)
   return { xPct, larguraPct }
+}
+// Ordem = sequência real de execução de obra (mesma lista/ordem do desktop e do Orçamento).
+const CATEGORIAS = ['Serviços Preliminares', 'Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Instalações de Incêndio', 'Climatização (AC)', 'Revestimento de Parede', 'Revestimento de Piso', 'Forro', 'Esquadrias', 'Vidraçaria', 'Serralheria', 'Marmoraria', 'Louças e Metais', 'Marcenaria', 'Pintura', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
+function ordemCategoria(categoria: string | null | undefined) {
+  const idx = CATEGORIAS.indexOf(categoria || '')
+  return idx === -1 ? CATEGORIAS.length : idx
+}
+function ordenarServicosObra(lista: any[]) {
+  return [...lista].sort((a, b) => {
+    const catDiff = ordemCategoria(a.categoria) - ordemCategoria(b.categoria)
+    return catDiff !== 0 ? catDiff : (a.ordem ?? 0) - (b.ordem ?? 0)
+  })
 }
 function corBarraEtapa(status: string) {
   if (status === 'concluida') return 'bg-primary-container'
@@ -372,10 +384,12 @@ export default function ObrasMobile() {
   }
 
   async function reordenarServico(servico: any, direcao: -1 | 1) {
-    const svsObra = servicosObra(servico.obra_id).slice().sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    const svsObra = ordenarServicosObra(servicosObra(servico.obra_id))
     const idx = svsObra.findIndex(s => s.id === servico.id)
     const vizinho = svsObra[idx + direcao]
-    if (!vizinho) return
+    // Só reordena dentro da mesma categoria — a ordem entre categorias já é fixada pela
+    // sequência de execução (Demolição antes de Pintura, etc.), não pelo campo "ordem".
+    if (!vizinho || (vizinho.categoria || null) !== (servico.categoria || null)) return
     const ordemAtual = servico.ordem ?? idx
     const ordemVizinho = vizinho.ordem ?? (idx + direcao)
     await Promise.all([
@@ -694,7 +708,7 @@ export default function ObrasMobile() {
     const contrato = parseFloat(detalhe.valor_contrato || 0)
     const prevTotal = totalPrevisto(detalhe.id)
     const margem = receitas - custos
-    const svs = servicosObra(detalhe.id)
+    const svs = ordenarServicosObra(servicosObra(detalhe.id))
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
     const medicoesObra = medicoes.filter(m => m.obra_id === detalhe.id)
     const visitasObra = relatorios.filter(r => r.obra_id === detalhe.id)
@@ -755,7 +769,7 @@ export default function ObrasMobile() {
             <div className="flex flex-col gap-3">
               {svs.length === 0 ? (
                 <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado</div>
-              ) : svs.map(sv => {
+              ) : svs.map((sv, idx) => {
                 const vp = parseFloat(sv.valor_previsto || 0)
                 const matPrev = parseFloat(sv.valor_material_previsto || 0)
                 const maoPrev = parseFloat(sv.valor_mao_obra_previsto || 0)
@@ -764,8 +778,14 @@ export default function ObrasMobile() {
                 const custoPrevTotal = matPrev + maoPrev
                 const custoRealTotal = vrMao + vrMat
                 const ppRaw = custoPrevTotal > 0 ? (custoRealTotal / custoPrevTotal) * 100 : 0
+                const categoriaAtual = sv.categoria || 'Outros'
+                const categoriaAnterior = idx > 0 ? (svs[idx - 1].categoria || 'Outros') : null
                 return (
-                  <div key={sv.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
+                  <Fragment key={sv.id}>
+                  {categoriaAtual !== categoriaAnterior && (
+                    <div className="text-[10px] font-bold text-primary uppercase tracking-wide mt-2 first:mt-0">{categoriaAtual}</div>
+                  )}
+                  <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
                     <div className="flex justify-between items-start gap-2 mb-1.5">
                       <span className="font-semibold text-sm text-on-surface">{sv.nome}</span>
                       <span className="text-[10px] font-semibold text-on-surface-variant uppercase shrink-0">{SERV_STATUS[sv.status] || sv.status}</span>
@@ -788,6 +808,7 @@ export default function ObrasMobile() {
                       <div className="text-[10px] text-on-surface-variant text-right">{ppRaw.toFixed(0)}%</div>
                     </div>
                   </div>
+                  </Fragment>
                 )
               })}
             </div>
@@ -915,7 +936,7 @@ export default function ObrasMobile() {
           )}
 
           {aba === 'cronograma' && (() => {
-            const svsOrdenados = svs.slice().sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+            const svsOrdenados = ordenarServicosObra(svs)
             const etapasObra = etapas.filter(e => e.obra_id === detalhe.id)
             const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
             if (svs.length === 0) return <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum serviço cadastrado nesta obra</div>
@@ -957,16 +978,22 @@ export default function ObrasMobile() {
                   const et = etapasObra.find(e => e.servico_id === servico.id)
                   if (!et) return null
                   const atrasadaEtapa = !!(et.data_fim_prevista && new Date(et.data_fim_prevista) < hoje && et.status !== 'concluida')
+                  const categoriaAtual = servico.categoria || 'Outros'
+                  const categoriaAnterior = idx > 0 ? (svsOrdenados[idx - 1].categoria || 'Outros') : null
                   return (
-                    <div key={et.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
+                    <Fragment key={et.id}>
+                    {categoriaAtual !== categoriaAnterior && (
+                      <div className="text-[10px] font-bold text-primary uppercase tracking-wide mt-2 first:mt-0">{categoriaAtual}</div>
+                    )}
+                    <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
                       <div className="flex justify-between items-start gap-2 mb-2">
                         <div>
                           <div className="font-semibold text-sm text-on-surface">{servico.nome}</div>
                           {servico.fornecedor && <div className="text-[11px] text-on-surface-variant">{servico.fornecedor}</div>}
                         </div>
                         <div className="flex gap-2 shrink-0">
-                          <button disabled={idx === 0} className="text-on-surface-variant disabled:opacity-20" onClick={() => reordenarServico(servico, -1)}>▲</button>
-                          <button disabled={idx === svsOrdenados.length - 1} className="text-on-surface-variant disabled:opacity-20" onClick={() => reordenarServico(servico, 1)}>▼</button>
+                          <button disabled={idx === 0 || (svsOrdenados[idx - 1].categoria || null) !== (servico.categoria || null)} className="text-on-surface-variant disabled:opacity-20" onClick={() => reordenarServico(servico, -1)}>▲</button>
+                          <button disabled={idx === svsOrdenados.length - 1 || (svsOrdenados[idx + 1].categoria || null) !== (servico.categoria || null)} className="text-on-surface-variant disabled:opacity-20" onClick={() => reordenarServico(servico, 1)}>▼</button>
                         </div>
                       </div>
                       <div className="grid grid-cols-2 gap-2.5 mb-2">
@@ -999,6 +1026,7 @@ export default function ObrasMobile() {
                       </select>
                       {atrasadaEtapa && <div className="text-[11px] text-error mt-1.5">⚠️ prazo vencido</div>}
                     </div>
+                    </Fragment>
                   )
                 })}
               </div>

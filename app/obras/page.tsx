@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import Link from 'next/link'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
@@ -159,6 +159,19 @@ const SERV_BADGE: Record<string, string> = {
 }
 
 const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
+// Ordem = sequência real de execução de obra (usada para ordenar/agrupar serviços no
+// Cronograma e na aba Serviços — mesma lista/ordem já usada no Orçamento).
+const CATEGORIAS = ['Serviços Preliminares', 'Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Instalações de Incêndio', 'Climatização (AC)', 'Revestimento de Parede', 'Revestimento de Piso', 'Forro', 'Esquadrias', 'Vidraçaria', 'Serralheria', 'Marmoraria', 'Louças e Metais', 'Marcenaria', 'Pintura', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
+function ordemCategoria(categoria: string | null | undefined) {
+  const idx = CATEGORIAS.indexOf(categoria || '')
+  return idx === -1 ? CATEGORIAS.length : idx
+}
+function ordenarServicosObra(lista: any[]) {
+  return [...lista].sort((a, b) => {
+    const catDiff = ordemCategoria(a.categoria) - ordemCategoria(b.categoria)
+    return catDiff !== 0 ? catDiff : (a.ordem ?? 0) - (b.ordem ?? 0)
+  })
+}
 // Cor compartilhada de barra de progresso (Serviços/Medição/Cronograma): verde até 80%,
 // laranja de 80 a 100%, vermelho acima de 100% (estourou o previsto/atrasado).
 function corProgresso(pctValor: number) {
@@ -263,7 +276,7 @@ export default function Obras() {
   })
 
   const [fServ, setFServ] = useState({
-    nome: '', unidade: 'm²', quantidade: '1', valor_previsto: '', valor_realizado: '',
+    nome: '', categoria: '', unidade: 'm²', quantidade: '1', valor_previsto: '', valor_realizado: '',
     valor_mao_obra_previsto: '', valor_material_previsto: '',
     status: 'pendente', observacao: '', fornecedor: ''
   })
@@ -665,14 +678,20 @@ export default function Obras() {
     const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
     const nomeEmpresa = cfg.nome_empresa || 'VIGA'
 
-    const linhasHtml = linhas.map(({ servico, etapa }) => `
-      <tr>
+    const linhasHtml = linhas.map(({ servico, etapa }, idx) => {
+      const categoriaAtual = servico.categoria || 'Outros'
+      const categoriaAnterior = idx > 0 ? (linhas[idx - 1].servico.categoria || 'Outros') : null
+      const headerCategoria = categoriaAtual !== categoriaAnterior
+        ? `<tr><td colspan="5" style="padding:6px 10px;background:#1b2027;color:#6ee9e0;font-weight:700;font-size:11px;text-transform:uppercase">${categoriaAtual}</td></tr>`
+        : ''
+      return `${headerCategoria}<tr>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${servico.nome}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7">${servico.fornecedor || '—'}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${etapa?.data_inicio_prevista ? new Date(etapa.data_inicio_prevista).toLocaleDateString('pt-BR') : '—'}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${etapa?.data_fim_prevista ? new Date(etapa.data_fim_prevista).toLocaleDateString('pt-BR') : '—'}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${ETAPA_STATUS[etapa?.status] || '—'}</td>
-      </tr>`).join('')
+      </tr>`
+    }).join('')
 
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
     <title>Cronograma ${obra.codigo} — ${nomeEmpresa}</title>
@@ -1224,10 +1243,12 @@ export default function Obras() {
   }
 
   async function reordenarServico(servico: any, direcao: -1 | 1) {
-    const svsObra = servicosObra(servico.obra_id).slice().sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    const svsObra = ordenarServicosObra(servicosObra(servico.obra_id))
     const idx = svsObra.findIndex(s => s.id === servico.id)
     const vizinho = svsObra[idx + direcao]
-    if (!vizinho) return
+    // Só reordena dentro da mesma categoria — a ordem entre categorias já é fixada pela
+    // sequência de execução (Demolição antes de Pintura, etc.), não pelo campo "ordem".
+    if (!vizinho || (vizinho.categoria || null) !== (servico.categoria || null)) return
     const ordemAtual = servico.ordem ?? idx
     const ordemVizinho = vizinho.ordem ?? (idx + direcao)
     await Promise.all([
@@ -1280,6 +1301,7 @@ export default function Obras() {
     const dados = {
       obra_id: detalhe.id,
       nome: fServ.nome.trim(),
+      categoria: fServ.categoria || null,
       unidade: fServ.unidade,
       quantidade: parseFloat(fServ.quantidade || '1'),
       valor_previsto: parseFloat(fServ.valor_previsto || '0'),
@@ -1322,7 +1344,7 @@ export default function Obras() {
   }
 
   function abrirNovoServico() {
-    setFServ({ nome: '', unidade: 'm²', quantidade: '1', valor_previsto: '', valor_realizado: '', valor_mao_obra_previsto: '', valor_material_previsto: '', status: 'pendente', observacao: '', fornecedor: '' })
+    setFServ({ nome: '', categoria: '', unidade: 'm²', quantidade: '1', valor_previsto: '', valor_realizado: '', valor_mao_obra_previsto: '', valor_material_previsto: '', status: 'pendente', observacao: '', fornecedor: '' })
     setServicoEditando(null)
     setJanela('novo_servico')
   }
@@ -1330,6 +1352,7 @@ export default function Obras() {
   function abrirEditarServico(sv: any) {
     setFServ({
       nome: sv.nome || '',
+      categoria: sv.categoria || '',
       unidade: sv.unidade || 'm²',
       quantidade: sv.quantidade != null ? String(sv.quantidade) : '1',
       valor_previsto: sv.valor_previsto != null ? String(sv.valor_previsto) : '',
@@ -1366,7 +1389,7 @@ export default function Obras() {
     const contrato  = parseFloat(detalhe.valor_contrato || 0)
     const prevTotal = totalPrevisto(detalhe.id)
     const realTotal = totalRealizado(detalhe.id)
-    const svs       = servicosObra(detalhe.id)
+    const svs       = ordenarServicosObra(servicosObra(detalhe.id))
     const lancD     = lancs.filter(l => l.obra_id === detalhe.id)
     const gastD     = gastos.filter(g => g.obra_id === detalhe.id)
     const pctCont   = pct(custos, contrato)
@@ -1657,7 +1680,7 @@ export default function Obras() {
                       </tr>
                     </thead>
                     <tbody>
-                      {svs.map(sv => {
+                      {svs.map((sv, idx) => {
                         const vp = parseFloat(sv.valor_previsto || 0)
                         const matPrev = parseFloat(sv.valor_material_previsto || 0)
                         const maoPrev = parseFloat(sv.valor_mao_obra_previsto || 0)
@@ -1667,8 +1690,16 @@ export default function Obras() {
                         const custoRealTotal = vrMao + vrMat
                         const ppRaw = custoPrevTotal > 0 ? (custoRealTotal / custoPrevTotal) * 100 : 0
                         const badge = SERV_BADGE[sv.status] || SERV_BADGE.pendente
+                        const categoriaAtual = sv.categoria || 'Outros'
+                        const categoriaAnterior = idx > 0 ? (svs[idx - 1].categoria || 'Outros') : null
                         return (
-                          <tr key={sv.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
+                          <Fragment key={sv.id}>
+                          {categoriaAtual !== categoriaAnterior && (
+                            <tr className="bg-surface-container-high">
+                              <td colSpan={11} className="px-3 py-1.5 text-[10px] font-bold text-primary uppercase tracking-wide">{categoriaAtual}</td>
+                            </tr>
+                          )}
+                          <tr className="border-b border-outline-variant hover:bg-surface-variant/20">
                             <td className="px-3 py-3">
                               <div className="font-semibold text-sm text-on-surface">{sv.nome}</div>
                               {sv.fornecedor && <div className="text-[11px] text-primary mt-0.5">{sv.fornecedor}</div>}
@@ -1700,6 +1731,7 @@ export default function Obras() {
                               </div>
                             </td>
                           </tr>
+                          </Fragment>
                         )
                       })}
                     </tbody>
@@ -1802,7 +1834,7 @@ export default function Obras() {
           </div>
         )}
         {abaDetalhe === 'cronograma' && svs.length > 0 && (() => {
-          const svsOrdenados = svs.slice().sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+          const svsOrdenados = ordenarServicosObra(svs)
           return (
           <div className={sectionCls}>
             <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
@@ -1872,12 +1904,20 @@ export default function Obras() {
                       const et = etapasObra.find(e => e.servico_id === servico.id)
                       if (!et) return null
                       const atrasadaEtapa = !!(et.data_fim_prevista && new Date(et.data_fim_prevista) < hoje && et.status !== 'concluida')
+                      const categoriaAtual = servico.categoria || 'Outros'
+                      const categoriaAnterior = idx > 0 ? (svsOrdenados[idx - 1].categoria || 'Outros') : null
                       return (
-                        <tr key={et.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
+                      <Fragment key={et.id}>
+                        {categoriaAtual !== categoriaAnterior && (
+                          <tr className="bg-surface-container-high">
+                            <td colSpan={6} className="px-3 py-1.5 text-[10px] font-bold text-primary uppercase tracking-wide">{categoriaAtual}</td>
+                          </tr>
+                        )}
+                        <tr className="border-b border-outline-variant hover:bg-surface-variant/20">
                           <td className="px-3 py-2.5">
                             <div className="flex flex-col gap-0.5">
-                              <button disabled={idx === 0} className="text-xs text-on-surface-variant hover:text-primary disabled:opacity-20 disabled:cursor-not-allowed" onClick={() => reordenarServico(servico, -1)}>▲</button>
-                              <button disabled={idx === svsOrdenados.length - 1} className="text-xs text-on-surface-variant hover:text-primary disabled:opacity-20 disabled:cursor-not-allowed" onClick={() => reordenarServico(servico, 1)}>▼</button>
+                              <button disabled={idx === 0 || (svsOrdenados[idx - 1].categoria || null) !== (servico.categoria || null)} className="text-xs text-on-surface-variant hover:text-primary disabled:opacity-20 disabled:cursor-not-allowed" onClick={() => reordenarServico(servico, -1)}>▲</button>
+                              <button disabled={idx === svsOrdenados.length - 1 || (svsOrdenados[idx + 1].categoria || null) !== (servico.categoria || null)} className="text-xs text-on-surface-variant hover:text-primary disabled:opacity-20 disabled:cursor-not-allowed" onClick={() => reordenarServico(servico, 1)}>▼</button>
                             </div>
                           </td>
                           <td className="px-3 py-2.5 font-semibold text-on-surface">{servico.nome}</td>
@@ -1910,6 +1950,7 @@ export default function Obras() {
                             {atrasadaEtapa && <div className="text-[10px] text-error mt-1">⚠️ prazo vencido</div>}
                           </td>
                         </tr>
+                      </Fragment>
                       )
                     })}
                   </tbody>
@@ -2330,6 +2371,14 @@ export default function Obras() {
               <div className="mb-3.5">
                 <label className={labelCls}>Fornecedor / Equipe Responsável (opcional)</label>
                 <input className={inputCls} placeholder="Ex: Pedreiro João, Instaladora XPTO Ar-Condicionado" value={fServ.fornecedor} onChange={e => setFServ({ ...fServ, fornecedor: e.target.value })} />
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Categoria</label>
+                <select className={inputCls} value={fServ.categoria} onChange={e => setFServ({ ...fServ, categoria: e.target.value })}>
+                  <option value="">Selecione</option>
+                  {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <div className="text-[11px] text-on-surface-variant mt-1">Define a ordem de execução no Cronograma</div>
               </div>
               <div className="grid grid-cols-2 gap-3 mb-3.5">
                 <div>

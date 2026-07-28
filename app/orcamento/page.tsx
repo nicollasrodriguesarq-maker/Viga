@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 
@@ -44,7 +44,8 @@ const EXECUCAO_BADGE: Record<string, string> = {
   projeto: 'bg-secondary/10 text-secondary border-secondary/20',
 }
 const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
-const CATEGORIAS = ['Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Climatização (AC)', 'Forro', 'Revestimento de Parede', 'Revestimento de Piso', 'Pintura', 'Esquadrias', 'Marcenaria', 'Serralheria', 'Vidraçaria', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
+// Ordem = sequência real de execução de obra (usada para ordenar/agrupar itens e etapas).
+const CATEGORIAS = ['Serviços Preliminares', 'Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Instalações de Incêndio', 'Climatização (AC)', 'Revestimento de Parede', 'Revestimento de Piso', 'Forro', 'Esquadrias', 'Vidraçaria', 'Serralheria', 'Marmoraria', 'Louças e Metais', 'Marcenaria', 'Pintura', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
 
 function ordemCategoria(categoria: string | null | undefined) {
   const idx = CATEGORIAS.indexOf(categoria || '')
@@ -300,15 +301,16 @@ export default function Orcamento() {
   // Nunca apaga linha orfa: pode ter valor_realizado/status preenchido manualmente depois.
   async function sincronizarServicosObra(orcamentoId: string, obraId: string) {
     const itensOrc = await buscar('orcamento_itens', '?orcamento_id=eq.' + orcamentoId)
-    const grupos = new Map<string, { previsto: number; maoObra: number; material: number; qtd: number; unidade: string }>()
+    const grupos = new Map<string, { previsto: number; maoObra: number; material: number; qtd: number; unidade: string; categoria: string }>()
     for (const item of itensOrc) {
       if (!item.servico) continue
       const qtd = parseFloat(item.quantidade || 1)
-      const atual = grupos.get(item.servico) || { previsto: 0, maoObra: 0, material: 0, qtd: 0, unidade: item.unidade || '' }
+      const atual = grupos.get(item.servico) || { previsto: 0, maoObra: 0, material: 0, qtd: 0, unidade: item.unidade || '', categoria: item.categoria || '' }
       atual.previsto += calcularTotalItem(item)
       atual.maoObra += parseFloat(item.preco_mao_obra || 0) * qtd
       atual.material += parseFloat(item.preco_material || 0) * qtd
       atual.qtd += qtd
+      if (!atual.categoria && item.categoria) atual.categoria = item.categoria
       grupos.set(item.servico, atual)
     }
     const servicosExistentes = await buscar('obra_servicos', '?obra_id=eq.' + obraId)
@@ -316,7 +318,7 @@ export default function Orcamento() {
     let criouNovo = false
     for (const [nome, totais] of grupos) {
       const existente = servicosExistentes.find((s: any) => s.nome === nome)
-      const dados = { valor_previsto: totais.previsto, valor_mao_obra_previsto: totais.maoObra, valor_material_previsto: totais.material, unidade: totais.unidade, quantidade: totais.qtd }
+      const dados = { valor_previsto: totais.previsto, valor_mao_obra_previsto: totais.maoObra, valor_material_previsto: totais.material, unidade: totais.unidade, quantidade: totais.qtd, categoria: totais.categoria || null }
       if (existente) await editar('obra_servicos', existente.id, dados)
       else {
         maxOrdem += 1
@@ -583,9 +585,14 @@ export default function Orcamento() {
       const matAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).material, 0)
       const maoAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).maoObra, 0)
       const totalAmb = itensAmb.reduce((a, i) => a + calcularTotalItem(i), 0)
-      const rows = itensAmb.map(item => {
+      const rows = itensAmb.map((item, idx) => {
         const { material: mat, maoObra: mao } = valoresProposta(item)
-        return `<tr>
+        const categoriaAtual = item.categoria || 'Outros'
+        const categoriaAnterior = idx > 0 ? (itensAmb[idx - 1].categoria || 'Outros') : null
+        const headerCategoria = categoriaAtual !== categoriaAnterior
+          ? `<tr><td colspan="5" style="padding:6px 10px;background:#eef3f8;color:#1B3A5C;font-weight:700;font-size:11px;text-transform:uppercase">${categoriaAtual}</td></tr>`
+          : ''
+        return `${headerCategoria}<tr>
           <td style="padding:8px 10px;border-bottom:1px solid #eee">${item.servico}${item.descricao ? '<br><small style="color:#666">' + item.descricao + '</small>' : ''}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center">${fmtN(parseFloat(item.quantidade||1))} ${item.unidade}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">${fmt(mat)}</td>
@@ -804,14 +811,21 @@ export default function Orcamento() {
   // demais para uma única página A4 paisagem simplesmente continuam na próxima, em vez de
   // serem cortados. break-inside:avoid em cada linha evita que uma linha seja partida ao meio.
   function paginaInvestimentoInverso(itensOrc: any[], codigo: string, cfg: any) {
-    const rows = itensOrc.map(item => `
+    const rows = itensOrc.map((item, idx) => {
+      const categoriaAtual = item.categoria || 'Outros'
+      const categoriaAnterior = idx > 0 ? (itensOrc[idx - 1].categoria || 'Outros') : null
+      const headerCategoria = categoriaAtual !== categoriaAnterior
+        ? `<tr style="break-inside:avoid"><td colspan="5" style="padding:8px 16px;background:#F5F4F1;color:#1A1A1A;font-weight:700;font-size:11px;letter-spacing:0.05em;text-transform:uppercase">${categoriaAtual}</td></tr>`
+        : ''
+      return `${headerCategoria}
       <tr style="break-inside:avoid">
         <td style="padding:12px 16px;border-bottom:1px solid #333;color:#eee">${item.servico}${item.descricao ? `<br/><span style="color:#999;font-size:11px">${item.descricao}</span>` : ''}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${item.unidade}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${fmtN(parseFloat(item.quantidade || 1))}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;color:#ccc">${fmt(calcularValorUnitario(parseFloat(item.preco_material||0), parseFloat(item.preco_mao_obra||0), parseFloat(item.lucro_percentual||0), parseFloat(item.imposto_percentual||0)))}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;font-weight:700;color:#fff">${fmt(calcularTotalItem(item))}</td>
-      </tr>`).join('')
+      </tr>`
+    }).join('')
     const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
     return `
     <div class="page-flow" style="background:#1A1A1A;color:#fff;padding:36px 40px">
@@ -934,7 +948,7 @@ export default function Orcamento() {
   async function gerarPropostaCompleta() {
     if (!detalhe) return
     const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
-    const itensDoOrc = itens.filter(i => i.orcamento_id === detalhe.id)
+    const itensDoOrc = ordenarPorCategoria(itens.filter(i => i.orcamento_id === detalhe.id))
     const origin = window.location.origin
 
     let paginasLev = ''
@@ -1251,29 +1265,38 @@ export default function Orcamento() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {itensAmb.map(item => {
+                                  {itensAmb.map((item, idx) => {
+                                    const categoriaAtual = item.categoria || 'Outros'
+                                    const categoriaAnterior = idx > 0 ? (itensAmb[idx - 1].categoria || 'Outros') : null
                                     const mat = parseFloat(item.preco_material||0) * parseFloat(item.quantidade||1)
                                     const mao = parseFloat(item.preco_mao_obra||0) * parseFloat(item.quantidade||1)
                                     return (
-                                      <tr key={item.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                                        <td className="px-2.5 py-2.5">
-                                          <div className="font-semibold text-on-surface">{item.servico}</div>
-                                          {item.descricao && <div className="text-[11px] text-on-surface-variant">{item.descricao}</div>}
-                                        </td>
-                                        <td className="px-2.5 py-2.5 text-on-surface">{fmtN(parseFloat(item.quantidade||1))}</td>
-                                        <td className="px-2.5 py-2.5 text-on-surface-variant text-xs">{item.unidade}</td>
-                                        <td className="px-2.5 py-2.5 text-primary font-semibold">{fmt(mat)}</td>
-                                        <td className="px-2.5 py-2.5 text-secondary font-semibold">{fmt(mao)}</td>
-                                        <td className="px-2.5 py-2.5 font-bold text-tertiary">{fmt(calcularTotalItem(item))}</td>
-                                        <td className="px-2.5 py-2.5">
-                                          {podeEditar && (
-                                            <div className="flex gap-1">
-                                              <button className={btnEditSmCls} onClick={() => abrirEditarItem(item)}>✏️</button>
-                                              <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id); carregar() }}>×</button>
-                                            </div>
-                                          )}
-                                        </td>
-                                      </tr>
+                                      <Fragment key={item.id}>
+                                        {categoriaAtual !== categoriaAnterior && (
+                                          <tr className="bg-surface-container-high">
+                                            <td colSpan={7} className="px-2.5 py-1.5 text-[10px] font-bold text-primary uppercase tracking-wide">{categoriaAtual}</td>
+                                          </tr>
+                                        )}
+                                        <tr className="border-b border-outline-variant hover:bg-surface-variant/20">
+                                          <td className="px-2.5 py-2.5">
+                                            <div className="font-semibold text-on-surface">{item.servico}</div>
+                                            {item.descricao && <div className="text-[11px] text-on-surface-variant">{item.descricao}</div>}
+                                          </td>
+                                          <td className="px-2.5 py-2.5 text-on-surface">{fmtN(parseFloat(item.quantidade||1))}</td>
+                                          <td className="px-2.5 py-2.5 text-on-surface-variant text-xs">{item.unidade}</td>
+                                          <td className="px-2.5 py-2.5 text-primary font-semibold">{fmt(mat)}</td>
+                                          <td className="px-2.5 py-2.5 text-secondary font-semibold">{fmt(mao)}</td>
+                                          <td className="px-2.5 py-2.5 font-bold text-tertiary">{fmt(calcularTotalItem(item))}</td>
+                                          <td className="px-2.5 py-2.5">
+                                            {podeEditar && (
+                                              <div className="flex gap-1">
+                                                <button className={btnEditSmCls} onClick={() => abrirEditarItem(item)}>✏️</button>
+                                                <button className={btnDangerSmCls} onClick={async () => { await remover('orcamento_itens', item.id); await atualizarTotais(detalhe.id); if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id); carregar() }}>×</button>
+                                              </div>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      </Fragment>
                                     )
                                   })}
                                 </tbody>

@@ -113,6 +113,20 @@ export default function FinanceiroMobile() {
     fecharWizard()
   }
 
+  // Categoria "Investimento (aporte)"/"Resgate de investimento" no lançamento também
+  // registra o movimento na aba Investimentos (desktop), sem precisar lançar duas vezes.
+  async function sincronizarInvestimento(dados: any) {
+    if (dados.categoria !== 'Investimento (aporte)' && dados.categoria !== 'Resgate de investimento') return
+    await inserir('investimentos', {
+      descricao: dados.descricao,
+      tipo: dados.categoria === 'Investimento (aporte)' ? 'aporte' : 'resgate',
+      valor: Math.abs(parseFloat(dados.valor || 0)),
+      data: dados.data,
+      instituicao: '',
+      observacao: 'Gerado automaticamente a partir do lançamento financeiro',
+    })
+  }
+
   async function finalizarSaidaWizard(overrides: Partial<typeof WZ_VAZIO> = {}) {
     const wizFinal = { ...wiz, ...overrides }
     if (!wizFinal.descricao || !wizFinal.valor) return alert('Preencha descrição e valor')
@@ -159,6 +173,7 @@ export default function FinanceiroMobile() {
       if (servicoId) dados.servico_id = servicoId
       if (nf_url) dados.nf_url = nf_url
       await inserir('lancamentos', dados)
+      await sincronizarInvestimento(dados)
     }
 
     if (servicoId) {

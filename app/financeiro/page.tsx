@@ -197,8 +197,23 @@ export default function Financeiro() {
       await atualizar('lancamentos', lancEditando.id, dados)
     } else {
       await inserir('lancamentos', dados)
+      await sincronizarInvestimento(dados)
     }
     setModal(''); setFLanc({...LZ}); setLancEditando(null); await carregar(); setSalvando(false)
+  }
+
+  // Categoria "Investimento (aporte)"/"Resgate de investimento" no lançamento também
+  // registra o movimento na aba Investimentos, sem precisar lançar duas vezes.
+  async function sincronizarInvestimento(dados: any) {
+    if (dados.categoria !== 'Investimento (aporte)' && dados.categoria !== 'Resgate de investimento') return
+    await inserir('investimentos', {
+      descricao: dados.descricao,
+      tipo: dados.categoria === 'Investimento (aporte)' ? 'aporte' : 'resgate',
+      valor: Math.abs(parseFloat(dados.valor || 0)),
+      data: dados.data,
+      instituicao: '',
+      observacao: 'Gerado automaticamente a partir do lançamento financeiro',
+    })
   }
 
   async function salvarConta() {
@@ -318,6 +333,7 @@ export default function Financeiro() {
       if (servicoId) dados.servico_id = servicoId
       if (nf_url) dados.nf_url = nf_url
       await inserir('lancamentos', dados)
+      await sincronizarInvestimento(dados)
     }
 
     if (servicoId) {

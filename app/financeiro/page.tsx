@@ -228,6 +228,11 @@ export default function Financeiro() {
     setModal(''); setFCartao({...CAZ}); carregar()
   }
 
+  async function marcarPago(id: string) {
+    await atualizar('lancamentos', id, { status: 'pago' })
+    await carregar()
+  }
+
   async function salvarGasto() {
     if (!fGasto.descricao || !fGasto.valor || !fGasto.cartao_id) return alert('Preencha todos os campos obrigatórios')
     setSalvando(true)
@@ -531,7 +536,10 @@ export default function Financeiro() {
                         {l.tipo==='entrada'?'+':'-'}{fmt(parseFloat(l.valor))}
                       </td>
                       <td className="px-3 py-2.5">
-                        <button className={btnDangerSmCls} onClick={()=>deletar('lancamentos',l.id).then(carregar)}>×</button>
+                        <div className="flex gap-1.5">
+                          {l.status==='pendente' && <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>}
+                          <button className={btnDangerSmCls} onClick={()=>deletar('lancamentos',l.id).then(carregar)}>×</button>
+                        </div>
                       </td>
                     </tr>
                   )})}
@@ -738,6 +746,7 @@ export default function Financeiro() {
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="flex gap-1.5">
+                            {l.status==='pendente' && <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>}
                             <button className={btnEditSmCls} onClick={()=>{
                               setLancEditando(l)
                               setFLanc({data:l.data||'',descricao:l.descricao||'',tipo:l.tipo||'saida',valor:l.valor||'',categoria:l.categoria||'',conta:l.conta||'',status:l.status||'pago',data_vencimento:l.data_vencimento||'',obra_id:l.obra_id||'',servico_id:l.servico_id||'',nf_numero:l.nf_numero||'',nf_url:l.nf_url||'',nf_arquivo:null})
@@ -946,7 +955,10 @@ export default function Financeiro() {
                     <div className="font-semibold text-on-surface">{l.descricao}</div>
                     <div className="text-[11px] text-error">Venceu em {l.data_vencimento||l.data} · {l.categoria||'—'}</div>
                   </div>
-                  <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
+                  <div className="flex items-center gap-3">
+                    <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>
+                    <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
+                  </div>
                 </div>
               ))}
             </div>
@@ -986,6 +998,7 @@ export default function Financeiro() {
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${atrasado ? 'bg-error/10 text-error border-error/20' : statusBadge(l.status==='pago')}`}>
                         {atrasado ? 'Vencido' : (l.status==='pago'?'Pago':'Pendente')}
                       </span>
+                      {l.status==='pendente' && <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>}
                       <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
                     </div>
                   </div>
@@ -1297,7 +1310,11 @@ function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, o
         <button className={fLanc.tipo==='entrada' ? 'bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold' : btnSecondaryCls} onClick={()=>setFLanc({...fLanc,tipo:'entrada'})}>💰 Entrada</button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
-        <div><label className={labelCls}>Data *</label><input className={inputCls} type="date" value={fLanc.data} onChange={(e:any)=>setFLanc({...fLanc,data:e.target.value})} /></div>
+        <div><label className={labelCls}>Data *</label><input className={inputCls} type="date" value={fLanc.data} onChange={(e:any)=>{
+          const novaData = e.target.value
+          const ehFutura = novaData > new Date().toISOString().slice(0,10)
+          setFLanc(ehFutura ? {...fLanc, data:novaData, status:'pendente', data_vencimento:novaData} : {...fLanc, data:novaData})
+        }} /></div>
         <div><label className={labelCls}>Valor (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={fLanc.valor} onChange={(e:any)=>setFLanc({...fLanc,valor:e.target.value})} /></div>
       </div>
       <div className="mb-3.5"><label className={labelCls}>Descrição *</label><input className={inputCls} placeholder="Ex: Pagamento fornecedor" value={fLanc.descricao} onChange={(e:any)=>setFLanc({...fLanc,descricao:e.target.value})} /></div>

@@ -510,7 +510,9 @@ export default function Financeiro() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lancObra.map(l=>(
+                  {lancObra.map(l=>{
+                    const atrasadoLinha = l.status==='pendente' && new Date(l.data_vencimento||l.data)<hoje
+                    return (
                     <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
                       <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(l.data)}</td>
                       <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}</td>
@@ -521,8 +523,8 @@ export default function Financeiro() {
                         {!l.nf_numero && !l.nf_url && <span className="text-on-surface-variant/50 text-[11px]">—</span>}
                       </td>
                       <td className="px-3 py-2.5">
-                        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusBadge(l.status==='pago')}`}>
-                          {l.status==='pago'?'Pago':'Pendente'}
+                        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${atrasadoLinha ? 'bg-error/10 text-error border-error/20' : statusBadge(l.status==='pago')}`}>
+                          {atrasadoLinha ? 'Vencido' : (l.status==='pago'?'Pago':'Pendente')}
                         </span>
                       </td>
                       <td className={`px-3 py-2.5 font-bold ${l.tipo==='entrada'?'text-primary-container':'text-error'}`}>
@@ -532,7 +534,7 @@ export default function Financeiro() {
                         <button className={btnDangerSmCls} onClick={()=>deletar('lancamentos',l.id).then(carregar)}>×</button>
                       </td>
                     </tr>
-                  ))}
+                  )})}
                   {gastObra.map(g=>(
                     <tr key={g.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
                       <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(g.data)}</td>
@@ -712,6 +714,7 @@ export default function Financeiro() {
                     <tr><td colSpan={8} className="text-center py-8 text-on-surface-variant">Nenhum lançamento em {mesNome}</td></tr>
                   ) : lancMes.map(l=>{
                     const obra = obras.find(o=>o.id===l.obra_id)
+                    const atrasadoLinha = l.status==='pendente' && new Date(l.data_vencimento||l.data)<hoje
                     return (
                       <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{dataBR(l.data)}</td>
@@ -726,8 +729,8 @@ export default function Financeiro() {
                           {!l.nf_numero && !l.nf_url && <span className="text-on-surface-variant/50 text-[11px]">—</span>}
                         </td>
                         <td className="px-3 py-2.5">
-                          <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusBadge(l.status==='pago')}`}>
-                            {l.status==='pago'?'Pago':'Pendente'}
+                          <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${atrasadoLinha ? 'bg-error/10 text-error border-error/20' : statusBadge(l.status==='pago')}`}>
+                            {atrasadoLinha ? 'Vencido' : (l.status==='pago'?'Pago':'Pendente')}
                           </span>
                         </td>
                         <td className={`px-3 py-2.5 font-bold whitespace-nowrap ${l.tipo==='entrada'?'text-primary-container':'text-error'}`}>
@@ -980,8 +983,8 @@ export default function Financeiro() {
                       <div className={`text-[11px] ${atrasado?'text-error':'text-on-surface-variant'}`}>{venc} · {l.categoria||'—'}</div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusBadge(l.status==='pago')}`}>
-                        {l.status==='pago'?'Pago':'Pendente'}
+                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${atrasado ? 'bg-error/10 text-error border-error/20' : statusBadge(l.status==='pago')}`}>
+                        {atrasado ? 'Vencido' : (l.status==='pago'?'Pago':'Pendente')}
                       </span>
                       <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
                     </div>

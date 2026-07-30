@@ -20,6 +20,15 @@ async function remover(tabela: string, id: string) {
   try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }) } catch {}
 }
 
+// Botão flutuante injetado em todo PDF gerado pelo app — sem ele o usuário fica preso na
+// tela do PDF sem como voltar, já que o app roda como PWA instalado (sem barra do navegador).
+function botaoVoltarApp(path: string) {
+  return `<div class="voltar-app" style="position:fixed;top:12px;left:12px;z-index:99999">
+    <a href="${path}" style="display:inline-flex;align-items:center;gap:6px;background:#1B3A5C;color:#fff;text-decoration:none;font-family:Arial,sans-serif;font-size:13px;font-weight:700;padding:10px 18px;border-radius:24px;box-shadow:0 2px 10px rgba(0,0,0,.3)">← Voltar ao App</a>
+  </div>
+  <style>@media print { .voltar-app { display:none !important } }</style>`
+}
+
 async function uploadFotoVisita(file: File): Promise<string | null> {
   const ext = file.name.split('.').pop()
   const nome = `visita_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
@@ -34,6 +43,21 @@ async function uploadFotoVisita(file: File): Promise<string | null> {
 
 const moeda = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const dataBR = (v: string) => v ? new Date(v + 'T00:00:00').toLocaleDateString('pt-BR') : '—'
+const pct = (a: number, b: number) => b > 0 ? Math.min((a / b) * 100, 100) : 0
+function obraAtrasada(obra: any) {
+  return !!(obra.data_previsao && new Date(obra.data_previsao) < new Date() && obra.status === 'em_execucao')
+}
+const GRUPO_CUSTO: Record<string, string> = {
+  'Material': 'Materiais & Insumos',
+  'Mão de obra': 'Mão de Obra Direta',
+  'Terceiros': 'Mão de Obra Direta',
+  'Pessoal': 'Mão de Obra Direta',
+  'Equipamento': 'Equipamentos & Logística',
+  'Aluguel': 'Equipamentos & Logística',
+}
+function grupoCusto(categoria: string) {
+  return GRUPO_CUSTO[categoria] || 'Custos Indiretos'
+}
 const STATUS_NOME: Record<string, string> = { captacao: 'Em Captação', em_execucao: 'Em Execução', pausada: 'Pausada', concluida: 'Concluída', cancelada: 'Cancelada' }
 const SERV_STATUS: Record<string, string> = { pendente: 'Pendente', em_execucao: 'Em Execução', concluido: 'Concluído', cancelado: 'Cancelado' }
 const ETAPA_STATUS: Record<string, string> = { pendente: 'Pendente', em_andamento: 'Em Andamento', concluida: 'Concluída', atrasada: 'Atrasada' }
@@ -146,6 +170,8 @@ export default function ObrasMobile() {
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
   const [mostrarProgramar, setMostrarProgramar] = useState(false)
   const [dataProgramar, setDataProgramar] = useState('')
+  const [mostrarRelatorioPdf, setMostrarRelatorioPdf] = useState(false)
+  const [observacoesPdf, setObservacoesPdf] = useState('')
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -421,6 +447,7 @@ export default function ObrasMobile() {
       h1,h2 { font-family:'Manrope',sans-serif; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
     </style></head><body>
+    ${botaoVoltarApp('/m/obras')}
     <div style="max-width:900px;margin:0 auto;padding:40px 36px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
         <div>
@@ -460,6 +487,376 @@ export default function ObrasMobile() {
     </div>
     <script>window.onload = () => { window.print() }</script>
     </body></html>`
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
+  // Mesmo padrao visual/logico de gerarPDFObra (desktop): resumo, curva S, Gantt, curva ABC e financeiro.
+  async function gerarPDFObra(obra: any, observacoesTexto: string) {
+    const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
+    const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const custos = custosObra(obra.id)
+    const receitas = receitasObra(obra.id)
+    const contrato = parseFloat(obra.valor_contrato || 0)
+    const margem = receitas - custos
+    const margemPrevistaPct = contrato > 0 ? ((contrato - custos) / contrato) * 100 : 0
+
+    const svsObra = servicos.filter(s => s.obra_id === obra.id)
+    const etapasObra = etapas.filter(e => e.obra_id === obra.id)
+    const medicoesObra = medicoes.filter(m => m.obra_id === obra.id)
+
+    const totalItens = svsObra.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
+    let progressoFisico = 0
+    if (totalItens > 0) {
+      const acumFisico = svsObra.reduce((acc, item) => {
+        const registros = medItens
+          .filter(mi => mi.servico_id === item.id)
+          .map(mi => ({ ...mi, medicao: medicoesObra.find(m => m.id === mi.medicao_id) }))
+          .filter((mi): mi is any => !!mi.medicao)
+          .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())
+        const ultimo = registros[0]
+        return acc + (ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0)
+      }, 0)
+      progressoFisico = Math.min((acumFisico / totalItens) * 100, 100)
+    } else {
+      progressoFisico = pct(custos, contrato)
+    }
+
+    const inicio = obra.data_inicio ? new Date(obra.data_inicio) : new Date()
+    const fim = obra.data_previsao ? new Date(obra.data_previsao) : new Date(inicio.getTime() + 180 * 86400000)
+    const hoje = new Date()
+
+    const planPontos = etapasObra
+      .filter(e => e.data_fim_prevista)
+      .map(e => ({ data: new Date(e.data_fim_prevista), item: svsObra.find(s => s.id === e.servico_id) }))
+      .filter((p): p is { data: Date; item: any } => !!p.item)
+      .sort((a, b) => a.data.getTime() - b.data.getTime())
+    let acumPlan = 0
+    const planSerie: { data: Date; pct: number }[] = [{ data: inicio, pct: 0 }]
+    planPontos.forEach(p => {
+      acumPlan += parseFloat(p.item.valor_previsto || 0)
+      planSerie.push({ data: p.data, pct: totalItens > 0 ? Math.min((acumPlan / totalItens) * 100, 100) : 0 })
+    })
+    if (planSerie.length === 1) planSerie.push({ data: fim, pct: 0 })
+
+    const datasMedicoes = Array.from(new Set(medicoesObra.map(m => m.data))).sort()
+    const realSerie: { data: Date; pct: number }[] = [{ data: inicio, pct: 0 }]
+    datasMedicoes.forEach(d => {
+      const dataD = new Date(d as string)
+      let acum = 0
+      svsObra.forEach(item => {
+        const registros = medItens
+          .filter(mi => mi.servico_id === item.id)
+          .map(mi => ({ ...mi, medicao: medicoesObra.find(m => m.id === mi.medicao_id) }))
+          .filter((mi): mi is any => !!mi.medicao && new Date(mi.medicao.data) <= dataD)
+          .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())
+        if (registros[0]) acum += registros[0].valor_base * registros[0].percentual_acumulado
+      })
+      realSerie.push({ data: dataD, pct: totalItens > 0 ? Math.min((acum / totalItens) * 100, 100) : 0 })
+    })
+
+    const totalMs = Math.max(fim.getTime() - inicio.getTime(), 1)
+    function serieParaPath(serie: { data: Date; pct: number }[]) {
+      return serie.map((p, i) => {
+        const x = Math.max(0, Math.min(800, ((p.data.getTime() - inicio.getTime()) / totalMs) * 800))
+        const y = 300 - (p.pct / 100) * 300
+        return (i === 0 ? 'M ' : 'L ') + x.toFixed(1) + ' ' + y.toFixed(1)
+      }).join(' ')
+    }
+    const planPath = serieParaPath(planSerie)
+    const realPath = serieParaPath(realSerie)
+    const hojeX = Math.max(0, Math.min(800, ((hoje.getTime() - inicio.getTime()) / totalMs) * 800))
+    const temCurva = etapasObra.some(e => e.data_fim_prevista) || medicoesObra.length > 0
+
+    const mesesEixo: string[] = []
+    for (let i = 0; i <= 6; i++) {
+      const d = new Date(inicio.getTime() + (totalMs * i) / 6)
+      mesesEixo.push(d.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '').toUpperCase())
+    }
+
+    const lancD = lancs.filter(l => l.obra_id === obra.id)
+    const gastD = gastos.filter(g => g.obra_id === obra.id)
+    const movimentos = [
+      ...lancD.map((l: any) => ({ data: l.data, descricao: l.descricao, categoria: l.categoria, valor: parseFloat(l.valor || 0), tipo: l.tipo, status: l.status })),
+      ...gastD.map((g: any) => ({ data: g.data, descricao: g.descricao, categoria: g.categoria, valor: parseFloat(g.valor || 0), tipo: 'saida', status: 'pago' })),
+    ].sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime()).slice(0, 12)
+
+    const custosPorGrupo: Record<string, number> = {}
+    ;[...lancD.filter((l: any) => l.tipo === 'saida'), ...gastD].forEach((m: any) => {
+      const g = grupoCusto(m.categoria || '')
+      custosPorGrupo[g] = (custosPorGrupo[g] || 0) + parseFloat(m.valor || 0)
+    })
+    const totalCustosGrupo = Object.values(custosPorGrupo).reduce((a, b) => a + b, 0) || 1
+    const gruposOrdem = ['Materiais & Insumos', 'Mão de Obra Direta', 'Equipamentos & Logística', 'Custos Indiretos']
+    const coresBucket: Record<string, string> = {
+      'Materiais & Insumos': '#6ee9e0',
+      'Mão de Obra Direta': '#cebdff',
+      'Equipamentos & Logística': '#ffcbac',
+      'Custos Indiretos': '#869391',
+    }
+
+    const roi = custos > 0 ? (margem / custos) * 100 : 0
+
+    // Curva ABC: serviços ordenados por valor previsto, classificados pelo peso acumulado
+    // no orçamento (A até 80%, B até 95%, C o restante) — ajuda a priorizar o controle.
+    const svsOrdenadosABC = svsObra.slice().sort((a, b) => parseFloat(b.valor_previsto || 0) - parseFloat(a.valor_previsto || 0))
+    const totalPrevistoABC = svsOrdenadosABC.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0) || 1
+    let acumABC = 0
+    const curvaAbcHtml = svsOrdenadosABC.map(s => {
+      const valor = parseFloat(s.valor_previsto || 0)
+      const pctInd = (valor / totalPrevistoABC) * 100
+      const acumAntes = acumABC
+      acumABC += pctInd
+      const classe = acumAntes < 80 ? 'A' : acumAntes < 95 ? 'B' : 'C'
+      const corClasse = classe === 'A' ? '#6ee9e0' : classe === 'B' ? '#ffcbac' : '#869391'
+      return `
+        <tr>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${s.nome}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right">${moeda(valor)}</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${pctInd.toFixed(1)}%</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${acumABC.toFixed(1)}%</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center"><span style="padding:2px 8px;border-radius:4px;background:${corClasse}22;color:${corClasse};font-weight:700">${classe}</span></td>
+        </tr>`
+    }).join('')
+
+    const ganttObraHtml = obra.data_inicio && obra.data_previsao
+      ? htmlGantt(inicio, fim, svsObra.map(s => {
+          const et = etapasObra.find(e => e.servico_id === s.id)
+          return { nome: s.nome, fornecedor: s.fornecedor, inicioPrevisto: et?.data_inicio_prevista, fimPrevisto: et?.data_fim_prevista, status: et?.status || 'pendente' }
+        }))
+      : '<div class="card" style="text-align:center;color:#869391;padding:30px 0">Informe as datas de início e fim da obra para gerar o Gantt.</div>'
+
+    const movimentosHtml = movimentos.map(m => `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:12px">${new Date(m.data).toLocaleDateString('pt-BR')}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${m.descricao || ''}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7;font-size:12px">${m.categoria || '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;color:${m.tipo === 'entrada' ? '#6ee9e0' : '#ffb4ab'}">${m.tipo === 'entrada' ? '+' : '-'}${moeda(m.valor)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">
+          <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:${m.status === 'pago' ? '#6ee9e01a' : '#ffcbac1a'};color:${m.status === 'pago' ? '#6ee9e0' : '#ffcbac'};text-transform:uppercase">${m.status === 'pago' ? 'Pago/Recebido' : 'Pendente'}</span>
+        </td>
+      </tr>`).join('')
+
+    const distribuicaoHtml = gruposOrdem.filter(g => custosPorGrupo[g] > 0).map(g => {
+      const percentual = (custosPorGrupo[g] / totalCustosGrupo) * 100
+      return `
+      <div style="margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span>${g}</span>
+          <span style="font-family:'JetBrains Mono',monospace;color:${coresBucket[g]}">${percentual.toFixed(0)}%</span>
+        </div>
+        <div style="height:8px;background:#30353d;border-radius:999px;overflow:hidden">
+          <div style="height:100%;width:${percentual}%;background:${coresBucket[g]}"></div>
+        </div>
+      </div>`
+    }).join('')
+
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>Relatório ${obra.codigo} — ${nomeEmpresa}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
+      h1,h2,h3 { font-family:'Manrope',sans-serif; }
+      .page { max-width:900px; margin:0 auto; padding:40px 36px; }
+      .card { background:#1b2027; border:1px solid #3d4948; border-radius:12px; padding:20px; }
+      @media print {
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        .page { break-after: page; }
+        .page:last-child { break-after: auto; }
+      }
+    </style></head><body>
+    ${botaoVoltarApp('/m/obras')}
+
+    <!-- PÁGINA 1 -->
+    <div class="page">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:44px;height:44px;background:#6ee9e0;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:900;color:#003734;font-size:20px">${nomeEmpresa.charAt(0)}</div>
+          <div>
+            <h1 style="font-size:20px;font-weight:800;color:#6ee9e0;text-transform:uppercase">${nomeEmpresa}</h1>
+            <p style="font-size:9px;color:#869391;text-transform:uppercase;letter-spacing:0.08em">Construction System</p>
+          </div>
+        </div>
+        <div style="text-align:right">
+          <h2 style="font-size:16px;font-weight:600">Relatório de Status de Projeto</h2>
+          <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+          <p style="font-size:10px;color:#6ee9e0;font-weight:700">Ref: ${obra.codigo}</p>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;margin-bottom:20px">
+        <div class="card">
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Resumo do Projeto</span>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
+            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Projeto</span><span style="font-size:14px;font-weight:600">${obra.nome}</span></div>
+            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cliente</span><span style="font-size:14px;font-weight:600">${obra.cliente}</span></div>
+            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Localização</span><span style="font-size:14px;font-weight:600">${obra.endereco || '—'}</span></div>
+            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cronograma</span><span style="font-size:14px;font-weight:600">${obra.data_inicio ? new Date(obra.data_inicio).toLocaleDateString('pt-BR') : '—'} — ${obra.data_previsao ? new Date(obra.data_previsao).toLocaleDateString('pt-BR') : '—'}</span></div>
+          </div>
+        </div>
+        <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">
+          <span style="font-size:10px;color:#869391;text-transform:uppercase;margin-bottom:8px">Progresso Atual</span>
+          <svg width="88" height="88" viewBox="0 0 96 96" style="transform:rotate(-90deg)">
+            <circle cx="48" cy="48" r="40" fill="transparent" stroke="#30353d" stroke-width="8" />
+            <circle cx="48" cy="48" r="40" fill="transparent" stroke="#6ee9e0" stroke-width="8" stroke-dasharray="251.2" stroke-dashoffset="${(251.2 * (1 - progressoFisico / 100)).toFixed(1)}" stroke-linecap="round" />
+          </svg>
+          <div style="margin-top:-56px;font-size:20px;font-weight:700">${progressoFisico.toFixed(0)}%</div>
+          <div style="margin-top:36px;font-size:11px;color:#6ee9e0">${obraAtrasada(obra) ? 'Status: Atrasada' : 'Status: Conforme Cronograma'}</div>
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+        <div class="card">
+          <span style="font-size:9px;color:#869391;text-transform:uppercase">Valor de Contrato</span>
+          <p style="font-size:18px;font-weight:700;margin-top:4px">${moeda(contrato)}</p>
+        </div>
+        <div class="card">
+          <span style="font-size:9px;color:#869391;text-transform:uppercase">Custo Total Atual</span>
+          <p style="font-size:18px;font-weight:700;margin-top:4px;color:#ffcbac">${moeda(custos)}</p>
+        </div>
+        <div class="card">
+          <span style="font-size:9px;color:#869391;text-transform:uppercase">Margem Prevista</span>
+          <p style="font-size:18px;font-weight:700;margin-top:4px;color:${margemPrevistaPct >= 0 ? '#6ee9e0' : '#ffb4ab'}">${margemPrevistaPct.toFixed(1)}%</p>
+        </div>
+      </div>
+
+      ${temCurva ? `
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Curva S - Evolução Físico-Financeira</span>
+          <div style="display:flex;gap:12px;font-size:9px;color:#869391">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#6ee9e0;margin-right:4px"></span>PLANEJADO</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#ffcbac;margin-right:4px"></span>REALIZADO</span>
+          </div>
+        </div>
+        <svg width="100%" height="220" viewBox="0 0 800 300" style="background:#171c23;border-radius:8px">
+          <path d="${planPath}" fill="none" stroke="#6ee9e0" stroke-width="3" stroke-dasharray="8 4" opacity="0.7" />
+          <path d="${realPath}" fill="none" stroke="#ffcbac" stroke-width="4" />
+          <line x1="${hojeX.toFixed(1)}" y1="0" x2="${hojeX.toFixed(1)}" y2="300" stroke="#869391" stroke-width="1" stroke-dasharray="4 4" />
+          <text x="${(hojeX + 5).toFixed(1)}" y="16" fill="#869391" font-size="10" font-weight="700">HOJE</text>
+        </svg>
+        <div style="display:flex;justify-content:space-between;margin-top:6px">
+          ${mesesEixo.map(m => `<span style="font-size:9px;color:#869391">${m}</span>`).join('')}
+        </div>
+      </div>` : `<div class="card" style="text-align:center;color:#869391;padding:30px 0">Sem cronograma ou medições registradas para montar a Curva S.</div>`}
+
+      <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
+        <span>Documento Confidencial - ${nomeEmpresa} Construction System</span>
+        <span>Página 1 de 3</span>
+      </div>
+    </div>
+
+    <!-- PÁGINA 2 -->
+    <div class="page">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #3d4948">
+        <span style="font-size:14px;font-weight:800;color:#6ee9e0">${nomeEmpresa}</span>
+        <span style="font-size:10px;color:#869391;text-transform:uppercase">Cronograma e Curva ABC</span>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Cronograma da Obra</span>
+        <div style="margin-top:8px">${ganttObraHtml}</div>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Curva ABC — Peso dos Serviços no Orçamento</span>
+        <table style="width:100%;border-collapse:collapse;margin-top:8px">
+          <thead>
+            <tr style="background:#252a32">
+              <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Serviço</th>
+              <th style="padding:8px 10px;text-align:right;font-size:9px;color:#869391;text-transform:uppercase">Previsto</th>
+              <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">% Individual</th>
+              <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">% Acumulado</th>
+              <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">Classe</th>
+            </tr>
+          </thead>
+          <tbody>${curvaAbcHtml || '<tr><td colspan="5" style="padding:16px;text-align:center;color:#869391">Nenhum serviço cadastrado</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
+        <span>Documento Confidencial - ${nomeEmpresa} Construction System</span>
+        <span>Página 2 de 3</span>
+      </div>
+    </div>
+
+    <!-- PÁGINA 3 -->
+    <div class="page">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #3d4948">
+        <span style="font-size:14px;font-weight:800;color:#6ee9e0">${nomeEmpresa}</span>
+        <span style="font-size:10px;color:#869391;text-transform:uppercase">Análise Financeira Detalhada</span>
+      </div>
+
+      <div style="margin-bottom:20px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Movimentações Financeiras</span>
+        <table style="width:100%;border-collapse:collapse;margin-top:8px">
+          <thead>
+            <tr style="background:#252a32">
+              <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Data</th>
+              <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Descrição</th>
+              <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Categoria</th>
+              <th style="padding:8px 10px;text-align:right;font-size:9px;color:#869391;text-transform:uppercase">Valor</th>
+              <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">Status</th>
+            </tr>
+          </thead>
+          <tbody>${movimentosHtml || '<tr><td colspan="5" style="padding:16px;text-align:center;color:#869391">Nenhuma movimentação registrada</td></tr>'}</tbody>
+        </table>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:16px;margin-bottom:20px">
+        <div>
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Distribuição de Custos</span>
+          <div class="card" style="margin-top:8px">${distribuicaoHtml || '<p style="color:#869391;text-align:center">Sem custos lançados ainda</p>'}</div>
+        </div>
+        <div>
+          <span style="font-size:10px;color:#869391;text-transform:uppercase">Resumo da Margem</span>
+          <div class="card" style="margin-top:8px">
+            <div style="display:flex;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid #3d4948;margin-bottom:8px">
+              <span style="font-size:12px;color:#bcc9c7">Receita Bruta</span><span style="font-family:'JetBrains Mono',monospace">${moeda(receitas)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;padding-bottom:8px;border-bottom:1px solid #3d4948;margin-bottom:8px">
+              <span style="font-size:12px;color:#bcc9c7">Despesas Totais</span><span style="font-family:'JetBrains Mono',monospace;color:#ffb4ab">${moeda(custos)}</span>
+            </div>
+            <div style="display:flex;justify-content:space-between">
+              <span style="font-size:12px;color:#bcc9c7">Lucro Operacional</span><span style="font-family:'JetBrains Mono',monospace;font-weight:700;color:${margem >= 0 ? '#6ee9e0' : '#ffb4ab'}">${moeda(margem)}</span>
+            </div>
+            <div style="text-align:center;margin-top:16px;padding-top:12px;border-top:1px solid #3d4948">
+              <p style="font-size:9px;color:#869391;text-transform:uppercase">ROI sobre Custos</p>
+              <p style="font-size:20px;font-weight:800;color:#6ee9e0">${roi.toFixed(1)}%</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      ${observacoesTexto ? `
+      <div style="margin-bottom:20px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Observações Técnicas e Riscos</span>
+        <div class="card" style="margin-top:8px;white-space:pre-wrap;color:#bcc9c7;font-size:12px">${observacoesTexto}</div>
+      </div>` : ''}
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:40px;padding-top:16px">
+        <div style="text-align:center">
+          <div style="width:100%;height:1px;background:#3d4948;margin-bottom:8px"></div>
+          <p style="font-size:11px;font-weight:700;text-transform:uppercase">${obra.responsavel || 'Responsável Técnico'}</p>
+          <p style="font-size:9px;color:#869391;text-transform:uppercase">Responsável Técnico</p>
+        </div>
+        <div style="text-align:center">
+          <div style="width:100%;height:1px;background:#3d4948;margin-bottom:8px"></div>
+          <p style="font-size:11px;font-weight:700;text-transform:uppercase">${obra.cliente}</p>
+          <p style="font-size:9px;color:#869391;text-transform:uppercase">Cliente / Contratante</p>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
+        <span>${nomeEmpresa} Construction Management System</span>
+        <span>Página 3 de 3</span>
+      </div>
+    </div>
+
+    <script>window.onload = () => { window.print() }</script>
+    </body></html>`
+
     const win = window.open('', '_blank')
     if (win) { win.document.write(html); win.document.close() }
   }
@@ -762,6 +1159,24 @@ export default function ObrasMobile() {
                   <span className="font-semibold text-on-surface text-right">{v}</span>
                 </div>
               ))}
+              <button className={btnSecondaryCls} onClick={() => { setObservacoesPdf(''); setMostrarRelatorioPdf(true) }}>🖨️ Gerar Relatório PDF</button>
+            </div>
+          )}
+
+          {mostrarRelatorioPdf && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setMostrarRelatorioPdf(false)}>
+              <div className="bg-surface-container border border-outline-variant rounded-2xl p-6 w-full max-w-[440px]">
+                <div className="text-base font-bold text-on-surface mb-1.5">🖨️ Gerar Relatório de Status</div>
+                <div className="text-body-sm text-on-surface-variant mb-4">Inclui resumo financeiro, curva S e distribuição de custos com os dados atuais da obra.</div>
+                <div className="mb-5">
+                  <label className={labelCls}>Observações Técnicas e Riscos (opcional)</label>
+                  <textarea className={inputCls + ' min-h-[100px] resize-y'} placeholder="Ex: Atraso na entrega de material, risco identificado, ponto de atenção..." value={observacoesPdf} onChange={e => setObservacoesPdf(e.target.value)} />
+                </div>
+                <div className="flex gap-2">
+                  <button className={btnSecondaryCls + ' flex-1'} onClick={() => setMostrarRelatorioPdf(false)}>Cancelar</button>
+                  <button className={btnPrimaryCls + ' flex-1'} onClick={() => { setMostrarRelatorioPdf(false); gerarPDFObra(detalhe, observacoesPdf) }}>Gerar PDF</button>
+                </div>
+              </div>
             </div>
           )}
 

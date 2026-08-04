@@ -35,7 +35,7 @@ async function uploadNF(file: File, lancamentoDesc: string): Promise<string | nu
 
 const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const CAT_IN = ['Medição de obra', 'Adiantamento', 'Sinal de contrato', 'Parcela de contrato', 'Outros']
-const CAT_OUT = ['Medição de obra', 'Material', 'Mão de obra', 'Terceiros', 'Aluguel', 'Equipamento', 'Imposto', 'Pessoal', 'Marketing', 'Administrativo', 'Investimento (aporte)', 'Resgate de investimento', 'Outros']
+const CAT_OUT = ['Medição de obra', 'Material', 'Mão de obra', 'Terceiros', 'Aluguel', 'Equipamento', 'Imposto', 'Pessoal', 'Marketing', 'Administrativo', 'Reembolso', 'Investimento (aporte)', 'Resgate de investimento', 'Outros']
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
 const labelCls = 'text-[11px] text-on-surface-variant font-semibold uppercase tracking-wide block mb-1.5'
@@ -54,6 +54,8 @@ const WZ_VAZIO = {
   dias_prazo: '30',
   cartao_id: '', parcelas: '1',
   data_pagamento_combinada: '',
+  favorecido: '',
+  recorrente: false,
 }
 
 export default function FinanceiroMobile() {
@@ -174,6 +176,8 @@ export default function FinanceiroMobile() {
       if (obraId) dados.obra_id = obraId
       if (servicoId) dados.servico_id = servicoId
       if (nf_url) dados.nf_url = nf_url
+      if (wizFinal.favorecido) dados.favorecido = wizFinal.favorecido
+      if (wizFinal.recorrente) { dados.recorrente = true; dados.recorrente_grupo = crypto.randomUUID() }
       await inserir('lancamentos', dados)
       await sincronizarInvestimento(dados)
     }
@@ -318,6 +322,16 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
               </div>
               <div><label className={labelCls}>Número da NF</label><input className={inputCls} placeholder="Ex: 000847" value={wiz.nf_numero} onChange={e => setWiz({ ...wiz, nf_numero: e.target.value })} /></div>
             </div>
+            {wiz.categoria === 'Reembolso' && (
+              <div className="mb-3.5">
+                <label className={labelCls + ' text-primary'}>👤 Reembolsar para</label>
+                <input className={inputCls + ' border-primary/40'} placeholder="Nome do funcionário ou terceiro que adiantou a compra" value={wiz.favorecido} onChange={e => setWiz({ ...wiz, favorecido: e.target.value })} />
+              </div>
+            )}
+            <label className="flex items-center gap-2 mb-3.5 cursor-pointer select-none">
+              <input type="checkbox" checked={wiz.recorrente} onChange={e => setWiz({ ...wiz, recorrente: e.target.checked })} className="w-4 h-4 accent-primary cursor-pointer" />
+              <span className="text-sm text-on-surface">🔁 Custo fixo (repete automaticamente todo mês)</span>
+            </label>
             <Botoes onProximo={() => {
               if (!wiz.descricao || !wiz.valor) return alert('Preencha o valor e a descrição')
               if (wiz.destino === 'obra' && wiz.obra_id) setWiz({ ...wiz, step: 's_pagamento' })

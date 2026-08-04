@@ -75,9 +75,9 @@ function exportarExcel(lancamentos: any[], obras: any[], mes: string) {
 }
 
 const CAT_IN  = ['Medição de obra','Adiantamento','Sinal de contrato','Parcela de contrato','Outros']
-const CAT_OUT = ['Medição de obra','Material','Mão de obra','Terceiros','Aluguel','Equipamento','Imposto','Pessoal','Marketing','Administrativo','Investimento (aporte)','Resgate de investimento','Outros']
+const CAT_OUT = ['Medição de obra','Material','Mão de obra','Terceiros','Aluguel','Equipamento','Imposto','Pessoal','Marketing','Administrativo','Reembolso','Investimento (aporte)','Resgate de investimento','Outros']
 
-const LZ = { data: new Date().toISOString().slice(0,10), descricao: '', tipo: 'saida', valor: '', categoria: '', conta: '', status: 'pago', data_vencimento: '', obra_id: '', servico_id: '', nf_numero: '', nf_url: '', nf_arquivo: null as File | null }
+const LZ = { data: new Date().toISOString().slice(0,10), descricao: '', tipo: 'saida', valor: '', categoria: '', conta: '', status: 'pago', data_vencimento: '', obra_id: '', servico_id: '', nf_numero: '', nf_url: '', nf_arquivo: null as File | null, recorrente: false, favorecido: '' }
 const CZ = { nome: '', banco: '', tipo: 'corrente', saldo_inicial: '' }
 const CAZ = { nome: '', bandeira: '', limite: '', dia_fechamento: '', dia_vencimento: '' }
 const GZ = { data: new Date().toISOString().slice(0,10), descricao: '', valor: '', categoria: '', cartao_id: '', parcelas: '1', obra_id: '', servico_id: '', nf_numero: '', nf_arquivo: null as File | null }
@@ -96,6 +96,8 @@ const WZ_VAZIO = {
   dias_prazo: '30',
   cartao_id: '', parcelas: '1',
   data_pagamento_combinada: '',
+  favorecido: '',
+  recorrente: false,
 }
 
 // classes reutilizáveis
@@ -178,8 +180,50 @@ export default function Financeiro() {
       get('obra_servicos','?order=created_at'),
       get('investimentos','?order=data.desc&limit=200'),
     ])
-    setContas(c); setLancamentos(l); setCartoes(ca); setGastosCartao(g); setObras(o); setServicosObra(sv); setInvestimentos(inv)
+    setContas(c); setCartoes(ca); setGastosCartao(g); setObras(o); setServicosObra(sv); setInvestimentos(inv)
+    const criouRecorrente = await garantirRecorrentes(l)
+    setLancamentos(criouRecorrente ? await get('lancamentos','?order=data.desc&limit=300') : l)
     setLoading(false)
+  }
+
+  // Custo fixo (energia, água, internet...): garante que o grupo recorrente sempre tenha
+  // uma instância no mês atual e no próximo, gerada sob demanda (sem cron) toda vez que a
+  // tela carrega. Idempotente — só cria o que ainda não existe para aquele mês.
+  async function garantirRecorrentes(lancs: any[]): Promise<boolean> {
+    const grupos = new Map<string, any[]>()
+    lancs.forEach((l: any) => {
+      if (l.recorrente && l.recorrente_grupo) {
+        if (!grupos.has(l.recorrente_grupo)) grupos.set(l.recorrente_grupo, [])
+        grupos.get(l.recorrente_grupo)!.push(l)
+      }
+    })
+    const hoje = new Date()
+    const mesAtual = hoje.toISOString().slice(0, 7)
+    const proxMesData = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
+    const proxMes = proxMesData.toISOString().slice(0, 7)
+    let criouAlgum = false
+    for (const itens of grupos.values()) {
+      const maisRecente = itens.slice().sort((a, b) => (a.data < b.data ? 1 : -1))[0]
+      const mesesExistentes = new Set(itens.map((i: any) => i.data.slice(0, 7)))
+      for (const mesAlvo of [mesAtual, proxMes]) {
+        if (mesesExistentes.has(mesAlvo)) continue
+        const [ano, mes] = mesAlvo.split('-').map(Number)
+        const diaOriginal = parseInt(maisRecente.data.slice(8, 10), 10)
+        const ultimoDiaMes = new Date(ano, mes, 0).getDate()
+        const novaData = `${mesAlvo}-${String(Math.min(diaOriginal, ultimoDiaMes)).padStart(2, '0')}`
+        const nova: any = {
+          data: novaData, descricao: maisRecente.descricao, tipo: maisRecente.tipo,
+          valor: maisRecente.valor, categoria: maisRecente.categoria, conta: maisRecente.conta,
+          status: 'pendente', data_vencimento: novaData,
+          recorrente: true, recorrente_grupo: maisRecente.recorrente_grupo,
+        }
+        if (maisRecente.obra_id) nova.obra_id = maisRecente.obra_id
+        if (maisRecente.servico_id) nova.servico_id = maisRecente.servico_id
+        await inserir('lancamentos', nova)
+        criouAlgum = true
+      }
+    }
+    return criouAlgum
   }
 
   async function salvarLanc() {
@@ -195,9 +239,13 @@ export default function Financeiro() {
     if (!dados.servico_id) delete dados.servico_id
     if (!dados.data_vencimento) delete dados.data_vencimento
     if (!dados.nf_url) delete dados.nf_url
+    if (!dados.favorecido) delete dados.favorecido
+    if (!dados.recorrente) { delete dados.recorrente; delete dados.recorrente_grupo }
     if (lancEditando) {
+      delete dados.recorrente_grupo
       await atualizar('lancamentos', lancEditando.id, dados)
     } else {
+      if (dados.recorrente) dados.recorrente_grupo = crypto.randomUUID()
       await inserir('lancamentos', dados)
       await sincronizarInvestimento(dados)
     }
@@ -339,6 +387,8 @@ export default function Financeiro() {
       if (obraId) dados.obra_id = obraId
       if (servicoId) dados.servico_id = servicoId
       if (nf_url) dados.nf_url = nf_url
+      if (wizFinal.favorecido) dados.favorecido = wizFinal.favorecido
+      if (wizFinal.recorrente) { dados.recorrente = true; dados.recorrente_grupo = crypto.randomUUID() }
       await inserir('lancamentos', dados)
       await sincronizarInvestimento(dados)
     }
@@ -420,6 +470,8 @@ export default function Financeiro() {
     return i.tipo === 'aporte' ? a + v : a - v
   }, 0)
   const aReceber = lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+  const custosFixosMes = lancamentos.filter(l=>l.recorrente && l.tipo==='saida' && (l.data||'').slice(0,7)===filtroMes)
+  const totalCustosFixos = custosFixosMes.reduce((a,l)=>a+parseFloat(l.valor||0),0)
 
   const hoje = new Date(); hoje.setHours(0,0,0,0)
   const em7dias = new Date(); em7dias.setDate(hoje.getDate()+7)
@@ -522,7 +574,7 @@ export default function Financeiro() {
                     return (
                     <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
                       <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(l.data)}</td>
-                      <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}</td>
+                      <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
                       <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria||'—'}</td>
                       <td className="px-3 py-2.5">
                         {l.nf_numero && <span className="text-[11px] text-on-surface-variant">#{l.nf_numero} </span>}
@@ -682,17 +734,42 @@ export default function Financeiro() {
             )}
           </section>
 
-          {aPagar > 0 && (
-            <div className="bg-surface-container border border-error/30 rounded-xl p-5 mb-4">
-              <div className="text-sm font-bold text-on-surface mb-3">⚠️ A Pagar — {fmt(aPagar)}</div>
-              {lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').map(l=>(
+          {totalCustosFixos > 0 && (
+            <div className="bg-surface-container border border-tertiary/30 rounded-xl p-5 mb-4">
+              <div className="text-sm font-bold text-on-surface mb-3">🔁 Custos Fixos — {mesNome} — {fmt(totalCustosFixos)}</div>
+              {custosFixosMes.map(l=>(
                 <div key={l.id} className={rowCls}>
-                  <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">Venc: {l.data_vencimento||l.data}</div></div>
-                  <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
+                  <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">{l.categoria||'—'} · {l.status==='pago'?'Pago':'Vence '+(l.data_vencimento||l.data)}</div></div>
+                  <div className="text-tertiary font-bold">{fmt(parseFloat(l.valor))}</div>
                 </div>
               ))}
             </div>
           )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+            {aPagar > 0 && (
+              <div className="bg-surface-container border border-error/30 rounded-xl p-5">
+                <div className="text-sm font-bold text-on-surface mb-3">⚠️ A Pagar — {fmt(aPagar)}</div>
+                {lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').map(l=>(
+                  <div key={l.id} className={rowCls}>
+                    <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">Venc: {l.data_vencimento||l.data}</div></div>
+                    <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {aReceber > 0 && (
+              <div className="bg-surface-container border border-primary-container/30 rounded-xl p-5">
+                <div className="text-sm font-bold text-on-surface mb-3">💰 A Receber — {fmt(aReceber)}</div>
+                {lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').map(l=>(
+                  <div key={l.id} className={rowCls}>
+                    <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">Venc: {l.data_vencimento||l.data}</div></div>
+                    <div className="text-primary-container font-bold">{fmt(parseFloat(l.valor))}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
 
@@ -728,7 +805,7 @@ export default function Financeiro() {
                     return (
                       <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{dataBR(l.data)}</td>
-                        <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}</td>
+                        <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria||'—'}</td>
                         <td className="px-3 py-2.5">
                           {obra ? <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-primary/10 text-primary border-primary/20">{obra.codigo}</span> : <span className="text-on-surface-variant/50 text-xs">—</span>}
@@ -751,7 +828,7 @@ export default function Financeiro() {
                             {l.status==='pendente' && <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>}
                             <button className={btnEditSmCls} onClick={()=>{
                               setLancEditando(l)
-                              setFLanc({data:l.data||'',descricao:l.descricao||'',tipo:l.tipo||'saida',valor:l.valor||'',categoria:l.categoria||'',conta:l.conta||'',status:l.status||'pago',data_vencimento:l.data_vencimento||'',obra_id:l.obra_id||'',servico_id:l.servico_id||'',nf_numero:l.nf_numero||'',nf_url:l.nf_url||'',nf_arquivo:null})
+                              setFLanc({data:l.data||'',descricao:l.descricao||'',tipo:l.tipo||'saida',valor:l.valor||'',categoria:l.categoria||'',conta:l.conta||'',status:l.status||'pago',data_vencimento:l.data_vencimento||'',obra_id:l.obra_id||'',servico_id:l.servico_id||'',nf_numero:l.nf_numero||'',nf_url:l.nf_url||'',nf_arquivo:null,recorrente:l.recorrente||false,favorecido:l.favorecido||''})
                               setModal('lancamento')
                             }}>✏️</button>
                             <button className={btnDangerSmCls} onClick={()=>deletar('lancamentos',l.id).then(carregar)}>×</button>
@@ -1357,7 +1434,17 @@ function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, o
             <option value="pendente">Pendente (futuro)</option>
           </select>
         </div>
+        {fLanc.categoria === 'Reembolso' && (
+          <div className="sm:col-span-2">
+            <label className={labelCls + ' text-primary'}>👤 Reembolsar para</label>
+            <input className={inputCls + ' border-primary/40'} placeholder="Nome do funcionário ou terceiro que adiantou a compra" value={fLanc.favorecido} onChange={(e:any)=>setFLanc({...fLanc,favorecido:e.target.value})} />
+          </div>
+        )}
       </div>
+      <label className="flex items-center gap-2 mb-3.5 cursor-pointer select-none">
+        <input type="checkbox" checked={fLanc.recorrente} onChange={(e:any)=>setFLanc({...fLanc,recorrente:e.target.checked})} className="w-4 h-4 accent-primary cursor-pointer" />
+        <span className="text-sm text-on-surface">🔁 Custo fixo (repete automaticamente todo mês — ex: energia, água, internet)</span>
+      </label>
       {fLanc.status==='pendente' && (
         <div className="mb-3.5">
           <label className={labelCls}>📅 Data de Vencimento</label>
@@ -1444,6 +1531,16 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
               </div>
               <div><label className={labelCls}>Número da NF</label><input className={inputCls} placeholder="Ex: 000847" value={wiz.nf_numero} onChange={e => setWiz({ ...wiz, nf_numero: e.target.value })} /></div>
             </div>
+            {wiz.categoria === 'Reembolso' && (
+              <div className="mb-3.5">
+                <label className={labelCls + ' text-primary'}>👤 Reembolsar para</label>
+                <input className={inputCls + ' border-primary/40'} placeholder="Nome do funcionário ou terceiro que adiantou a compra" value={wiz.favorecido} onChange={e => setWiz({ ...wiz, favorecido: e.target.value })} />
+              </div>
+            )}
+            <label className="flex items-center gap-2 mb-3.5 cursor-pointer select-none">
+              <input type="checkbox" checked={wiz.recorrente} onChange={e => setWiz({ ...wiz, recorrente: e.target.checked })} className="w-4 h-4 accent-primary cursor-pointer" />
+              <span className="text-sm text-on-surface">🔁 Custo fixo (repete automaticamente todo mês — ex: energia, água, internet)</span>
+            </label>
             <Botoes onProximo={() => { if (!wiz.descricao || !wiz.valor) return alert('Preencha o valor e a descrição'); setWiz({ ...wiz, step: 's_destino' }) }} />
           </>
         )}

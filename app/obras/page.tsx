@@ -102,29 +102,33 @@ async function remover(tabela: string, id: string) {
 }
 
 async function uploadFotoVisita(file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop()
-  const nome = `visita_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
-  const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/relatorio-visita-fotos/${nome}`, {
-    method: 'POST',
-    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
-    body: file,
-  })
-  if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/relatorio-visita-fotos/${nome}`
-  return null
+  try {
+    const ext = file.name.split('.').pop()
+    const nome = `visita_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
+    const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/relatorio-visita-fotos/${nome}`, {
+      method: 'POST',
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
+      body: file,
+    })
+    if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/relatorio-visita-fotos/${nome}`
+    return null
+  } catch { return null }
 }
 
 const CLIMA_OPCOES = [{ v: 'ensolarado', l: '☀️ Ensolarado' }, { v: 'nublado', l: '☁️ Nublado' }, { v: 'chuva', l: '🌧️ Chuva' }, { v: 'sem_expediente', l: '🚫 Sem expediente' }]
 const FRV_VAZIO = { data: new Date().toISOString().slice(0, 10), clima: '', descricao: '', pendencias: '', equipe_presente: [] as string[], nomeEquipeAtual: '' }
 
 async function uploadArquivoFuncionario(file: File): Promise<string | null> {
-  const nome = `arq_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-  const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/obra-funcionarios-arquivos/${nome}`, {
-    method: 'POST',
-    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type || 'application/octet-stream' },
-    body: file,
-  })
-  if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/obra-funcionarios-arquivos/${nome}`
-  return null
+  try {
+    const nome = `arq_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/obra-funcionarios-arquivos/${nome}`, {
+      method: 'POST',
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    })
+    if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/obra-funcionarios-arquivos/${nome}`
+    return null
+  } catch { return null }
 }
 const FFUNC_VAZIO = { nome: '', cpf: '', rg: '', empresa: '', telefone: '' }
 
@@ -209,10 +213,17 @@ function grupoCusto(categoria: string) {
   return GRUPO_CUSTO[categoria] || 'Custos Indiretos'
 }
 
+// Usa o maior número já usado (não a contagem) — se alguma obra do ano foi excluída,
+// contar de novo geraria um código repetido e o insert seria rejeitado (409).
 function gerarCodigo(obras: any[]) {
   const ano = new Date().getFullYear()
-  const qtd = obras.filter(o => o.codigo?.startsWith('OBR-' + ano)).length
-  return 'OBR-' + ano + '-' + String(qtd + 1).padStart(3, '0')
+  const prefixo = 'OBR-' + ano + '-'
+  const maior = obras.reduce((m, o) => {
+    if (!o.codigo?.startsWith(prefixo)) return m
+    const n = parseInt(o.codigo.slice(prefixo.length), 10)
+    return Number.isFinite(n) && n > m ? n : m
+  }, 0)
+  return prefixo + String(maior + 1).padStart(3, '0')
 }
 
 function corPct(p: number) {
@@ -442,20 +453,31 @@ export default function Obras() {
   async function salvarRelatorioVisita() {
     if (!detalhe) return
     setEnviandoRv(true)
-    const fotos: { url: string; descricao: string }[] = []
-    for (const f of fotosRv) {
-      const url = f.url || (f.file ? await uploadFotoVisita(f.file) : null)
-      if (url) fotos.push({ url, descricao: f.descricao || '' })
+    try {
+      const fotos: { url: string; descricao: string }[] = []
+      let falhas = 0
+      for (const f of fotosRv) {
+        const url = f.url || (f.file ? await uploadFotoVisita(f.file) : null)
+        if (url) fotos.push({ url, descricao: f.descricao || '' })
+        else if (f.file) falhas++
+      }
+      const dados = {
+        obra_id: detalhe.id, data: fRv.data, clima: fRv.clima || null, descricao: fRv.descricao || null,
+        pendencias: fRv.pendencias || null, equipe_presente: fRv.equipe_presente, fotos,
+      }
+      const ok = rvEditando
+        ? await editar('obra_relatorios_visita', rvEditando.id, dados)
+        : !!(await criar('obra_relatorios_visita', dados))
+      if (!ok) { alert('Não foi possível salvar o relatório. Verifique a conexão e tente novamente.'); return }
+      if (falhas > 0) alert(`Relatório salvo, mas ${falhas} foto(s) não foram enviadas (conexão instável). Edite o relatório para reenviá-las.`)
+      setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null)
+      setJanela(null)
+      await carregar()
+    } catch {
+      alert('Não foi possível salvar o relatório. Verifique a conexão e tente novamente.')
+    } finally {
+      setEnviandoRv(false)
     }
-    const dados = {
-      obra_id: detalhe.id, data: fRv.data, clima: fRv.clima || null, descricao: fRv.descricao || null,
-      pendencias: fRv.pendencias || null, equipe_presente: fRv.equipe_presente, fotos,
-    }
-    if (rvEditando) { await editar('obra_relatorios_visita', rvEditando.id, dados) }
-    else { await criar('obra_relatorios_visita', dados) }
-    setEnviandoRv(false); setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null)
-    setJanela(null)
-    await carregar()
   }
 
   function atribuicoesDaObra(obraId: string) {

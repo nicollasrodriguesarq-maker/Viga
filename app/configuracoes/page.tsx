@@ -60,15 +60,17 @@ async function obterTokenValido(): Promise<string> {
 }
 
 async function uploadLogo(file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop()
-  const nome = `logo_${Date.now()}.${ext}`
-  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/empresa-logo/${nome}`, {
-    method: 'POST',
-    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': file.type },
-    body: file,
-  })
-  if (r.ok) return `${SUPABASE_URL}/storage/v1/object/public/empresa-logo/${nome}`
-  return null
+  try {
+    const ext = file.name.split('.').pop()
+    const nome = `logo_${Date.now()}.${ext}`
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/empresa-logo/${nome}`, {
+      method: 'POST',
+      headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, 'Content-Type': file.type },
+      body: file,
+    })
+    if (r.ok) return `${SUPABASE_URL}/storage/v1/object/public/empresa-logo/${nome}`
+    return null
+  } catch { return null }
 }
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'

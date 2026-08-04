@@ -20,15 +20,17 @@ async function atualizar(tabela: string, id: string, dados: object) {
 }
 
 async function uploadNF(file: File, lancamentoDesc: string): Promise<string | null> {
-  const ext = file.name.split('.').pop()
-  const nome = `nf_${Date.now()}_${lancamentoDesc.replace(/\s+/g, '_').slice(0, 20)}.${ext}`
-  const r = await fetch(`${SUPABASE_URL}/storage/v1/object/notas-fiscais/${nome}`, {
-    method: 'POST',
-    headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': file.type },
-    body: file,
-  })
-  if (r.ok) return `${SUPABASE_URL}/storage/v1/object/public/notas-fiscais/${nome}`
-  return null
+  try {
+    const ext = file.name.split('.').pop()
+    const nome = `nf_${Date.now()}_${lancamentoDesc.replace(/\s+/g, '_').slice(0, 20)}.${ext}`
+    const r = await fetch(`${SUPABASE_URL}/storage/v1/object/notas-fiscais/${nome}`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': file.type },
+      body: file,
+    })
+    if (r.ok) return `${SUPABASE_URL}/storage/v1/object/public/notas-fiscais/${nome}`
+    return null
+  } catch { return null }
 }
 
 const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })

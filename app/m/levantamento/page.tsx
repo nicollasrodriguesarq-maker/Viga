@@ -21,15 +21,17 @@ async function remover(tabela: string, id: string) {
 }
 
 async function uploadFotoServico(file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop()
-  const nome = `foto_${Date.now()}.${ext}`
-  const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/levantamento-fotos/${nome}`, {
-    method: 'POST',
-    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
-    body: file,
-  })
-  if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/levantamento-fotos/${nome}`
-  return null
+  try {
+    const ext = file.name.split('.').pop()
+    const nome = `foto_${Date.now()}.${ext}`
+    const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/levantamento-fotos/${nome}`, {
+      method: 'POST',
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
+      body: file,
+    })
+    if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/levantamento-fotos/${nome}`
+    return null
+  } catch { return null }
 }
 
 const num = (v: string) => parseFloat(String(v || '0').replace(',', '.')) || 0
@@ -46,10 +48,17 @@ const AMBIENTES_COMUNS = ['Sala de Estar', 'Sala de Jantar', 'Cozinha', 'Quarto 
 // Ordem = sequência real de execução de obra (usada para ordenar/agrupar itens e etapas).
 const CATEGORIAS = ['Serviços Preliminares', 'Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Instalações de Incêndio', 'Climatização (AC)', 'Revestimento de Parede', 'Revestimento de Piso', 'Forro', 'Esquadrias', 'Vidraçaria', 'Serralheria', 'Marmoraria', 'Louças e Metais', 'Marcenaria', 'Pintura', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
 
+// Usa o maior número já usado (não a contagem) — se algum levantamento do ano foi
+// excluído, contar de novo geraria um código repetido e o insert seria rejeitado (409).
 function gerarCodigo(lista: any[]) {
   const a = new Date().getFullYear()
-  const n = lista.filter(l => l.codigo?.startsWith('LEV-' + a)).length + 1
-  return 'LEV-' + a + '-' + String(n).padStart(3, '0')
+  const prefixo = 'LEV-' + a + '-'
+  const maior = lista.reduce((m, l) => {
+    if (!l.codigo?.startsWith(prefixo)) return m
+    const n = parseInt(l.codigo.slice(prefixo.length), 10)
+    return Number.isFinite(n) && n > m ? n : m
+  }, 0)
+  return prefixo + String(maior + 1).padStart(3, '0')
 }
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'

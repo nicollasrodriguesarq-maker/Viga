@@ -30,15 +30,17 @@ function botaoVoltarApp(path: string) {
 }
 
 async function uploadFotoVisita(file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop()
-  const nome = `visita_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
-  const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/relatorio-visita-fotos/${nome}`, {
-    method: 'POST',
-    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
-    body: file,
-  })
-  if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/relatorio-visita-fotos/${nome}`
-  return null
+  try {
+    const ext = file.name.split('.').pop()
+    const nome = `visita_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
+    const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/relatorio-visita-fotos/${nome}`, {
+      method: 'POST',
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
+      body: file,
+    })
+    if (r.ok) return `${BASE.replace('/rest/v1', '')}/storage/v1/object/public/relatorio-visita-fotos/${nome}`
+    return null
+  } catch { return null }
 }
 
 const moeda = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -276,20 +278,31 @@ export default function ObrasMobile() {
   async function salvarRelatorioVisita() {
     if (!detalhe) return
     setEnviandoRv(true)
-    const fotos: { url: string; descricao: string }[] = []
-    for (const f of fotosRv) {
-      const url = f.url || (f.file ? await uploadFotoVisita(f.file) : null)
-      if (url) fotos.push({ url, descricao: f.descricao || '' })
+    try {
+      const fotos: { url: string; descricao: string }[] = []
+      let falhas = 0
+      for (const f of fotosRv) {
+        const url = f.url || (f.file ? await uploadFotoVisita(f.file) : null)
+        if (url) fotos.push({ url, descricao: f.descricao || '' })
+        else if (f.file) falhas++
+      }
+      const dados = {
+        obra_id: detalhe.id, data: fRv.data, clima: fRv.clima || null, descricao: fRv.descricao || null,
+        pendencias: fRv.pendencias || null, equipe_presente: fRv.equipe_presente, fotos,
+      }
+      const ok = rvEditando
+        ? await editar('obra_relatorios_visita', rvEditando.id, dados)
+        : !!(await criar('obra_relatorios_visita', { ...dados, criado_por: meuId || null }))
+      if (!ok) { alert('Não foi possível salvar o relatório. Verifique a conexão e tente novamente.'); return }
+      if (falhas > 0) alert(`Relatório salvo, mas ${falhas} foto(s) não foram enviadas (conexão instável). Edite o relatório para reenviá-las.`)
+      setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null)
+      setTela('detalhe'); setAba('visitas')
+      await carregar()
+    } catch {
+      alert('Não foi possível salvar o relatório. Verifique a conexão e tente novamente.')
+    } finally {
+      setEnviandoRv(false)
     }
-    const dados = {
-      obra_id: detalhe.id, data: fRv.data, clima: fRv.clima || null, descricao: fRv.descricao || null,
-      pendencias: fRv.pendencias || null, equipe_presente: fRv.equipe_presente, fotos,
-    }
-    if (rvEditando) { await editar('obra_relatorios_visita', rvEditando.id, dados) }
-    else { await criar('obra_relatorios_visita', { ...dados, criado_por: meuId || null }) }
-    setEnviandoRv(false); setFRv(FRV_VAZIO); setFotosRv([]); setRvEditando(null)
-    setTela('detalhe'); setAba('visitas')
-    await carregar()
   }
 
   function abrirEditarVisita(v: any) {

@@ -30,27 +30,31 @@ function calcularArea(unidade: string, comprimento: string, largura: string, alt
 }
 
 async function uploadFotoServico(file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop()
-  const nome = `foto_${Date.now()}.${ext}`
-  const r = await fetch(`${BASE.replace('/rest/v1','')}/storage/v1/object/levantamento-fotos/${nome}`, {
-    method: 'POST',
-    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
-    body: file,
-  })
-  if (r.ok) return `${BASE.replace('/rest/v1','')}/storage/v1/object/public/levantamento-fotos/${nome}`
-  return null
+  try {
+    const ext = file.name.split('.').pop()
+    const nome = `foto_${Date.now()}.${ext}`
+    const r = await fetch(`${BASE.replace('/rest/v1','')}/storage/v1/object/levantamento-fotos/${nome}`, {
+      method: 'POST',
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type },
+      body: file,
+    })
+    if (r.ok) return `${BASE.replace('/rest/v1','')}/storage/v1/object/public/levantamento-fotos/${nome}`
+    return null
+  } catch { return null }
 }
 
 async function uploadArquivoLevantamento(file: File): Promise<string | null> {
-  const ext = file.name.split('.').pop()
-  const nome = `arq_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-  const r = await fetch(`${BASE.replace('/rest/v1','')}/storage/v1/object/levantamento-arquivos/${nome}`, {
-    method: 'POST',
-    headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type || 'application/octet-stream' },
-    body: file,
-  })
-  if (r.ok) return `${BASE.replace('/rest/v1','')}/storage/v1/object/public/levantamento-arquivos/${nome}`
-  return null
+  try {
+    const ext = file.name.split('.').pop()
+    const nome = `arq_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
+    const r = await fetch(`${BASE.replace('/rest/v1','')}/storage/v1/object/levantamento-arquivos/${nome}`, {
+      method: 'POST',
+      headers: { apikey: ANON, Authorization: `Bearer ${ANON}`, 'Content-Type': file.type || 'application/octet-stream' },
+      body: file,
+    })
+    if (r.ok) return `${BASE.replace('/rest/v1','')}/storage/v1/object/public/levantamento-arquivos/${nome}`
+    return null
+  } catch { return null }
 }
 
 async function buscar(tabela: string, q = '') {
@@ -106,10 +110,17 @@ function ordenarPorCategoria(itensList: any[]) {
   return [...itensList].sort((a, b) => ordemCategoria(a.categoria) - ordemCategoria(b.categoria))
 }
 
+// Usa o maior número já usado (não a contagem) — se algum levantamento do ano foi
+// excluído, contar de novo geraria um código repetido e o insert seria rejeitado (409).
 function gerarCodigo(lista: any[]) {
   const a = new Date().getFullYear()
-  const n = lista.filter(l => l.codigo?.startsWith('LEV-' + a)).length + 1
-  return 'LEV-' + a + '-' + String(n).padStart(3, '0')
+  const prefixo = 'LEV-' + a + '-'
+  const maior = lista.reduce((m, l) => {
+    if (!l.codigo?.startsWith(prefixo)) return m
+    const n = parseInt(l.codigo.slice(prefixo.length), 10)
+    return Number.isFinite(n) && n > m ? n : m
+  }, 0)
+  return prefixo + String(maior + 1).padStart(3, '0')
 }
 
 // classes reutilizáveis

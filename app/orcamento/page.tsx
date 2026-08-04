@@ -159,10 +159,17 @@ export default function Orcamento() {
     setLoading(false)
   }
 
+  // Usa o maior número já usado (não a contagem) — se algum orçamento do ano foi
+  // excluído, contar de novo geraria um código repetido e o insert seria rejeitado (409).
   function gerarCodigo(lista: any[]) {
     const a = new Date().getFullYear()
-    const n = lista.filter(l => l.codigo?.startsWith('ORC-' + a)).length + 1
-    return 'ORC-' + a + '-' + String(n).padStart(3, '0')
+    const prefixo = 'ORC-' + a + '-'
+    const maior = lista.reduce((m, l) => {
+      if (!l.codigo?.startsWith(prefixo)) return m
+      const n = parseInt(l.codigo.slice(prefixo.length), 10)
+      return Number.isFinite(n) && n > m ? n : m
+    }, 0)
+    return prefixo + String(maior + 1).padStart(3, '0')
   }
 
   async function salvarOrcamento() {
@@ -483,8 +490,13 @@ export default function Orcamento() {
     if (!detalhe || !fTransformar.data_inicio) return alert('Selecione a data de início')
     const anoAtual = new Date().getFullYear()
     const todasObras = await buscar('obras', '?select=codigo')
-    const qtd = todasObras.filter((o: any) => o.codigo?.startsWith('OBR-' + anoAtual)).length
-    const codigo = 'OBR-' + anoAtual + '-' + String(qtd + 1).padStart(3, '0')
+    const prefixoObra = 'OBR-' + anoAtual + '-'
+    const maiorObra = todasObras.reduce((m: number, o: any) => {
+      if (!o.codigo?.startsWith(prefixoObra)) return m
+      const n = parseInt(o.codigo.slice(prefixoObra.length), 10)
+      return Number.isFinite(n) && n > m ? n : m
+    }, 0)
+    const codigo = prefixoObra + String(maiorObra + 1).padStart(3, '0')
 
     const itensOrc = ordenarPorCategoria(itens.filter(i => i.orcamento_id === detalhe.id))
     const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)

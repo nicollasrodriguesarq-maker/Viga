@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 
@@ -65,6 +65,9 @@ export default function FinanceiroMobile() {
   const [wizardAberto, setWizardAberto] = useState(false)
   const [wiz, setWiz] = useState<any>({ ...WZ_VAZIO })
   const [wizSalvando, setWizSalvando] = useState(false)
+  // Trava síncrona contra duplo-toque (o estado `wizSalvando` só bloqueia o botão depois de
+  // um re-render; em toques muito rápidos no celular os dois cliques podem passar antes disso).
+  const salvandoLockRef = useRef(false)
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -132,89 +135,105 @@ export default function FinanceiroMobile() {
   }
 
   async function finalizarSaidaWizard(overrides: Partial<typeof WZ_VAZIO> = {}) {
+    if (salvandoLockRef.current) return
     const wizFinal = { ...wiz, ...overrides }
     if (!wizFinal.descricao || !wizFinal.valor) return alert('Preencha descrição e valor')
+    salvandoLockRef.current = true
     setWizSalvando(true)
-    let nf_url = ''
-    if (wizFinal.nf_arquivo) {
-      const url = await uploadNF(wizFinal.nf_arquivo, wizFinal.descricao)
-      if (url) nf_url = url
-    }
-    const obraId = wizFinal.destino === 'obra' ? wizFinal.obra_id : ''
-    const servicoId = wizFinal.destino === 'obra' ? wizFinal.servico_id : ''
-    const valorTotal = parseFloat(wizFinal.valor || '0')
+    try {
+      let nf_url = ''
+      if (wizFinal.nf_arquivo) {
+        const url = await uploadNF(wizFinal.nf_arquivo, wizFinal.descricao)
+        if (url) nf_url = url
+      }
+      const obraId = wizFinal.destino === 'obra' ? wizFinal.obra_id : ''
+      const servicoId = wizFinal.destino === 'obra' ? wizFinal.servico_id : ''
+      const valorTotal = parseFloat(wizFinal.valor || '0')
 
-    if (wizFinal.forma_pagamento === 'cartao') {
-      const n = parseInt(wizFinal.parcelas || '1')
-      const valorParcela = Math.round((valorTotal / n) * 100) / 100
-      for (let i = 0; i < n; i++) {
-        const dataParcela = new Date(wizFinal.data + 'T00:00:00')
-        dataParcela.setMonth(dataParcela.getMonth() + i)
+      if (wizFinal.forma_pagamento === 'cartao') {
+        const n = parseInt(wizFinal.parcelas || '1')
+        const valorParcela = Math.round((valorTotal / n) * 100) / 100
+        for (let i = 0; i < n; i++) {
+          const dataParcela = new Date(wizFinal.data + 'T00:00:00')
+          dataParcela.setMonth(dataParcela.getMonth() + i)
+          const dados: any = {
+            data: dataParcela.toISOString().slice(0, 10),
+            descricao: wizFinal.descricao + (n > 1 ? ` (parcela ${i + 1}/${n})` : ''),
+            valor: valorParcela, categoria: wizFinal.categoria, cartao_id: wizFinal.cartao_id,
+            parcelas: n, parcela_numero: i + 1,
+          }
+          if (wizFinal.nf_numero) dados.nf_numero = wizFinal.nf_numero
+          if (obraId) dados.obra_id = obraId
+          if (nf_url) dados.nf_url = nf_url
+          await inserir('gastos_cartao', dados)
+        }
+      } else {
         const dados: any = {
-          data: dataParcela.toISOString().slice(0, 10),
-          descricao: wizFinal.descricao + (n > 1 ? ` (parcela ${i + 1}/${n})` : ''),
-          valor: valorParcela, categoria: wizFinal.categoria, cartao_id: wizFinal.cartao_id,
-          parcelas: n, parcela_numero: i + 1,
+          data: wizFinal.data, descricao: wizFinal.descricao, tipo: 'saida', valor: valorTotal,
+          categoria: wizFinal.categoria, forma_pagamento: wizFinal.forma_pagamento,
+          status: wizFinal.forma_pagamento === 'faturado' ? 'pendente' : 'pago',
+        }
+        if (wizFinal.forma_pagamento === 'faturado') {
+          const venc = new Date(wizFinal.data + 'T00:00:00')
+          venc.setDate(venc.getDate() + parseInt(wizFinal.dias_prazo || '0'))
+          dados.data_vencimento = venc.toISOString().slice(0, 10)
         }
         if (wizFinal.nf_numero) dados.nf_numero = wizFinal.nf_numero
         if (obraId) dados.obra_id = obraId
+        if (servicoId) dados.servico_id = servicoId
         if (nf_url) dados.nf_url = nf_url
-        await inserir('gastos_cartao', dados)
+        if (wizFinal.favorecido) dados.favorecido = wizFinal.favorecido
+        if (wizFinal.recorrente) { dados.recorrente = true; dados.recorrente_grupo = crypto.randomUUID() }
+        await inserir('lancamentos', dados)
+        await sincronizarInvestimento(dados)
       }
-    } else {
-      const dados: any = {
-        data: wizFinal.data, descricao: wizFinal.descricao, tipo: 'saida', valor: valorTotal,
-        categoria: wizFinal.categoria, forma_pagamento: wizFinal.forma_pagamento,
-        status: wizFinal.forma_pagamento === 'faturado' ? 'pendente' : 'pago',
-      }
-      if (wizFinal.forma_pagamento === 'faturado') {
-        const venc = new Date(wizFinal.data + 'T00:00:00')
-        venc.setDate(venc.getDate() + parseInt(wizFinal.dias_prazo || '0'))
-        dados.data_vencimento = venc.toISOString().slice(0, 10)
-      }
-      if (wizFinal.nf_numero) dados.nf_numero = wizFinal.nf_numero
-      if (obraId) dados.obra_id = obraId
-      if (servicoId) dados.servico_id = servicoId
-      if (nf_url) dados.nf_url = nf_url
-      if (wizFinal.favorecido) dados.favorecido = wizFinal.favorecido
-      if (wizFinal.recorrente) { dados.recorrente = true; dados.recorrente_grupo = crypto.randomUUID() }
-      await inserir('lancamentos', dados)
-      await sincronizarInvestimento(dados)
-    }
 
-    if (servicoId) {
-      const serv = servicosObra.find((s: any) => s.id === servicoId)
-      if (serv) {
-        const novoRealizado = parseFloat(serv.valor_realizado || 0) + valorTotal
-        await atualizar('obra_servicos', servicoId, { valor_realizado: novoRealizado })
+      if (servicoId) {
+        const serv = servicosObra.find((s: any) => s.id === servicoId)
+        if (serv) {
+          const novoRealizado = parseFloat(serv.valor_realizado || 0) + valorTotal
+          await atualizar('obra_servicos', servicoId, { valor_realizado: novoRealizado })
+        }
       }
-    }
 
-    setWizSalvando(false)
-    fecharWizard()
-    await carregar()
+      fecharWizard()
+      await carregar()
+    } catch {
+      alert('Não foi possível salvar o lançamento. Verifique a conexão e tente novamente.')
+    } finally {
+      salvandoLockRef.current = false
+      setWizSalvando(false)
+    }
   }
 
   async function finalizarEntradaComNFWizard() {
+    if (salvandoLockRef.current) return
     if (!wiz.descricao || !wiz.valor || !wiz.data_pagamento_combinada) return alert('Preencha descrição, valor e data de pagamento')
+    salvandoLockRef.current = true
     setWizSalvando(true)
-    let nf_url = ''
-    if (wiz.nf_arquivo) {
-      const url = await uploadNF(wiz.nf_arquivo, wiz.descricao)
-      if (url) nf_url = url
+    try {
+      let nf_url = ''
+      if (wiz.nf_arquivo) {
+        const url = await uploadNF(wiz.nf_arquivo, wiz.descricao)
+        if (url) nf_url = url
+      }
+      const dados: any = {
+        data: wiz.data, descricao: wiz.descricao, tipo: 'entrada', valor: parseFloat(wiz.valor || '0'),
+        categoria: wiz.categoria, status: 'pendente', data_vencimento: wiz.data_pagamento_combinada,
+      }
+      if (wiz.nf_numero) dados.nf_numero = wiz.nf_numero
+      if (wiz.obra_id) dados.obra_id = wiz.obra_id
+      if (wiz.servico_id) dados.servico_id = wiz.servico_id
+      if (nf_url) dados.nf_url = nf_url
+      await inserir('lancamentos', dados)
+      fecharWizard()
+      await carregar()
+    } catch {
+      alert('Não foi possível salvar o lançamento. Verifique a conexão e tente novamente.')
+    } finally {
+      salvandoLockRef.current = false
+      setWizSalvando(false)
     }
-    const dados: any = {
-      data: wiz.data, descricao: wiz.descricao, tipo: 'entrada', valor: parseFloat(wiz.valor || '0'),
-      categoria: wiz.categoria, status: 'pendente', data_vencimento: wiz.data_pagamento_combinada,
-    }
-    if (wiz.nf_numero) dados.nf_numero = wiz.nf_numero
-    if (wiz.obra_id) dados.obra_id = wiz.obra_id
-    if (wiz.servico_id) dados.servico_id = wiz.servico_id
-    if (nf_url) dados.nf_url = nf_url
-    await inserir('lancamentos', dados)
-    setWizSalvando(false)
-    fecharWizard()
-    await carregar()
   }
 
   return (
@@ -383,8 +402,8 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
           <>
             <Titulo>Forma de pagamento</Titulo>
             <div className="flex flex-col gap-3">
-              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant bg-surface-container-low transition-all" onClick={() => onFinalizarSaida({ forma_pagamento: 'a_vista' })}>
-                <div className="font-bold text-on-surface">💵 À Vista</div>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant bg-surface-container-low transition-all disabled:opacity-50" disabled={salvando} onClick={() => onFinalizarSaida({ forma_pagamento: 'a_vista' })}>
+                <div className="font-bold text-on-surface">{salvando ? 'Salvando...' : '💵 À Vista'}</div>
                 <div className="text-body-sm text-on-surface-variant">Lança automático no controle do mês como pago</div>
               </button>
               <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, forma_pagamento: 'faturado', step: 's_faturado' })}>

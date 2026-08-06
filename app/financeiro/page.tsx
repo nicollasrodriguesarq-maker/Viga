@@ -520,6 +520,15 @@ export default function Financeiro() {
   const totalCustosFixos = custosFixosMes.reduce((a,l)=>a+parseFloat(l.valor||0),0)
 
   const hoje = new Date(); hoje.setHours(0,0,0,0)
+  // Boleto vencido e não pago "vira o mês": ao olhar o mês corrente de verdade (hoje), a
+  // lista de Lançamentos também traz pendências de meses anteriores que ainda não foram
+  // pagas, no topo, com a data de vencimento original — não fica esquecido em uma aba antiga.
+  const mesRealAtual = new Date().toISOString().slice(0,7)
+  const vencidosArrastados = filtroMes === mesRealAtual
+    ? lancamentos.filter(l => l.status==='pendente' && new Date(l.data_vencimento||l.data) < hoje && (l.data_vencimento||l.data||'').slice(0,7) !== filtroMes)
+      .sort((a,b) => (a.data_vencimento||a.data) < (b.data_vencimento||b.data) ? -1 : 1)
+    : []
+  const lancMesExibicao = [...vencidosArrastados, ...lancMes]
   const em7dias = new Date(); em7dias.setDate(hoje.getDate()+7)
   const vencProximos = lancamentos.filter(l => {
     if (l.status !== 'pendente' || l.tipo !== 'saida') return false
@@ -843,15 +852,16 @@ export default function Financeiro() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lancMes.length===0 ? (
+                  {lancMesExibicao.length===0 ? (
                     <tr><td colSpan={8} className="text-center py-8 text-on-surface-variant">Nenhum lançamento em {mesNome}</td></tr>
-                  ) : lancMes.map(l=>{
+                  ) : lancMesExibicao.map(l=>{
                     const obra = obras.find(o=>o.id===l.obra_id)
+                    const arrastadoDeOutroMes = vencidosArrastados.includes(l)
                     const atrasadoLinha = l.status==='pendente' && new Date(l.data_vencimento||l.data)<hoje
                     return (
-                      <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                        <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{dataBR(l.data)}</td>
-                        <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
+                      <tr key={l.id} className={`border-b border-outline-variant hover:bg-surface-variant/20 ${arrastadoDeOutroMes ? 'bg-error/5' : ''}`}>
+                        <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{dataBR(arrastadoDeOutroMes ? (l.data_vencimento||l.data) : l.data)}</td>
+                        <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{arrastadoDeOutroMes && <span title="Arrastado de mês anterior sem pagamento" className="ml-1.5 text-[10px] font-semibold text-error">↩ mês anterior</span>}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria||'—'}</td>
                         <td className="px-3 py-2.5">
                           {obra ? <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-primary/10 text-primary border-primary/20">{obra.codigo}</span> : <span className="text-on-surface-variant/50 text-xs">—</span>}
@@ -886,7 +896,7 @@ export default function Financeiro() {
                 </tbody>
               </table>
             </div>
-            {lancMes.length>0 && (
+            {lancMesExibicao.length>0 && (
               <div className="flex gap-5 pt-4 mt-2 border-t-2 border-outline-variant flex-wrap items-center">
                 <span className="text-xs text-on-surface-variant font-semibold">Saldo anterior: <strong className="text-primary">{fmt(saldoAnterior)}</strong></span>
                 <span className="text-xs text-on-surface-variant">+</span>

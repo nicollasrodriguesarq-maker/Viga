@@ -45,33 +45,160 @@ async function uploadNF(file: File, lancamentoDesc: string): Promise<string | nu
   } catch { return null }
 }
 
-// Exportar Excel
-function exportarExcel(lancamentos: any[], obras: any[], mes: string) {
+// Relatório Financeiro Mensal em PDF — visão geral (balanço, lucro, impostos, distribuição
+// por categoria) seguida da lista completa de lançamentos com link direto para a NF anexada.
+// Pensado para encaminhar à contabilidade ou levar para reunião financeira.
+async function gerarPDFRelatorioMensal(lancamentos: any[], obras: any[], mes: string) {
+  const cfg = (await get('empresa_config', '?limit=1'))[0] || {}
+  const nomeEmpresa = cfg.nome_empresa || 'VIGA'
   const mesNome = meses[parseInt(mes.slice(5,7))-1] + ' ' + mes.slice(0,4)
-  const lancMes = lancamentos.filter(l => l.data?.slice(0,7) === mes)
-
-  let csv = `VIGA - Lançamentos Financeiros - ${mesNome}\n`
-  csv += `Gerado em: ${new Date().toLocaleDateString('pt-BR')}\n\n`
-  csv += `Data;Descrição;Tipo;Categoria;Obra;Conta;Status;Número NF;Valor\n`
-
-  lancMes.forEach(l => {
-    const obra = obras.find(o => o.id === l.obra_id)
-    const valor = (l.tipo === 'entrada' ? '+' : '-') + parseFloat(l.valor || 0).toFixed(2).replace('.', ',')
-    csv += `${dataBR(l.data)};${l.descricao};${l.tipo === 'entrada' ? 'Entrada' : 'Saída'};${l.categoria || ''};${obra ? obra.nome : ''};${l.conta || ''};${l.status === 'pago' ? 'Pago' : 'Pendente'};${l.nf_numero || ''};${valor}\n`
-  })
+  const lancMes = lancamentos.filter(l => l.data?.slice(0,7) === mes).sort((a,b) => (a.data < b.data ? -1 : 1))
 
   const entradas = lancMes.filter(l=>l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
   const saidas = lancMes.filter(l=>l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  csv += `\n;;;;;;;\n`
-  csv += `;TOTAL ENTRADAS;;;;;;;+${entradas.toFixed(2).replace('.',',')}\n`
-  csv += `;TOTAL SAÍDAS;;;;;;;-${saidas.toFixed(2).replace('.',',')}\n`
-  csv += `;RESULTADO;;;;;;;${(entradas-saidas).toFixed(2).replace('.',',')}\n`
+  const impostos = lancMes.filter(l=>l.tipo==='saida' && l.categoria==='Imposto').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+  const lucro = entradas - saidas
+  const maxBarra = Math.max(entradas, saidas, 1)
 
-  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url; a.download = `VIGA_Lancamentos_${mes}.csv`
-  a.click(); URL.revokeObjectURL(url)
+  const porCategoria: Record<string, number> = {}
+  lancMes.filter(l=>l.tipo==='saida').forEach(l => {
+    const cat = l.categoria || 'Outros'
+    porCategoria[cat] = (porCategoria[cat] || 0) + parseFloat(l.valor || 0)
+  })
+  const categoriasOrdenadas = Object.entries(porCategoria).sort((a,b) => b[1]-a[1])
+  const coresCategorias = ['#6ee9e0','#cebdff','#ffcbac','#ffb4ab','#a6d5a1','#f4d35e','#8ecae6','#869391']
+  const distribuicaoHtml = categoriasOrdenadas.map(([cat, valor], i) => {
+    const pct = saidas > 0 ? (valor/saidas)*100 : 0
+    const cor = coresCategorias[i % coresCategorias.length]
+    return `
+      <div style="margin-bottom:12px">
+        <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">
+          <span>${cat}</span>
+          <span style="font-family:'JetBrains Mono',monospace;color:${cor}">${fmt(valor)} (${pct.toFixed(0)}%)</span>
+        </div>
+        <div style="height:8px;background:#30353d;border-radius:999px;overflow:hidden">
+          <div style="height:100%;width:${pct}%;background:${cor}"></div>
+        </div>
+      </div>`
+  }).join('')
+
+  const linhasHtml = lancMes.map(l => {
+    const obra = obras.find((o: any) => o.id === l.obra_id)
+    return `
+    <tr>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap">${dataBR(l.data)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${l.descricao}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7;font-size:11px">${l.categoria || '—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7;font-size:11px">${obra ? obra.codigo : '—'}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">
+        <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:${l.status==='pago'?'#6ee9e01a':'#ffcbac1a'};color:${l.status==='pago'?'#6ee9e0':'#ffcbac'};text-transform:uppercase">${l.status==='pago'?'Pago':'Pendente'}</span>
+      </td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;color:${l.tipo==='entrada'?'#6ee9e0':'#ffb4ab'};font-weight:600;white-space:nowrap">${l.tipo==='entrada'?'+':'-'}${fmt(parseFloat(l.valor||0))}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">
+        ${l.nf_url ? `<a href="${l.nf_url}" target="_blank" style="color:#6ee9e0;text-decoration:none;font-size:11px;font-weight:600">📎 Ver NF</a>` : '<span style="color:#3d4948">—</span>'}
+      </td>
+    </tr>`
+  }).join('')
+
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+  <title>Relatório Financeiro ${mesNome} — ${nomeEmpresa}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
+    h1,h2,h3 { font-family:'Manrope',sans-serif; }
+    .page { max-width:900px; margin:0 auto; padding:40px 36px; }
+    .card { background:#1b2027; border:1px solid #3d4948; border-radius:12px; padding:20px; }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .page { break-after: page; }
+      .page:last-child { break-after: auto; }
+    }
+  </style></head><body>
+
+  <!-- PÁGINA 1 — VISÃO GERAL -->
+  <div class="page">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
+      <div style="display:flex;align-items:center;gap:12px">
+        ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:44px;object-fit:contain" />` : `<div style="width:44px;height:44px;background:#6ee9e0;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:900;color:#003734;font-size:20px">${nomeEmpresa.charAt(0)}</div>`}
+        <div>
+          <h1 style="font-size:20px;font-weight:800;color:#6ee9e0;text-transform:uppercase">${nomeEmpresa}</h1>
+          <p style="font-size:9px;color:#869391;text-transform:uppercase;letter-spacing:0.08em">Relatório Financeiro Mensal</p>
+        </div>
+      </div>
+      <div style="text-align:right">
+        <h2 style="font-size:16px;font-weight:600">${mesNome}</h2>
+        <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: 'long', year: 'numeric' })}</p>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+      <div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">Entradas</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#6ee9e0">${fmt(entradas)}</p></div>
+      <div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">Saídas</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#ffb4ab">${fmt(saidas)}</p></div>
+      <div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">Impostos</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#ffcbac">${fmt(impostos)}</p></div>
+      <div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">Resultado (Lucro)</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:${lucro>=0?'#6ee9e0':'#ffb4ab'}">${fmt(lucro)}</p></div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px">
+      <div class="card">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Balanço do Mês — Entradas × Saídas</span>
+        <div style="margin-top:16px">
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Entradas</span><span style="font-family:'JetBrains Mono',monospace;color:#6ee9e0;font-weight:700">${fmt(entradas)}</span></div>
+          <div style="height:20px;background:#30353d;border-radius:6px;overflow:hidden;margin-bottom:16px"><div style="height:100%;width:${(entradas/maxBarra)*100}%;background:#6ee9e0"></div></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Saídas</span><span style="font-family:'JetBrains Mono',monospace;color:#ffb4ab;font-weight:700">${fmt(saidas)}</span></div>
+          <div style="height:20px;background:#30353d;border-radius:6px;overflow:hidden"><div style="height:100%;width:${(saidas/maxBarra)*100}%;background:#ffb4ab"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Saídas por Categoria</span>
+        <div style="margin-top:16px">
+          ${distribuicaoHtml || '<p style="color:#869391;text-align:center;padding:20px 0">Sem saídas no período</p>'}
+        </div>
+      </div>
+    </div>
+
+    <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
+      <span>Documento Confidencial - ${nomeEmpresa}</span>
+      <span>Página 1 de 2</span>
+    </div>
+  </div>
+
+  <!-- PÁGINA 2 — LANÇAMENTOS DETALHADOS -->
+  <div class="page">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;padding-bottom:12px;border-bottom:1px solid #3d4948">
+      <span style="font-size:14px;font-weight:800;color:#6ee9e0">${nomeEmpresa}</span>
+      <span style="font-size:10px;color:#869391;text-transform:uppercase">Lançamentos — ${mesNome}</span>
+    </div>
+    <table style="width:100%;border-collapse:collapse">
+      <thead>
+        <tr style="background:#252a32">
+          <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Data</th>
+          <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Descrição</th>
+          <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Categoria</th>
+          <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Obra</th>
+          <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">Status</th>
+          <th style="padding:8px 10px;text-align:right;font-size:9px;color:#869391;text-transform:uppercase">Valor</th>
+          <th style="padding:8px 10px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">Anexo</th>
+        </tr>
+      </thead>
+      <tbody>${linhasHtml || '<tr><td colspan="7" style="padding:24px;text-align:center;color:#869391">Nenhum lançamento neste período</td></tr>'}</tbody>
+    </table>
+    <div style="display:flex;justify-content:flex-end;gap:24px;margin-top:20px;padding-top:16px;border-top:1px solid #3d4948">
+      <span style="font-size:12px;color:#869391">Entradas: <strong style="color:#6ee9e0">${fmt(entradas)}</strong></span>
+      <span style="font-size:12px;color:#869391">Saídas: <strong style="color:#ffb4ab">${fmt(saidas)}</strong></span>
+      <span style="font-size:13px;font-weight:700">Resultado: <strong style="color:${lucro>=0?'#6ee9e0':'#ffb4ab'}">${fmt(lucro)}</strong></span>
+    </div>
+    <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
+      <span>Documento Confidencial - ${nomeEmpresa}</span>
+      <span>Página 2 de 2</span>
+    </div>
+  </div>
+
+  <script>window.onload = () => { window.print() }</script>
+  </body></html>`
+
+  const win = window.open('', '_blank')
+  if (win) { win.document.write(html); win.document.close() }
 }
 
 const CAT_IN  = ['Medição de obra','Adiantamento','Sinal de contrato','Parcela de contrato','Outros']
@@ -700,8 +827,8 @@ export default function Financeiro() {
       }
       topbarSlot={
         <>
-          <button className={btnSecondaryCls + ' flex items-center gap-2'} onClick={()=>exportarExcel(lancamentos, obras, filtroMes)}>
-            <span className="material-symbols-outlined text-[18px]">table_view</span> Excel
+          <button className={btnSecondaryCls + ' flex items-center gap-2'} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, filtroMes)}>
+            <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span> PDF
           </button>
           <button onClick={abrirWizard} className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20">
             <span className="material-symbols-outlined text-[20px]">add_circle</span>
@@ -738,8 +865,8 @@ export default function Financeiro() {
             <span className="text-on-surface-variant text-sm">Período:</span>
             <input type="month" value={filtroMes} onChange={e=>setFiltroMes(e.target.value)} className={inputCls + ' w-40'} />
             <span className="text-on-surface font-semibold">{mesNome}</span>
-            <button className={btnSecondaryCls + ' ml-auto flex items-center gap-2'} onClick={()=>exportarExcel(lancamentos, obras, filtroMes)}>
-              <span className="material-symbols-outlined text-[18px] text-primary">cloud_download</span>
+            <button className={btnSecondaryCls + ' ml-auto flex items-center gap-2'} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, filtroMes)}>
+              <span className="material-symbols-outlined text-[18px] text-primary">picture_as_pdf</span>
               Exportar Relatório Mensal — {mesNome}
             </button>
           </div>
@@ -837,7 +964,7 @@ export default function Financeiro() {
               <input type="month" value={filtroMes} onChange={e=>setFiltroMes(e.target.value)} className={inputCls + ' w-40'} />
             </div>
             <div className="flex gap-2">
-              <button className={btnSecondaryCls} onClick={()=>exportarExcel(lancamentos, obras, filtroMes)}>📊 Exportar Excel</button>
+              <button className={btnSecondaryCls} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, filtroMes)}>🖨️ Exportar PDF</button>
               <button className={btnPrimaryCls} onClick={abrirWizard}>+ Novo Lançamento</button>
             </div>
           </div>

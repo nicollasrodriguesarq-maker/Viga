@@ -52,7 +52,23 @@ async function gerarPDFRelatorioMensal(lancamentos: any[], obras: any[], mes: st
   const cfg = (await get('empresa_config', '?limit=1'))[0] || {}
   const nomeEmpresa = cfg.nome_empresa || 'VIGA'
   const mesNome = meses[parseInt(mes.slice(5,7))-1] + ' ' + mes.slice(0,4)
-  const lancMes = lancamentos.filter(l => l.data?.slice(0,7) === mes).sort((a,b) => (a.data < b.data ? -1 : 1))
+  const lancMesBase = lancamentos.filter(l => l.data?.slice(0,7) === mes)
+
+  // Pendência (atrasada ou vencendo nos próximos 7 dias) de fora do mês entra no relatório
+  // do mês corrente de verdade — mesmo critério usado na tela de Lançamentos, pra a
+  // contabilidade nunca receber um balanço que "esquece" uma dívida em aberto.
+  const hoje = new Date(); hoje.setHours(0,0,0,0)
+  const mesRealAtual = new Date().toISOString().slice(0,7)
+  const em7dias = new Date(); em7dias.setDate(hoje.getDate()+7)
+  const idsNoMes = new Set(lancMesBase.map(l => l.id))
+  const pendenciasTrazidas = mes === mesRealAtual
+    ? lancamentos.filter(l => {
+        if (l.status !== 'pendente' || idsNoMes.has(l.id)) return false
+        const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
+        return venc <= em7dias
+      })
+    : []
+  const lancMes = [...pendenciasTrazidas, ...lancMesBase].sort((a,b) => (a.data < b.data ? -1 : 1))
 
   const entradas = lancMes.filter(l=>l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
   const saidas = lancMes.filter(l=>l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
@@ -84,10 +100,11 @@ async function gerarPDFRelatorioMensal(lancamentos: any[], obras: any[], mes: st
 
   const linhasHtml = lancMes.map(l => {
     const obra = obras.find((o: any) => o.id === l.obra_id)
+    const trazidaDeFora = pendenciasTrazidas.includes(l)
     return `
     <tr>
-      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap">${dataBR(l.data)}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${l.descricao}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap">${dataBR(trazidaDeFora ? (l.data_vencimento||l.data) : l.data)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${l.descricao}${trazidaDeFora ? ' <span style="color:#ffb4ab;font-size:9px;font-weight:700;text-transform:uppercase">⚠ fora do mês</span>' : ''}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7;font-size:11px">${l.categoria || '—'}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7;font-size:11px">${obra ? obra.codigo : '—'}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">
@@ -627,8 +644,6 @@ export default function Financeiro() {
   // Cálculos
   const mesNome = meses[parseInt(filtroMes.slice(5,7))-1] + ' ' + filtroMes.slice(0,4)
   const lancMes = lancamentos.filter(l => l.data?.slice(0,7) === filtroMes)
-  const entradas = lancMes.filter(l=>l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const saidas   = lancMes.filter(l=>l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
   const saldoBase = contas.reduce((a,c)=>a+parseFloat(c.saldo_inicial||0),0)
   const saldoTotal = saldoBase
     + lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pago').reduce((a,l)=>a+parseFloat(l.valor||0),0)
@@ -636,7 +651,6 @@ export default function Financeiro() {
   const saldoAnterior = saldoBase
     + lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pago'&&(l.data||'').slice(0,7)<filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0)
     - lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pago'&&(l.data||'').slice(0,7)<filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const saldoFinalMes = saldoAnterior + entradas - saidas
   const aPagar  = lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((a,l)=>a+parseFloat(l.valor||0),0)
   const totalInvestido = investimentos.reduce((a,i) => {
     const v = parseFloat(i.valor||0)
@@ -647,15 +661,7 @@ export default function Financeiro() {
   const totalCustosFixos = custosFixosMes.reduce((a,l)=>a+parseFloat(l.valor||0),0)
 
   const hoje = new Date(); hoje.setHours(0,0,0,0)
-  // Boleto vencido e não pago "vira o mês": ao olhar o mês corrente de verdade (hoje), a
-  // lista de Lançamentos também traz pendências de meses anteriores que ainda não foram
-  // pagas, no topo, com a data de vencimento original — não fica esquecido em uma aba antiga.
   const mesRealAtual = new Date().toISOString().slice(0,7)
-  const vencidosArrastados = filtroMes === mesRealAtual
-    ? lancamentos.filter(l => l.status==='pendente' && new Date(l.data_vencimento||l.data) < hoje && (l.data_vencimento||l.data||'').slice(0,7) !== filtroMes)
-      .sort((a,b) => (a.data_vencimento||a.data) < (b.data_vencimento||b.data) ? -1 : 1)
-    : []
-  const lancMesExibicao = [...vencidosArrastados, ...lancMes]
   const em7dias = new Date(); em7dias.setDate(hoje.getDate()+7)
   const vencProximos = lancamentos.filter(l => {
     if (l.status !== 'pendente' || l.tipo !== 'saida') return false
@@ -667,6 +673,22 @@ export default function Financeiro() {
     const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
     return venc < hoje
   })
+  // Boleto vencido e não pago "vira o mês", e tudo que está na Agenda de Pagamentos
+  // (atrasado ou vencendo em 7 dias, de entrada ou saída) também entra na lista E nos
+  // cálculos do mês corrente de verdade — não fica esquecido em uma aba antiga nem some
+  // do balanço quando o mês vira.
+  const idsNoMes = new Set(lancMes.map(l => l.id))
+  const vencidosArrastados = filtroMes === mesRealAtual
+    ? lancamentos.filter(l => {
+        if (l.status !== 'pendente' || idsNoMes.has(l.id)) return false
+        const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
+        return venc <= em7dias
+      }).sort((a,b) => (a.data_vencimento||a.data) < (b.data_vencimento||b.data) ? -1 : 1)
+    : []
+  const lancMesExibicao = [...vencidosArrastados, ...lancMes]
+  const entradas = lancMesExibicao.filter(l=>l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+  const saidas   = lancMesExibicao.filter(l=>l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+  const saldoFinalMes = saldoAnterior + entradas - saidas
 
   function getCustosObra(id: string) {
     return lancamentos.filter(l=>l.obra_id===id&&l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
@@ -876,8 +898,8 @@ export default function Financeiro() {
               {l:'Saldo Acumulado', v:fmt(saldoTotal), c: saldoTotal>=0?'text-primary':'text-error', sub:'Todas as contas'},
               {l:'Total Investido', v:fmt(totalInvestido), c:'text-secondary', sub:'Ver aba Investimentos'},
               {l:'Saldo Início '+mesNome, v:fmt(saldoAnterior), c: saldoAnterior>=0?'text-primary-fixed-dim':'text-error', sub:'Vindo de meses anteriores'},
-              {l:'Entradas '+mesNome, v:fmt(entradas), c:'text-primary', sub:lancMes.filter(l=>l.tipo==='entrada').length+' lançamento(s)', border:'border-l-4 border-l-primary/30'},
-              {l:'Saídas '+mesNome, v:fmt(saidas), c:'text-error', sub:lancMes.filter(l=>l.tipo==='saida').length+' lançamento(s)', border:'border-l-4 border-l-error/30'},
+              {l:'Entradas '+mesNome, v:fmt(entradas), c:'text-primary', sub:lancMesExibicao.filter(l=>l.tipo==='entrada').length+' lançamento(s)', border:'border-l-4 border-l-primary/30'},
+              {l:'Saídas '+mesNome, v:fmt(saidas), c:'text-error', sub:lancMesExibicao.filter(l=>l.tipo==='saida').length+' lançamento(s)', border:'border-l-4 border-l-error/30'},
               {l:'Saldo Final '+mesNome, v:fmt(saldoFinalMes), c:saldoFinalMes>=0?'text-primary':'text-error', sub:'A receber: '+fmt(aReceber), destaque:true},
             ].map(({l,v,c,sub,border,destaque}: any)=>(
               <div key={l} className={`${destaque ? 'bg-surface-container-high border border-primary/30 ring-2 ring-primary/10' : 'bg-surface-container border border-outline-variant'} ${border||''} rounded-xl p-4`}>
@@ -988,7 +1010,7 @@ export default function Financeiro() {
                     return (
                       <tr key={l.id} className={`border-b border-outline-variant hover:bg-surface-variant/20 ${arrastadoDeOutroMes ? 'bg-error/5' : ''}`}>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{dataBR(arrastadoDeOutroMes ? (l.data_vencimento||l.data) : l.data)}</td>
-                        <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{arrastadoDeOutroMes && <span title="Arrastado de mês anterior sem pagamento" className="ml-1.5 text-[10px] font-semibold text-error">↩ mês anterior</span>}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
+                        <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{arrastadoDeOutroMes && <span title="Pendência de fora do mês trazida para o cálculo atual (atrasada ou vencendo em breve)" className="ml-1.5 text-[10px] font-semibold text-error">⚠ fora do mês</span>}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria||'—'}</td>
                         <td className="px-3 py-2.5">
                           {obra ? <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-primary/10 text-primary border-primary/20">{obra.codigo}</span> : <span className="text-on-surface-variant/50 text-xs">—</span>}

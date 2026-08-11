@@ -226,7 +226,7 @@ const CZ = { nome: '', banco: '', tipo: 'corrente', saldo_inicial: '' }
 const CAZ = { nome: '', bandeira: '', limite: '', dia_fechamento: '', dia_vencimento: '' }
 const GZ = { data: new Date().toISOString().slice(0,10), descricao: '', valor: '', categoria: '', cartao_id: '', parcelas: '1', obra_id: '', servico_id: '', nf_numero: '', nf_arquivo: null as File | null }
 const IZ = { descricao: '', tipo: 'aporte', valor: '', data: new Date().toISOString().slice(0,10), instituicao: '', observacao: '' }
-const RCZ = { data: new Date().toISOString().slice(0,10), valor: '', descricao: '', obra_id: '', servico_id: '' }
+const RCZ = { data: new Date().toISOString().slice(0,10), valor: '', descricao: '', obra_id: '', servico_id: '', conta: '' }
 
 const WZ_VAZIO = {
   step: 'tipo',
@@ -242,6 +242,7 @@ const WZ_VAZIO = {
   data_pagamento_combinada: '',
   favorecido: '',
   recorrente: false,
+  conta: '',
 }
 
 // classes reutilizáveis
@@ -556,6 +557,7 @@ export default function Financeiro() {
         if (nf_url) dados.nf_url = nf_url
         if (wizFinal.favorecido) dados.favorecido = wizFinal.favorecido
         if (wizFinal.recorrente) { dados.recorrente = true; dados.recorrente_grupo = crypto.randomUUID() }
+        if (wizFinal.conta) dados.conta = wizFinal.conta
         await inserir('lancamentos', dados)
         await sincronizarInvestimento(dados)
       }
@@ -581,6 +583,7 @@ export default function Financeiro() {
   async function finalizarEntradaComNFWizard() {
     if (salvandoLockRef.current) return
     if (!wiz.descricao || !wiz.valor || !wiz.data_pagamento_combinada) return alert('Preencha descrição, valor e data de pagamento')
+    if (!wiz.conta) return alert('Selecione em qual conta o pagamento vai cair')
     salvandoLockRef.current = true
     setWizSalvando(true)
     try {
@@ -602,6 +605,7 @@ export default function Financeiro() {
       if (wiz.obra_id) dados.obra_id = wiz.obra_id
       if (wiz.servico_id) dados.servico_id = wiz.servico_id
       if (nf_url) dados.nf_url = nf_url
+      dados.conta = wiz.conta
       await inserir('lancamentos', dados)
       fecharWizard()
       await carregar()
@@ -616,6 +620,7 @@ export default function Financeiro() {
   async function salvarRecebimentoCartao() {
     if (salvandoLancRef.current) return
     if (!fRecebCartao.valor || !fRecebCartao.data) return alert('Preencha valor e data de recebimento')
+    if (!fRecebCartao.conta) return alert('Selecione em qual conta o valor vai cair')
     salvandoLancRef.current = true
     setSalvando(true)
     try {
@@ -627,6 +632,7 @@ export default function Financeiro() {
         valor: parseFloat(fRecebCartao.valor),
         meio_recebimento: 'cartao',
         status: fRecebCartao.data <= hojeStr ? 'pago' : 'pendente',
+        conta: fRecebCartao.conta,
       }
       if (fRecebCartao.data > hojeStr) dados.data_vencimento = fRecebCartao.data
       if (fRecebCartao.obra_id) dados.obra_id = fRecebCartao.obra_id
@@ -689,6 +695,15 @@ export default function Financeiro() {
   const entradas = lancMesExibicao.filter(l=>l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
   const saidas   = lancMesExibicao.filter(l=>l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
   const saldoFinalMes = saldoAnterior + entradas - saidas
+
+  // Saldo real de cada conta bancária: inicial + entradas pagas - saídas pagas vinculadas
+  // àquela conta especificamente (não o total geral de todas as contas somadas).
+  function saldoConta(conta: any) {
+    const mov = lancamentos.filter(l => l.status === 'pago' && l.conta === conta.nome)
+    const entr = mov.filter(l => l.tipo === 'entrada').reduce((a,l) => a+parseFloat(l.valor||0), 0)
+    const said = mov.filter(l => l.tipo === 'saida').reduce((a,l) => a+parseFloat(l.valor||0), 0)
+    return parseFloat(conta.saldo_inicial||0) + entr - said
+  }
 
   function getCustosObra(id: string) {
     return lancamentos.filter(l=>l.obra_id===id&&l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
@@ -922,18 +937,20 @@ export default function Financeiro() {
               </div>
             ) : (
               <div className="divide-y divide-outline-variant">
-                {contas.map(c=>(
+                {contas.map(c=>{
+                  const saldoC = saldoConta(c)
+                  return (
                   <div key={c.id} className="p-4 flex items-center justify-between hover:bg-surface-variant/20 transition-all">
                     <div><div className="font-semibold text-on-surface">{c.nome}</div><div className="text-[11px] text-on-surface-variant">{c.banco} · {c.tipo}</div></div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
-                        <div className={`text-lg font-bold ${saldoTotal>=0?'text-primary':'text-error'}`}>{fmt(saldoTotal)}</div>
+                        <div className={`text-lg font-bold ${saldoC>=0?'text-primary':'text-error'}`}>{fmt(saldoC)}</div>
                         <div className="text-[10px] text-on-surface-variant mt-0.5">saldo atual · inicial: {fmt(parseFloat(c.saldo_inicial||0))}</div>
                       </div>
                       <button className={btnDangerSmCls} onClick={()=>deletar('contas',c.id).then(carregar)}>×</button>
                     </div>
                   </div>
-                ))}
+                )})}
               </div>
             )}
           </section>
@@ -1119,12 +1136,14 @@ export default function Financeiro() {
               <div className="text-5xl mb-4">🏦</div>
               <button className={btnPrimaryCls} onClick={()=>setModal('conta')}>Cadastrar conta</button>
             </div>
-          ) : contas.map(c=>(
+          ) : contas.map(c=>{
+            const saldoC = saldoConta(c)
+            return (
             <div key={c.id} className={sectionCls}>
               <div className="flex justify-between items-center">
                 <div><div className="text-base font-bold text-on-surface">{c.nome}</div><div className="text-body-sm text-on-surface-variant mt-1">{c.banco} · Conta {c.tipo}</div></div>
                 <div className="text-right">
-                  <div className={`text-xl font-bold ${saldoTotal>=0?'text-primary':'text-error'}`}>{fmt(saldoTotal)}</div>
+                  <div className={`text-xl font-bold ${saldoC>=0?'text-primary':'text-error'}`}>{fmt(saldoC)}</div>
                   <div className="text-[11px] text-on-surface-variant mt-0.5">saldo atual</div>
                   <div className="text-[10px] text-on-surface-variant/60 mt-0.5">inicial: {fmt(parseFloat(c.saldo_inicial||0))}</div>
                 </div>
@@ -1133,7 +1152,7 @@ export default function Financeiro() {
                 <button className={btnDangerSmCls} onClick={()=>deletar('contas',c.id).then(carregar)}>Excluir conta</button>
               </div>
             </div>
-          ))}
+          )})}
         </>
       )}
 
@@ -1543,6 +1562,12 @@ export default function Financeiro() {
               <div><label className={labelCls}>Data de Recebimento *</label><input className={inputCls} type="date" value={fRecebCartao.data} onChange={e=>setFRecebCartao({...fRecebCartao,data:e.target.value})} /></div>
             </div>
             <div className="mb-3.5"><label className={labelCls}>Descrição</label><input className={inputCls} placeholder="Ex: Pagamento serviço no cartão" value={fRecebCartao.descricao} onChange={e=>setFRecebCartao({...fRecebCartao,descricao:e.target.value})} /></div>
+            <div className="mb-3.5"><label className={labelCls}>Conta que vai receber *</label>
+              <select className={inputCls} value={fRecebCartao.conta} onChange={e=>setFRecebCartao({...fRecebCartao,conta:e.target.value})}>
+                <option value="">Selecione</option>
+                {contas.map(c=><option key={c.id} value={c.nome}>{c.nome}</option>)}
+              </select>
+            </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-5">
               <div><label className={labelCls}>Vincular à Obra (opcional)</label>
                 <select className={inputCls} value={fRecebCartao.obra_id} onChange={e=>setFRecebCartao({...fRecebCartao,obra_id:e.target.value,servico_id:''})}>
@@ -1573,6 +1598,7 @@ export default function Financeiro() {
           obras={obras.filter(o=>o.status==='em_execucao')}
           servicos={servicosObra}
           cartoes={cartoes}
+          contas={contas}
           salvando={wizSalvando}
           onVoltar={voltarWizard}
           onCancelar={fecharWizard}
@@ -1674,7 +1700,7 @@ function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, o
 }
 
 // Fluxo guiado: anexar NF → obra/empresa → forma de pagamento (sem OCR — preenchimento manual)
-function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onVoltar, onCancelar, onFinalizarSaida, onFinalizarEntradaComNF, onIrParaFormularioTradicional }: any) {
+function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salvando, onVoltar, onCancelar, onFinalizarSaida, onFinalizarEntradaComNF, onIrParaFormularioTradicional }: any) {
   const servicosDaObra = wiz.destino === 'obra' && wiz.obra_id ? servicos.filter((s: any) => s.obra_id === wiz.obra_id) : []
   const servicosDaObraEntrada = wiz.obra_id ? servicos.filter((s: any) => s.obra_id === wiz.obra_id) : []
 
@@ -1792,12 +1818,20 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
         {wiz.step === 's_pagamento' && (
           <>
             <Titulo>Forma de pagamento</Titulo>
+            <div className="mb-3.5">
+              <label className={labelCls}>Conta de saída *</label>
+              <select className={inputCls} value={wiz.conta} onChange={e => setWiz({ ...wiz, conta: e.target.value })}>
+                <option value="">Selecione a conta</option>
+                {contas.map((c: any) => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+              </select>
+              <div className="text-[11px] text-on-surface-variant mt-1">Necessária para o saldo de cada conta se atualizar sozinho</div>
+            </div>
             <div className="flex flex-col gap-3">
-              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary bg-surface-container-low transition-all disabled:opacity-50" disabled={salvando} onClick={() => onFinalizarSaida({ forma_pagamento: 'a_vista' })}>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary bg-surface-container-low transition-all disabled:opacity-50" disabled={salvando || !wiz.conta} onClick={() => onFinalizarSaida({ forma_pagamento: 'a_vista' })}>
                 <div className="font-bold text-on-surface">{salvando ? 'Salvando...' : '💵 À Vista'}</div>
                 <div className="text-body-sm text-on-surface-variant">Lança automático no controle do mês como pago</div>
               </button>
-              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-tertiary bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, forma_pagamento: 'faturado', step: 's_faturado' })}>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-tertiary bg-surface-container-low transition-all disabled:opacity-50" disabled={!wiz.conta} onClick={() => setWiz({ ...wiz, forma_pagamento: 'faturado', step: 's_faturado' })}>
                 <div className="font-bold text-on-surface">📅 Faturado</div>
                 <div className="text-body-sm text-on-surface-variant">Define prazo em dias e calcula a data de pagamento</div>
               </button>
@@ -1929,6 +1963,14 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
               <label className={labelCls}>Data de Pagamento *</label>
               <input className={inputCls} type="date" value={wiz.data_pagamento_combinada} onChange={e => setWiz({ ...wiz, data_pagamento_combinada: e.target.value })} />
               <div className="text-[11px] text-tertiary mt-1">Este lançamento entra na programação de pagamento como pendente</div>
+            </div>
+            <div className="mb-3.5">
+              <label className={labelCls}>Vai cair em qual conta? *</label>
+              <select className={inputCls} value={wiz.conta} onChange={e => setWiz({ ...wiz, conta: e.target.value })}>
+                <option value="">Selecione a conta</option>
+                {contas.map((c: any) => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+              </select>
+              <div className="text-[11px] text-on-surface-variant mt-1">Necessária para o saldo de cada conta se atualizar sozinho</div>
             </div>
             <Botoes onFinalizar={onFinalizarEntradaComNF} finalizarLabel="Finalizar Lançamento" />
           </>

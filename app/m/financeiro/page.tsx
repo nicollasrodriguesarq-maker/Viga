@@ -56,12 +56,14 @@ const WZ_VAZIO = {
   data_pagamento_combinada: '',
   favorecido: '',
   recorrente: false,
+  conta: '',
 }
 
 export default function FinanceiroMobile() {
   const [obras, setObras] = useState<any[]>([])
   const [servicosObra, setServicosObra] = useState<any[]>([])
   const [cartoes, setCartoes] = useState<any[]>([])
+  const [contas, setContas] = useState<any[]>([])
   const [wizardAberto, setWizardAberto] = useState(false)
   const [wiz, setWiz] = useState<any>({ ...WZ_VAZIO })
   const [wizSalvando, setWizSalvando] = useState(false)
@@ -82,14 +84,16 @@ export default function FinanceiroMobile() {
   }, [])
 
   async function carregar() {
-    const [o, sv, ca] = await Promise.all([
+    const [o, sv, ca, ct] = await Promise.all([
       get('obras', '?order=created_at.desc'),
       get('obra_servicos', '?order=created_at'),
       get('cartoes', '?order=created_at'),
+      get('contas', '?order=created_at'),
     ])
     setObras(o.filter((x: any) => x.status === 'em_execucao'))
     setServicosObra(sv)
     setCartoes(ca)
+    setContas(ct)
   }
 
   function abrirWizard() {
@@ -184,6 +188,7 @@ export default function FinanceiroMobile() {
         if (nf_url) dados.nf_url = nf_url
         if (wizFinal.favorecido) dados.favorecido = wizFinal.favorecido
         if (wizFinal.recorrente) { dados.recorrente = true; dados.recorrente_grupo = crypto.randomUUID() }
+        if (wizFinal.conta) dados.conta = wizFinal.conta
         await inserir('lancamentos', dados)
         await sincronizarInvestimento(dados)
       }
@@ -209,6 +214,7 @@ export default function FinanceiroMobile() {
   async function finalizarEntradaComNFWizard() {
     if (salvandoLockRef.current) return
     if (!wiz.descricao || !wiz.valor || !wiz.data_pagamento_combinada) return alert('Preencha descrição, valor e data de pagamento')
+    if (!wiz.conta) return alert('Selecione em qual conta o pagamento vai cair')
     salvandoLockRef.current = true
     setWizSalvando(true)
     try {
@@ -225,6 +231,7 @@ export default function FinanceiroMobile() {
       if (wiz.obra_id) dados.obra_id = wiz.obra_id
       if (wiz.servico_id) dados.servico_id = wiz.servico_id
       if (nf_url) dados.nf_url = nf_url
+      dados.conta = wiz.conta
       await inserir('lancamentos', dados)
       fecharWizard()
       await carregar()
@@ -249,7 +256,7 @@ export default function FinanceiroMobile() {
 
       {wizardAberto && (
         <WizardLancamento
-          wiz={wiz} setWiz={setWiz} obras={obras} servicos={servicosObra} cartoes={cartoes}
+          wiz={wiz} setWiz={setWiz} obras={obras} servicos={servicosObra} cartoes={cartoes} contas={contas}
           salvando={wizSalvando}
           onVoltar={voltarWizard} onCancelar={fecharWizard}
           onFinalizarSaida={finalizarSaidaWizard}
@@ -261,7 +268,7 @@ export default function FinanceiroMobile() {
   )
 }
 
-function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onVoltar, onCancelar, onFinalizarSaida, onFinalizarEntradaComNF, onIrParaFormularioTradicional }: any) {
+function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salvando, onVoltar, onCancelar, onFinalizarSaida, onFinalizarEntradaComNF, onIrParaFormularioTradicional }: any) {
   const servicosDaObra = wiz.destino === 'obra' && wiz.obra_id ? servicos.filter((s: any) => s.obra_id === wiz.obra_id) : []
   const servicosDaObraEntrada = wiz.obra_id ? servicos.filter((s: any) => s.obra_id === wiz.obra_id) : []
 
@@ -401,12 +408,20 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
         {wiz.step === 's_pagamento' && (
           <>
             <Titulo>Forma de pagamento</Titulo>
+            <div className="mb-3.5">
+              <label className={labelCls}>Conta de saída *</label>
+              <select className={inputCls} value={wiz.conta} onChange={e => setWiz({ ...wiz, conta: e.target.value })}>
+                <option value="">Selecione a conta</option>
+                {contas.map((c: any) => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+              </select>
+              <div className="text-[11px] text-on-surface-variant mt-1">Necessária para o saldo de cada conta se atualizar sozinho</div>
+            </div>
             <div className="flex flex-col gap-3">
-              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant bg-surface-container-low transition-all disabled:opacity-50" disabled={salvando} onClick={() => onFinalizarSaida({ forma_pagamento: 'a_vista' })}>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant bg-surface-container-low transition-all disabled:opacity-50" disabled={salvando || !wiz.conta} onClick={() => onFinalizarSaida({ forma_pagamento: 'a_vista' })}>
                 <div className="font-bold text-on-surface">{salvando ? 'Salvando...' : '💵 À Vista'}</div>
                 <div className="text-body-sm text-on-surface-variant">Lança automático no controle do mês como pago</div>
               </button>
-              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, forma_pagamento: 'faturado', step: 's_faturado' })}>
+              <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant bg-surface-container-low transition-all disabled:opacity-50" disabled={!wiz.conta} onClick={() => setWiz({ ...wiz, forma_pagamento: 'faturado', step: 's_faturado' })}>
                 <div className="font-bold text-on-surface">📅 Faturado</div>
                 <div className="text-body-sm text-on-surface-variant">Define prazo em dias e calcula a data de pagamento</div>
               </button>
@@ -537,6 +552,14 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, salvando, onV
               <label className={labelCls}>Data de Pagamento *</label>
               <input className={inputCls} type="date" value={wiz.data_pagamento_combinada} onChange={e => setWiz({ ...wiz, data_pagamento_combinada: e.target.value })} />
               <div className="text-[11px] text-tertiary mt-1">Este lançamento entra na programação de pagamento como pendente</div>
+            </div>
+            <div className="mb-3.5">
+              <label className={labelCls}>Vai cair em qual conta? *</label>
+              <select className={inputCls} value={wiz.conta} onChange={e => setWiz({ ...wiz, conta: e.target.value })}>
+                <option value="">Selecione a conta</option>
+                {contas.map((c: any) => <option key={c.id} value={c.nome}>{c.nome}</option>)}
+              </select>
+              <div className="text-[11px] text-on-surface-variant mt-1">Necessária para o saldo de cada conta se atualizar sozinho</div>
             </div>
             <Botoes onFinalizar={onFinalizarEntradaComNF} finalizarLabel="Finalizar Lançamento" />
           </>

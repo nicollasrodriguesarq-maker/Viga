@@ -67,6 +67,19 @@ const btnPrimaryCls = 'bg-primary text-on-primary rounded-lg px-4 py-3 text-sm f
 const btnSecondaryCls = 'bg-surface-container-low border border-outline-variant text-on-surface-variant rounded-lg px-4 py-3 text-sm cursor-pointer w-full'
 const moeda = (v: number) => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 
+// Sobrescrita de impressão: mesma lógica de app/levantamento/page.tsx (dark theme na tela,
+// mas impressoras/PDF costumam ignorar o fundo escuro — força fundo branco e texto escuro
+// só no momento de imprimir/exportar).
+const PRINT_SAFE_CSS = `
+      @media print {
+        html, body { background:#ffffff !important; }
+        body { color:#12161c !important; }
+        * { color:#12161c !important; }
+        .card { background:#ffffff !important; }
+        [style*="background:#0f141b"], [style*="background:#1b2027"], [style*="background:#171c23"], [style*="background:#252a32"], [style*="background:#3d4948"] { background:#ffffff !important; }
+        [style*="border:1px solid #3d4948"], [style*="border-bottom:1px solid #3d4948"], [style*="border-top:1px solid #3d4948"], [style*="border-color:#3d4948"] { border-color:#d7dbda !important; }
+      }`
+
 // Botão flutuante injetado em todo PDF gerado pelo app — sem ele o usuário fica preso na
 // tela do PDF sem como voltar, já que o app roda como PWA instalado (sem barra do navegador).
 function botaoVoltarApp(path: string) {
@@ -449,6 +462,7 @@ export default function LevantamentoMobile() {
         .page { break-after: page; }
         .page:last-child { break-after: auto; }
       }
+      ${PRINT_SAFE_CSS}
     </style></head><body>
     ${botaoVoltarApp('/m/levantamento')}
     ${paginas}

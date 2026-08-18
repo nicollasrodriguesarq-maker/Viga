@@ -66,6 +66,20 @@ function htmlGantt(inicio: Date, fim: Date, linhas: { nome: string; fornecedor?:
     </div>`
 }
 
+// Sobrescrita de impressão: os relatórios usam tema escuro na tela, mas impressoras/PDF
+// costumam ignorar o fundo escuro e imprimir em papel branco — sem isso, o texto claro
+// (pensado pra contrastar com #0f141b/#1b2027) fica ilegível em cima do branco. Força fundo
+// branco e texto escuro só no momento de imprimir/exportar, preservando o visual normal na tela.
+const PRINT_SAFE_CSS = `
+      @media print {
+        html, body { background:#ffffff !important; }
+        body { color:#12161c !important; }
+        * { color:#12161c !important; }
+        .card { background:#ffffff !important; }
+        [style*="background:#0f141b"], [style*="background:#1b2027"], [style*="background:#171c23"], [style*="background:#252a32"], [style*="background:#3d4948"] { background:#ffffff !important; }
+        [style*="border:1px solid #3d4948"], [style*="border-bottom:1px solid #3d4948"], [style*="border-top:1px solid #3d4948"], [style*="border-color:#3d4948"] { border-color:#d7dbda !important; }
+      }`
+
 async function buscar(tabela: string, query = '') {
   try {
     const r = await fetch(BASE + '/' + tabela + query, { headers: HDR })
@@ -633,6 +647,7 @@ export default function Obras() {
       body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
       h1,h2 { font-family:'Manrope',sans-serif; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      ${PRINT_SAFE_CSS}
     </style></head><body>
     <div style="max-width:900px;margin:0 auto;padding:40px 36px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
@@ -723,6 +738,7 @@ export default function Obras() {
       body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
       h1,h2 { font-family:'Manrope',sans-serif; }
       @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      ${PRINT_SAFE_CSS}
     </style></head><body>
     <div style="max-width:900px;margin:0 auto;padding:40px 36px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
@@ -760,6 +776,86 @@ export default function Obras() {
         </thead>
         <tbody>${linhasHtml}</tbody>
       </table>
+    </div>
+    <script>window.onload = () => { window.print() }</script>
+    </body></html>`
+
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
+  // Relatório de Visita em PDF — pensado pra mandar direto pro cliente sempre que uma visita
+  // técnica é registrada (mesmo padrão visual dos demais relatórios da obra).
+  async function gerarPDFRelatorioVisita(obra: any, visita: any) {
+    const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
+    const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const climaLabel = CLIMA_OPCOES.find(c => c.v === visita.clima)?.l || visita.clima || '—'
+    const fotos: { url: string; descricao: string }[] = Array.isArray(visita.fotos) ? visita.fotos : []
+
+    const equipeHtml = (visita.equipe_presente || []).length
+      ? (visita.equipe_presente as string[]).map((n: string) => `<span style="display:inline-block;background:#1b2027;border:1px solid #3d4948;border-radius:999px;padding:4px 12px;font-size:11px;margin:0 6px 6px 0">${n}</span>`).join('')
+      : '<span style="color:#869391;font-size:12px">Nenhum nome registrado</span>'
+
+    const fotosHtml = fotos.length
+      ? fotos.map((f, i) => `
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;overflow:hidden;margin-bottom:16px;break-inside:avoid">
+          <img src="${f.url}" style="width:100%;max-height:420px;object-fit:cover;display:block" />
+          <div style="padding:10px 14px">
+            <span style="font-size:10px;color:#6ee9e0;font-weight:700">FOTO ${i + 1}</span>
+            <p style="font-size:12px;color:#bcc9c7;margin-top:2px">${f.descricao || 'Sem descrição'}</p>
+          </div>
+        </div>`).join('')
+      : '<p style="color:#869391;text-align:center;padding:20px 0">Nenhuma foto anexada</p>'
+
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>Relatório de Visita — ${dataBR(visita.data)} — ${nomeEmpresa}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
+      h1,h2 { font-family:'Manrope',sans-serif; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      ${PRINT_SAFE_CSS}
+    </style></head><body>
+    <div style="max-width:900px;margin:0 auto;padding:40px 36px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
+        <div>
+          <h1 style="font-size:24px;font-weight:700;color:#6ee9e0;text-transform:uppercase">Relatório de Visita Técnica</h1>
+          <p style="color:#bcc9c7">${climaLabel}</p>
+        </div>
+        <div style="text-align:right">
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:32px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          <p style="font-size:10px;color:#869391">Data da visita: ${dataBR(visita.data)}</p>
+          <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Obra</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${obra?.nome || ''}</p>
+          <p style="font-size:12px;color:#bcc9c7">${obra?.cliente || ''}</p>
+        </div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#869391;text-transform:uppercase">Equipe presente</span>
+          <div style="margin-top:8px">${equipeHtml}</div>
+        </div>
+      </div>
+      <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px;margin-bottom:16px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Atividades / Descrição da Visita</span>
+        <p style="margin-top:8px;line-height:1.6;white-space:pre-wrap">${visita.descricao || '—'}</p>
+      </div>
+      ${visita.pendencias ? `<div style="background:#1b2027;border:1px solid #ffcbac4d;border-radius:12px;padding:16px;margin-bottom:20px">
+        <span style="font-size:10px;color:#ffcbac;text-transform:uppercase;font-weight:700">⚠ Pendências / Próximos Passos</span>
+        <p style="margin-top:8px;line-height:1.6;white-space:pre-wrap">${visita.pendencias}</p>
+      </div>` : ''}
+      <div style="margin-bottom:12px">
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Registro Fotográfico</span>
+      </div>
+      ${fotosHtml}
+      <div style="display:flex;justify-content:space-between;margin-top:32px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
+        <span>Documento gerado por ${nomeEmpresa}</span>
+        <span>${dataBR(visita.data)}</span>
+      </div>
     </div>
     <script>window.onload = () => { window.print() }</script>
     </body></html>`
@@ -947,6 +1043,7 @@ export default function Obras() {
         .page { break-after: page; }
         .page:last-child { break-after: auto; }
       }
+      ${PRINT_SAFE_CSS}
     </style></head><body>
 
     <!-- PÁGINA 1 -->
@@ -2197,6 +2294,7 @@ export default function Obras() {
                           {climaLabel && <span className="text-[11px] text-on-surface-variant ml-2">{climaLabel}</span>}
                         </div>
                         <div className="flex gap-1.5 shrink-0">
+                          <button className={btnEditSmCls} onClick={() => gerarPDFRelatorioVisita(detalhe, v)} title="Gerar PDF para enviar ao cliente">🖨️</button>
                           <button className={btnEditSmCls} onClick={() => abrirEditarVisita(v)}>✏️</button>
                           <button className={btnDangerSmCls} onClick={() => excluirVisita(v)}>×</button>
                         </div>

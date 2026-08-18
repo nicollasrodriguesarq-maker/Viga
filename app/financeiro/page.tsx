@@ -45,6 +45,20 @@ async function uploadNF(file: File, lancamentoDesc: string): Promise<string | nu
   } catch { return null }
 }
 
+// Sobrescrita de impressão: os relatórios usam tema escuro na tela, mas impressoras/PDF
+// costumam ignorar o fundo escuro e imprimir em papel branco — sem isso, o texto claro
+// (pensado pra contrastar com #0f141b/#1b2027) fica ilegível em cima do branco. Força fundo
+// branco e texto escuro só no momento de imprimir/exportar, preservando o visual normal na tela.
+const PRINT_SAFE_CSS = `
+      @media print {
+        html, body { background:#ffffff !important; }
+        body { color:#12161c !important; }
+        * { color:#12161c !important; }
+        .card { background:#ffffff !important; }
+        [style*="background:#0f141b"], [style*="background:#1b2027"], [style*="background:#171c23"], [style*="background:#252a32"], [style*="background:#3d4948"] { background:#ffffff !important; }
+        [style*="border:1px solid #3d4948"], [style*="border-bottom:1px solid #3d4948"], [style*="border-top:1px solid #3d4948"], [style*="border-color:#3d4948"] { border-color:#d7dbda !important; }
+      }`
+
 // Relatório Financeiro Mensal em PDF — visão geral (balanço, lucro, impostos, distribuição
 // por categoria) seguida da lista completa de lançamentos com link direto para a NF anexada.
 // Pensado para encaminhar à contabilidade ou levar para reunião financeira.
@@ -131,6 +145,7 @@ async function gerarPDFRelatorioMensal(lancamentos: any[], obras: any[], mes: st
       .page { break-after: page; }
       .page:last-child { break-after: auto; }
     }
+    ${PRINT_SAFE_CSS}
   </style></head><body>
 
   <!-- PÁGINA 1 — VISÃO GERAL -->

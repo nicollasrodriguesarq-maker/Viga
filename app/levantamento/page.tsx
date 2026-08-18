@@ -11,6 +11,20 @@ const moeda = (v: number) => Number(v||0).toLocaleString('pt-BR', { style: 'curr
 const num = (v: string) => parseFloat(String(v || '0').replace(',', '.')) || 0
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro']
 
+// Sobrescrita de impressão: os relatórios usam tema escuro na tela, mas impressoras/PDF
+// costumam ignorar o fundo escuro e imprimir em papel branco — sem isso, o texto claro
+// (pensado pra contrastar com #0f141b/#1b2027) fica ilegível em cima do branco. Força fundo
+// branco e texto escuro só no momento de imprimir/exportar, preservando o visual normal na tela.
+const PRINT_SAFE_CSS = `
+      @media print {
+        html, body { background:#ffffff !important; }
+        body { color:#12161c !important; }
+        * { color:#12161c !important; }
+        .card { background:#ffffff !important; }
+        [style*="background:#0f141b"], [style*="background:#1b2027"], [style*="background:#171c23"], [style*="background:#252a32"], [style*="background:#3d4948"] { background:#ffffff !important; }
+        [style*="border:1px solid #3d4948"], [style*="border-bottom:1px solid #3d4948"], [style*="border-top:1px solid #3d4948"], [style*="border-color:#3d4948"] { border-color:#d7dbda !important; }
+      }`
+
 // Calcula a área/quantidade conforme a unidade: m² usa comprimento x altura
 // (medida típica de parede), com fallback pra comprimento x largura quando não
 // há altura informada (medida típica de piso); m³ usa os três; demais
@@ -626,6 +640,7 @@ export default function Levantamento() {
         .page { break-after: page; }
         .page:last-child { break-after: auto; }
       }
+      ${PRINT_SAFE_CSS}
     </style></head><body>
     ${paginas}
     <script>window.onload = () => { window.print() }</script>

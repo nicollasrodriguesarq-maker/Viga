@@ -76,7 +76,7 @@ const PRINT_SAFE_CSS = `
         body { color:#12161c !important; }
         * { color:#12161c !important; }
         .card { background:#ffffff !important; }
-        [style*="background:#0f141b"], [style*="background:#1b2027"], [style*="background:#171c23"], [style*="background:#252a32"], [style*="background:#3d4948"] { background:#ffffff !important; }
+        [style*="background:#0f141b"], [style*="background:#1b2027"], [style*="background:#171c23"], [style*="background:#252a32"], [style*="background:#3d4948"], [style*="linear-gradient"] { background:#ffffff !important; }
         [style*="border:1px solid #3d4948"], [style*="border-bottom:1px solid #3d4948"], [style*="border-top:1px solid #3d4948"], [style*="border-color:#3d4948"] { border-color:#d7dbda !important; }
       }`
 
@@ -656,7 +656,7 @@ export default function Obras() {
           <p style="color:#bcc9c7">${medicao.tipo === 'fornecedor' ? 'Pagamento a Fornecedor' : 'Cobrança ao Cliente'}</p>
         </div>
         <div style="text-align:right">
-          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:32px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:56px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
           <p style="font-size:10px;color:#869391">Nº ${medicao.numero}</p>
           <p style="font-size:10px;color:#869391">Data: ${new Date(medicao.data).toLocaleDateString('pt-BR')}</p>
         </div>
@@ -747,7 +747,7 @@ export default function Obras() {
           <p style="color:#bcc9c7">Serviços, datas previstas e status</p>
         </div>
         <div style="text-align:right">
-          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:32px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:56px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
           <p style="font-size:10px;color:#869391">Ref: ${obra.codigo}</p>
           <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
         </div>
@@ -824,7 +824,7 @@ export default function Obras() {
           <p style="color:#bcc9c7">${climaLabel}</p>
         </div>
         <div style="text-align:right">
-          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:32px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:56px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
           <p style="font-size:10px;color:#869391">Data da visita: ${dataBR(visita.data)}</p>
           <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
         </div>

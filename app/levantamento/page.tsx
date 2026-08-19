@@ -21,7 +21,7 @@ const PRINT_SAFE_CSS = `
         body { color:#12161c !important; }
         * { color:#12161c !important; }
         .card { background:#ffffff !important; }
-        [style*="background:#0f141b"], [style*="background:#1b2027"], [style*="background:#171c23"], [style*="background:#252a32"], [style*="background:#3d4948"] { background:#ffffff !important; }
+        [style*="background:#0f141b"], [style*="background:#1b2027"], [style*="background:#171c23"], [style*="background:#252a32"], [style*="background:#3d4948"], [style*="linear-gradient"] { background:#ffffff !important; }
         [style*="border:1px solid #3d4948"], [style*="border-bottom:1px solid #3d4948"], [style*="border-top:1px solid #3d4948"], [style*="border-color:#3d4948"] { border-color:#d7dbda !important; }
       }`
 

@@ -481,7 +481,7 @@ export default function ObrasMobile() {
           <p style="color:#bcc9c7">Serviços, datas previstas e status</p>
         </div>
         <div style="text-align:right">
-          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:56px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:80px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
           <p style="font-size:10px;color:#869391">Ref: ${obra.codigo}</p>
           <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
         </div>
@@ -928,7 +928,7 @@ export default function ObrasMobile() {
           <p style="color:#bcc9c7">${climaLabel}</p>
         </div>
         <div style="text-align:right">
-          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:56px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:80px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
           <p style="font-size:10px;color:#869391">Data da visita: ${dataBR(visita.data)}</p>
           <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
         </div>

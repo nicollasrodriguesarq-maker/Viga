@@ -622,8 +622,8 @@ export default function ObrasMobile() {
     const custos = custosObra(obra.id)
     const receitas = receitasObra(obra.id)
     const contrato = parseFloat(obra.valor_contrato || 0)
-    const margem = receitas - custos
-    const margemPrevistaPct = contrato > 0 ? ((contrato - custos) / contrato) * 100 : 0
+    const margem = obra.gerenciamento ? receitas : receitas - custos
+    const margemPrevistaPct = contrato > 0 ? (obra.gerenciamento ? (receitas / contrato) * 100 : ((contrato - custos) / contrato) * 100) : 0
 
     const svsObra = servicos.filter(s => s.obra_id === obra.id)
     const etapasObra = etapas.filter(e => e.obra_id === obra.id)
@@ -1314,7 +1314,7 @@ export default function ObrasMobile() {
     const receitas = receitasObra(detalhe.id)
     const contrato = parseFloat(detalhe.valor_contrato || 0)
     const prevTotal = totalPrevisto(detalhe.id)
-    const margem = receitas - custos
+    const margem = detalhe.gerenciamento ? receitas : receitas - custos
     const svs = ordenarServicosObra(servicosObra(detalhe.id))
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
     const medicoesObra = medicoes.filter(m => m.obra_id === detalhe.id)
@@ -1344,14 +1344,17 @@ export default function ObrasMobile() {
           <div>
             <div className="text-headline-sm font-headline text-on-surface">{detalhe.nome}</div>
             <div className="text-body-sm text-on-surface-variant">{detalhe.cliente}{detalhe.endereco ? ' · ' + detalhe.endereco : ''}</div>
-            <span className="text-[11px] font-semibold text-on-surface-variant uppercase">{STATUS_NOME[detalhe.status] || detalhe.status}</span>
+            <div className="flex items-center gap-1.5 mt-0.5">
+              <span className="text-[11px] font-semibold text-on-surface-variant uppercase">{STATUS_NOME[detalhe.status] || detalhe.status}</span>
+              {detalhe.gerenciamento && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-secondary/10 text-secondary border-secondary/20">🤝 Gerenciamento</span>}
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2.5">
             {([
               ['Contrato', moeda(contrato), 'text-primary'],
               ['Recebido', moeda(receitas), 'text-primary-container'],
-              ['Custos Reais', moeda(custos), 'text-error'],
+              [detalhe.gerenciamento ? 'Custos (do Cliente)' : 'Custos Reais', moeda(custos), 'text-error'],
               ['Margem Atual', moeda(margem), margem >= 0 ? 'text-primary-container' : 'text-error'],
             ] as [string, string, string][]).map(([l, v, c]) => (
               <div key={l} className="bg-surface-container-high border border-outline-variant rounded-lg p-3">

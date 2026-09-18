@@ -664,32 +664,40 @@ export default function Financeiro() {
 
   // Cálculos
   const mesNome = meses[parseInt(filtroMes.slice(5,7))-1] + ' ' + filtroMes.slice(0,4)
-  const lancMes = lancamentos.filter(l => l.data?.slice(0,7) === filtroMes)
+  // Obra de Gerenciamento: o fornecedor é contratado e pago pelo cliente, não pela Inverso —
+  // toda saída vinculada a essa obra é dinheiro de terceiro (a Inverso só controla a medição
+  // e o pagamento), então fica fora do balanço geral da empresa. A entrada (taxa de
+  // gerenciamento cobrada do cliente) continua contando normalmente. Isso não mexe na aba
+  // Obras (que continua mostrando o custo real pro cliente) nem no saldo de cada conta
+  // bancária (saldoConta, que reflete o extrato real independente de quem é o dono do dinheiro).
+  const obrasGerenciamento = new Set(obras.filter((o: any) => o.gerenciamento).map((o: any) => o.id))
+  const lancamentosEmpresa = lancamentos.filter(l => !(l.tipo === 'saida' && l.obra_id && obrasGerenciamento.has(l.obra_id)))
+  const lancMes = lancamentosEmpresa.filter(l => l.data?.slice(0,7) === filtroMes)
   const saldoBase = contas.reduce((a,c)=>a+parseFloat(c.saldo_inicial||0),0)
   const saldoTotal = saldoBase
-    + lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pago').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-    - lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pago').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+    + lancamentosEmpresa.filter(l=>l.tipo==='entrada'&&l.status==='pago').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+    - lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status==='pago').reduce((a,l)=>a+parseFloat(l.valor||0),0)
   const saldoAnterior = saldoBase
-    + lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pago'&&(l.data||'').slice(0,7)<filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0)
-    - lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pago'&&(l.data||'').slice(0,7)<filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const aPagar  = lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+    + lancamentosEmpresa.filter(l=>l.tipo==='entrada'&&l.status==='pago'&&(l.data||'').slice(0,7)<filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0)
+    - lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status==='pago'&&(l.data||'').slice(0,7)<filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0)
+  const aPagar  = lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((a,l)=>a+parseFloat(l.valor||0),0)
   const totalInvestido = investimentos.reduce((a,i) => {
     const v = parseFloat(i.valor||0)
     return i.tipo === 'aporte' ? a + v : a - v
   }, 0)
-  const aReceber = lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const custosFixosMes = lancamentos.filter(l=>l.recorrente && l.tipo==='saida' && (l.data||'').slice(0,7)===filtroMes)
+  const aReceber = lancamentosEmpresa.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+  const custosFixosMes = lancamentosEmpresa.filter(l=>l.recorrente && l.tipo==='saida' && (l.data||'').slice(0,7)===filtroMes)
   const totalCustosFixos = custosFixosMes.reduce((a,l)=>a+parseFloat(l.valor||0),0)
 
   const hoje = new Date(); hoje.setHours(0,0,0,0)
   const mesRealAtual = new Date().toISOString().slice(0,7)
   const em7dias = new Date(); em7dias.setDate(hoje.getDate()+7)
-  const vencProximos = lancamentos.filter(l => {
+  const vencProximos = lancamentosEmpresa.filter(l => {
     if (l.status !== 'pendente' || l.tipo !== 'saida') return false
     const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
     return venc >= hoje && venc <= em7dias
   })
-  const vencAtrasados = lancamentos.filter(l => {
+  const vencAtrasados = lancamentosEmpresa.filter(l => {
     if (l.status !== 'pendente' || l.tipo !== 'saida') return false
     const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
     return venc < hoje
@@ -700,7 +708,7 @@ export default function Financeiro() {
   // do balanço quando o mês vira.
   const idsNoMes = new Set(lancMes.map(l => l.id))
   const vencidosArrastados = filtroMes === mesRealAtual
-    ? lancamentos.filter(l => {
+    ? lancamentosEmpresa.filter(l => {
         if (l.status !== 'pendente' || idsNoMes.has(l.id)) return false
         const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
         return venc <= em7dias
@@ -741,15 +749,19 @@ export default function Financeiro() {
     const receitas = getReceitasObra(obraDetalhe.id)
     const custos   = getCustosObra(obraDetalhe.id)
     const contrato = parseFloat(obraDetalhe.valor_contrato||0)
-    const margem   = receitas - custos
-    const pctC     = contrato > 0 ? Math.min((custos/contrato)*100, 100) : 0
+    // Gerenciamento: custo é do cliente, não da Inverso — margem é só a taxa recebida.
+    const margem   = obraDetalhe.gerenciamento ? receitas : receitas - custos
+    const pctC     = contrato > 0 ? Math.min(((obraDetalhe.gerenciamento ? receitas : custos)/contrato)*100, 100) : 0
 
     return (
       <Layout userEmail={userEmail} onLogout={sair}>
         <div className="flex items-center gap-4 flex-wrap mb-lg">
           <button onClick={() => setObraDetalhe(null)} className={btnSecondaryCls}>← Voltar</button>
           <div>
-            <div className="text-xl font-bold text-on-surface">{obraDetalhe.nome}</div>
+            <div className="text-xl font-bold text-on-surface flex items-center gap-2">
+              {obraDetalhe.nome}
+              {obraDetalhe.gerenciamento && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-secondary/10 text-secondary border-secondary/20" title="Custos de fornecedor são do cliente — não entram no balanço da Inverso">🤝 Gerenciamento</span>}
+            </div>
             <div className="text-body-sm text-on-surface-variant">{obraDetalhe.codigo} · Financeiro da Obra</div>
           </div>
           <div className="ml-auto">
@@ -761,7 +773,7 @@ export default function Financeiro() {
           {[
             {l:'Contrato', v:fmt(contrato), c:'text-primary'},
             {l:'Receitas', v:fmt(receitas), c:'text-primary-container'},
-            {l:'Custos', v:fmt(custos), c:'text-error'},
+            {l: obraDetalhe.gerenciamento ? 'Custos (do Cliente)' : 'Custos', v:fmt(custos), c:'text-error'},
             {l:'Margem', v:fmt(margem), c: margem>=0?'text-primary-container':'text-error'},
           ].map(({l,v,c}) => (
             <div key={l} className={cardCls}>
@@ -1106,18 +1118,21 @@ export default function Financeiro() {
               const custos = getCustosObra(obra.id)
               const receitas = getReceitasObra(obra.id)
               const contrato = parseFloat(obra.valor_contrato||0)
-              const margem = receitas - custos
-              const pctO = contrato>0?Math.min((custos/contrato)*100,100):0
+              const margem = obra.gerenciamento ? receitas : receitas - custos
+              const pctO = contrato>0?Math.min(((obra.gerenciamento ? receitas : custos)/contrato)*100,100):0
               return (
                 <div key={obra.id} onClick={()=>setObraDetalhe(obra)}
                   className="bg-surface-container border border-outline-variant hover:border-primary transition-all duration-300 rounded-xl p-5 cursor-pointer">
                   <div className="mb-3">
                     <div className="text-[11px] text-on-surface-variant mb-1">{obra.codigo}</div>
-                    <div className="text-base font-bold text-on-surface">{obra.nome}</div>
+                    <div className="text-base font-bold text-on-surface flex items-center gap-1.5">
+                      {obra.nome}
+                      {obra.gerenciamento && <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full border bg-secondary/10 text-secondary border-secondary/20">🤝</span>}
+                    </div>
                     <div className="text-body-sm text-on-surface-variant">{obra.cliente}</div>
                   </div>
                   <div className="grid grid-cols-3 gap-2 mb-3">
-                    {[{l:'CONTRATO',v:fmt(contrato),c:'text-primary'},{l:'CUSTOS',v:fmt(custos),c:'text-error'},{l:'MARGEM',v:fmt(margem),c:margem>=0?'text-primary-container':'text-error'}].map(({l,v,c})=>(
+                    {[{l:'CONTRATO',v:fmt(contrato),c:'text-primary'},{l: obra.gerenciamento ? 'CUSTOS (CLIENTE)' : 'CUSTOS',v:fmt(custos),c:'text-error'},{l:'MARGEM',v:fmt(margem),c:margem>=0?'text-primary-container':'text-error'}].map(({l,v,c})=>(
                       <div key={l} className="bg-surface-container-high rounded-lg p-2.5">
                         <div className="text-[10px] text-on-surface-variant mb-1">{l}</div>
                         <div className={`text-xs font-bold ${c}`}>{v}</div>

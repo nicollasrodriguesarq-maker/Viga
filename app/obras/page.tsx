@@ -298,7 +298,8 @@ export default function Obras() {
   const [fObra, setFObra] = useState({
     codigo: '', nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '',
     endereco: '', responsavel: '', status: 'em_execucao',
-    data_inicio: '', data_previsao: '', valor_contrato: '', dias_trabalho: 'seg_sex'
+    data_inicio: '', data_previsao: '', valor_contrato: '', dias_trabalho: 'seg_sex',
+    gerenciamento: false,
   })
 
   const [fServ, setFServ] = useState({
@@ -974,8 +975,10 @@ export default function Obras() {
     const custos = custosObra(obra.id)
     const receitas = receitasObra(obra.id)
     const contrato = parseFloat(obra.valor_contrato || 0)
-    const margem = receitas - custos
-    const margemPrevistaPct = contrato > 0 ? ((contrato - custos) / contrato) * 100 : 0
+    // Gerenciamento: o custo do fornecedor é do cliente, não da Inverso — margem = receita
+    // da taxa de gerenciamento, sem subtrair um custo que não é dela (mesma lógica da tela).
+    const margem = obra.gerenciamento ? receitas : receitas - custos
+    const margemPrevistaPct = contrato > 0 ? (obra.gerenciamento ? (receitas / contrato) * 100 : ((contrato - custos) / contrato) * 100) : 0
 
     const svsObra = servicos.filter(s => s.obra_id === obra.id)
     const etapasObra = etapas.filter(e => e.obra_id === obra.id)
@@ -1496,6 +1499,7 @@ export default function Obras() {
       data_previsao: fObra.data_previsao || null,
       valor_contrato: parseFloat(fObra.valor_contrato || '0'),
       dias_trabalho: fObra.dias_trabalho || 'seg_sex',
+      gerenciamento: !!fObra.gerenciamento,
     }
     let obraId = obraEditando?.id
     if (obraEditando) {
@@ -1545,7 +1549,7 @@ export default function Obras() {
   }
 
   function abrirNovaObra() {
-    setFObra({ codigo: gerarCodigo(obras), nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '', endereco: '', responsavel: '', status: 'em_execucao', data_inicio: '', data_previsao: '', valor_contrato: '', dias_trabalho: 'seg_sex' })
+    setFObra({ codigo: gerarCodigo(obras), nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '', endereco: '', responsavel: '', status: 'em_execucao', data_inicio: '', data_previsao: '', valor_contrato: '', dias_trabalho: 'seg_sex', gerenciamento: false })
     setObraEditando(null)
     setJanela('nova_obra')
   }
@@ -1559,6 +1563,7 @@ export default function Obras() {
       data_inicio: obra.data_inicio || '', data_previsao: obra.data_previsao || '',
       valor_contrato: obra.valor_contrato != null ? String(obra.valor_contrato) : '',
       dias_trabalho: obra.dias_trabalho || 'seg_sex',
+      gerenciamento: !!obra.gerenciamento,
     })
     setObraEditando(obra)
     setJanela('editar_obra')
@@ -1613,11 +1618,16 @@ export default function Obras() {
     const svs       = ordenarServicosObra(servicosObra(detalhe.id))
     const lancD     = lancs.filter(l => l.obra_id === detalhe.id)
     const gastD     = gastos.filter(g => g.obra_id === detalhe.id)
-    const pctCont   = pct(custos, contrato)
+    // Numa obra de Gerenciamento, o custo do fornecedor é do cliente, não da Inverso — a
+    // margem/lucro da empresa nessa obra é só a taxa de gerenciamento recebida (receitas),
+    // sem subtrair um custo que não é dela; e "consumo do contrato" passa a comparar quanto
+    // da taxa já foi cobrada, não o custo repassado (que pode superar o próprio contrato de
+    // gerenciamento sem que isso signifique nada de errado).
+    const pctCont   = detalhe.gerenciamento ? pct(receitas, contrato) : pct(custos, contrato)
     const pctServ   = pct(realTotal, prevTotal)
     const atrasada  = detalhe.data_previsao && new Date(detalhe.data_previsao) < new Date() && detalhe.status === 'em_execucao'
-    const margem    = receitas - custos
-    const pctMargem = receitas > 0 ? Math.min(Math.max(((receitas - custos) / receitas) * 100, 0), 100) : 0
+    const margem    = detalhe.gerenciamento ? receitas : receitas - custos
+    const pctMargem = receitas > 0 ? Math.min(Math.max((margem / receitas) * 100, 0), 100) : 0
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
     const etapasObra = etapas.filter(e => e.obra_id === detalhe.id)
     const hoje = new Date(); hoje.setHours(0,0,0,0)
@@ -1655,6 +1665,7 @@ export default function Obras() {
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-body-sm text-on-surface-variant font-semibold">{detalhe.codigo}</span>
               <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${EXECUCAO_BADGE[detalhe.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[detalhe.tipo_execucao || 'obra']}</span>
+              {detalhe.gerenciamento && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-secondary/10 text-secondary border-secondary/20" title="Custos de fornecedor são do cliente — não entram no financeiro da Inverso">🤝 Gerenciamento</span>}
               <Bdg status={detalhe.status} />
               {atrasada && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-error/10 text-error border-error/20">⚠️ Atrasada</span>}
             </div>
@@ -1682,7 +1693,7 @@ export default function Obras() {
           {([
             ['Contrato', moeda(contrato), 'text-primary'],
             ['Recebido', moeda(receitas), 'text-primary-container'],
-            ['Custos Reais', moeda(custos), 'text-error'],
+            [detalhe.gerenciamento ? 'Custos (do Cliente)' : 'Custos Reais', moeda(custos), 'text-error'],
             ['Margem Atual', moeda(margem), margem >= 0 ? 'text-primary-container' : 'text-error'],
             ['Prev. Serviços', moeda(prevTotal), 'text-tertiary'],
             ['Gasto Serviços', moeda(realTotal), realTotal > prevTotal && prevTotal > 0 ? 'text-error' : realTotal > 0 ? 'text-primary' : 'text-on-surface-variant'],
@@ -1698,14 +1709,14 @@ export default function Obras() {
         {contrato > 0 && (
           <div className={sectionCls}>
             <div className="flex justify-between text-body-sm text-on-surface-variant mb-1.5">
-              <span>Consumo do contrato — {moeda(custos)} de {moeda(contrato)}</span>
+              <span>{detalhe.gerenciamento ? 'Taxa de gerenciamento cobrada' : 'Consumo do contrato'} — {moeda(detalhe.gerenciamento ? receitas : custos)} de {moeda(contrato)}</span>
               <span className={corPct(pctCont).text}>{pctCont.toFixed(1)}%</span>
             </div>
             <div className="h-[7px] bg-surface-variant rounded overflow-hidden mb-3.5">
               <div className={`h-full rounded ${corPct(pctCont).bar}`} style={{ width: pctCont + '%' }} />
             </div>
             <div className="flex justify-between text-body-sm text-on-surface-variant mb-1.5">
-              <span>Margem — Recebido: {moeda(receitas)} · Custos: {moeda(custos)} · Margem: {moeda(margem)}</span>
+              <span>Margem — Recebido: {moeda(receitas)} · Custos{detalhe.gerenciamento ? ' (repassado ao cliente, fora do balanço da Inverso)' : ''}: {moeda(custos)} · Margem: {moeda(margem)}</span>
               <span className={corSinal(margem).text}>{contrato > 0 ? ((margem / contrato) * 100).toFixed(1) : 0}%</span>
             </div>
             <div className={`h-[7px] bg-surface-variant rounded overflow-hidden ${prevTotal > 0 ? 'mb-3.5' : ''}`}>
@@ -2945,6 +2956,14 @@ function FormObra({ f, setF, obras, editando, salvar, cancelar }: {
           <input className={inputCls} placeholder="Nome do cliente" value={f.cliente} onChange={(e: any) => setF({ ...f, cliente: e.target.value })} />
         </div>
       </div>
+
+      <label className="flex items-start gap-2.5 mb-3.5 px-3.5 py-2.5 bg-secondary/5 border border-secondary/20 rounded-lg cursor-pointer select-none">
+        <input type="checkbox" checked={!!f.gerenciamento} onChange={(e: any) => setF({ ...f, gerenciamento: e.target.checked })} className="w-4 h-4 accent-secondary cursor-pointer mt-0.5" />
+        <span>
+          <span className="block text-body-sm font-semibold text-on-surface">🤝 Esta obra é um contrato de Gerenciamento</span>
+          <span className="block text-[11px] text-on-surface-variant mt-0.5">Nós controlamos as medições e pagamentos do fornecedor, mas quem paga é o cliente — o custo dele não entra no financeiro da Inverso. Só a medição de taxa de gerenciamento conta como receita.</span>
+        </span>
+      </label>
 
       <div className="mb-3.5">
         <label className={labelCls}>Endereço</label>

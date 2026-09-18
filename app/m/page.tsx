@@ -79,10 +79,13 @@ export default function DashboardMobile() {
     setObrasAtivas(obrasVisiveis.filter((o: any) => o.status === 'em_execucao').length)
     setObrasRecentes(obrasVisiveis.slice(0, 4))
     setCompromissosHoje(compromissos)
+    // Obra de Gerenciamento: a saída paga ao fornecedor é dinheiro do cliente, não da
+    // Inverso, e não deve aparecer como "a pagar" da empresa (mesma regra do Financeiro).
+    const obrasGerenciamento = new Set(obras.filter((o: any) => o.gerenciamento).map((o: any) => o.id))
     const lancMes = lancamentos.filter((l: any) => l.data?.slice(0, 7) === mesAtual)
     setFaturamentoMes(lancMes.filter((l: any) => l.tipo === 'entrada').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
     setAReceber(lancamentos.filter((l: any) => l.tipo === 'entrada' && l.status === 'pendente').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
-    setAPagar(lancamentos.filter((l: any) => l.tipo === 'saida' && l.status === 'pendente').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
+    setAPagar(lancamentos.filter((l: any) => l.tipo === 'saida' && l.status === 'pendente' && !(l.obra_id && obrasGerenciamento.has(l.obra_id))).reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
     setCarregando(false)
   }
 

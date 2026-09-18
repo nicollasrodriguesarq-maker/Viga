@@ -364,6 +364,37 @@ export default function ObrasMobile() {
     })
     return { totalPeriodo, totalLiquido }
   }
+  // Mapa Geral: pivota medicao_itens numa linha por item × uma coluna por medição real do
+  // grupo (estilo planilha "Medição Física" que o cliente usa). Mesmo motor do desktop
+  // (app/obras/page.tsx).
+  function mapaGeralGrupo(grupo: { tipo: 'cliente' | 'fornecedor'; fornecedor: string | null; medicoes: any[] }, itensGrupo: any[]) {
+    const itensOrdenados = ordenarServicosObra(itensGrupo)
+    const medicoesReais = grupo.medicoes.filter(m => m.valor_adiantamento == null)
+    const linhas = itensOrdenados.map(item => {
+      const porMedicao = medicoesReais.map(med => {
+        const mi = medItens.find(x => x.medicao_id === med.id && x.servico_id === item.id)
+        const ultimo = ultimoRegistro(item.id, med.id, med.tipo, med.fornecedor, med.data)
+        const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
+        const valorBase = mi ? mi.valor_base : (ultimo ? ultimo.valor_base : baseParaMedicao(item, med.tipo))
+        const acumAtual = mi ? mi.valor_base * mi.percentual_acumulado : acumAnterior
+        const valorPeriodo = acumAtual - acumAnterior
+        return { med, valorBase, valorPeriodo, pctPeriodo: valorBase > 0 ? (valorPeriodo / valorBase) * 100 : 0, acumAtual }
+      })
+      const ultimaColuna = porMedicao[porMedicao.length - 1]
+      const valorAcum = ultimaColuna ? ultimaColuna.acumAtual : 0
+      const baseFinal = ultimaColuna ? ultimaColuna.valorBase : baseParaMedicao(item, grupo.tipo)
+      const pctAcum = baseFinal > 0 ? (valorAcum / baseFinal) * 100 : 0
+      return { item, porMedicao, valorBase: baseFinal, valorAcum, pctAcum, valorFalta: Math.max(baseFinal - valorAcum, 0), pctFalta: Math.max(100 - pctAcum, 0) }
+    })
+    const totaisPorMedicao = medicoesReais.map((_, idx) => linhas.reduce((a, l) => a + (l.porMedicao[idx]?.valorPeriodo || 0), 0))
+    const totalBase = linhas.reduce((a, l) => a + l.valorBase, 0)
+    const totalAcum = linhas.reduce((a, l) => a + l.valorAcum, 0)
+    const totalFalta = linhas.reduce((a, l) => a + l.valorFalta, 0)
+    const totalPctAcum = totalBase > 0 ? (totalAcum / totalBase) * 100 : 0
+    const totalPctFalta = totalBase > 0 ? (totalFalta / totalBase) * 100 : 0
+    return { itensOrdenados, medicoesReais, linhas, totaisPorMedicao, totalBase, totalAcum, totalFalta, totalPctAcum, totalPctFalta }
+  }
+
   // Relatório Completo de Medições — histórico acumulado de todas as medições já lançadas
   // para um fornecedor (ou para o cliente), com o panorama pago × falta pagar. Mesmo padrão
   // do desktop (app/obras/page.tsx).
@@ -392,6 +423,76 @@ export default function ObrasMobile() {
     }).join('')
     const faltaGrupo = previstoGrupo - pagoGrupo
 
+    // Mapa Geral (linha por item × coluna por medição real, estilo "Medição Física" da
+    // planilha que o cliente usa) e Curva S Físico × Financeiro escopados a este grupo.
+    const svsObraMapa = servicosObra(obra.id)
+    const itensGrupoMapa = svsObraMapa.filter((s: any) => grupo.tipo !== 'fornecedor' || s.fornecedor === grupo.fornecedor)
+    const mapa = mapaGeralGrupo(grupo, itensGrupoMapa)
+
+    let categoriaAnteriorMapa: string | null = null
+    const mapaLinhasHtml = mapa.linhas.map(l => {
+      const categoriaAtual = l.item.categoria || 'Outros'
+      const headerCategoria = categoriaAtual !== categoriaAnteriorMapa
+        ? `<tr><td colspan="${4 + mapa.medicoesReais.length * 2 + 4}" style="padding:6px 10px;background:#252a32;color:#6ee9e0;font-weight:700;font-size:10px;text-transform:uppercase">${categoriaAtual}</td></tr>`
+        : ''
+      categoriaAnteriorMapa = categoriaAtual
+      const colsPorMedicao = l.porMedicao.map(pm => `
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;border-left:1px solid #3d4948;text-align:center;color:#bcc9c7">${pm.pctPeriodo.toFixed(0)}%</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;text-align:right;color:#bcc9c7">${moeda(pm.valorPeriodo)}</td>`).join('')
+      return `${headerCategoria}<tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948">${l.item.nome}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;text-align:center;color:#869391">${l.item.unidade || '—'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;text-align:center;color:#869391">${l.item.quantidade ?? '—'}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;text-align:right">${moeda(l.valorBase)}</td>
+        ${colsPorMedicao}
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;border-left:1px solid #3d4948;text-align:center;color:#6ee9e0;font-weight:700">${l.pctAcum.toFixed(0)}%</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;text-align:right;color:#6ee9e0;font-weight:700">${moeda(l.valorAcum)}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;border-left:1px solid #3d4948;text-align:center;color:#ffb4ab">${l.pctFalta.toFixed(0)}%</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #3d4948;text-align:right;color:#ffb4ab">${moeda(l.valorFalta)}</td>
+      </tr>`
+    }).join('')
+    const mapaCabecalhoMedicoes = mapa.medicoesReais.map((med, i) => `<th colspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase;border-left:1px solid #3d4948">Medição ${i + 1}<br/><span style="font-weight:400;text-transform:none">${new Date(med.data).toLocaleDateString('pt-BR')}</span></th>`).join('')
+    const mapaSubcabecalhoMedicoes = mapa.medicoesReais.map(() => `<th style="padding:4px 8px;text-align:center;font-size:9px;color:#869391;border-left:1px solid #3d4948">%</th><th style="padding:4px 8px;text-align:center;font-size:9px;color:#869391">R$</th>`).join('')
+    const mapaRodapeMedicoes = mapa.totaisPorMedicao.map(v => `
+        <td style="padding:8px;border-left:1px solid #3d4948;text-align:center;font-size:9px;color:#869391">${mapa.totalBase > 0 ? ((v / mapa.totalBase) * 100).toFixed(0) : '0'}%</td>
+        <td style="padding:8px;text-align:right;font-weight:700">${moeda(v)}</td>`).join('')
+
+    // Curva S Físico × Financeiro — eixo de datas real do grupo (não um cronograma fixo),
+    // físico = acumulado medido (mesma lógica de progressoFisico, escopada ao grupo),
+    // financeiro = acumulado pago (inclui adiantamento, já que ele também conta como pago
+    // no painel Pago × Falta Pagar acima).
+    const datasGrupoCurva = grupo.medicoes.map(m => new Date(m.data + 'T00:00:00'))
+    const inicioCurva = datasGrupoCurva.length ? new Date(Math.min(...datasGrupoCurva.map(d => d.getTime()))) : new Date()
+    const fimCurva = datasGrupoCurva.length ? new Date(Math.max(...datasGrupoCurva.map(d => d.getTime()))) : new Date()
+    const totalMsCurva = Math.max(fimCurva.getTime() - inicioCurva.getTime(), 1)
+    function serieParaPathGrupo(serie: { data: Date; pct: number }[]) {
+      return serie.map((p, i) => {
+        const x = Math.max(0, Math.min(800, ((p.data.getTime() - inicioCurva.getTime()) / totalMsCurva) * 800))
+        const y = 300 - (p.pct / 100) * 300
+        return (i === 0 ? 'M ' : 'L ') + x.toFixed(1) + ' ' + y.toFixed(1)
+      }).join(' ')
+    }
+    const fisicoSerie: { data: Date; pct: number }[] = [{ data: inicioCurva, pct: 0 }]
+    mapa.medicoesReais.forEach((med, idx) => {
+      const acumAte = mapa.linhas.reduce((a, l) => a + (l.porMedicao[idx]?.acumAtual || 0), 0)
+      fisicoSerie.push({ data: new Date(med.data + 'T00:00:00'), pct: mapa.totalBase > 0 ? Math.min((acumAte / mapa.totalBase) * 100, 100) : 0 })
+    })
+    let pagoAcumCurva = 0
+    const financeiroSerie: { data: Date; pct: number }[] = [{ data: inicioCurva, pct: 0 }]
+    grupo.medicoes.slice().sort((a, b) => a.data < b.data ? -1 : 1).forEach(med => {
+      const lanc = med.lancamento_id ? lancs.find((l: any) => l.id === med.lancamento_id) : null
+      if (lanc?.status === 'pago') pagoAcumCurva += totalsMedicao(med).totalLiquido
+      financeiroSerie.push({ data: new Date(med.data + 'T00:00:00'), pct: mapa.totalBase > 0 ? Math.min((pagoAcumCurva / mapa.totalBase) * 100, 100) : 0 })
+    })
+    const fisicoPath = serieParaPathGrupo(fisicoSerie)
+    const financeiroPath = serieParaPathGrupo(financeiroSerie)
+    const temCurvaGrupo = mapa.medicoesReais.length >= 2
+    const eixoDatasCurva: string[] = []
+    for (let i = 0; i <= 4; i++) {
+      const d = new Date(inicioCurva.getTime() + (totalMsCurva * i) / 4)
+      eixoDatasCurva.push(d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', ''))
+    }
+
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
     <title>Relatório Completo — ${nomeGrupo} — ${nomeEmpresa}</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
@@ -403,7 +504,7 @@ export default function ObrasMobile() {
       ${PRINT_SAFE_CSS}
     </style></head><body>
     ${botaoVoltarApp('/m/obras')}
-    <div style="max-width:900px;margin:0 auto;padding:40px 36px">
+    <div style="max-width:1200px;margin:0 auto;padding:40px 36px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
         <div>
           <h1 style="font-size:24px;font-weight:700;color:#6ee9e0;text-transform:uppercase">Relatório Completo de Medições</h1>
@@ -448,6 +549,61 @@ export default function ObrasMobile() {
           </tr>
         </tfoot>
       </table>
+
+      <h2 style="font-size:16px;font-weight:700;color:#6ee9e0;text-transform:uppercase;margin-bottom:4px">Mapa Geral de Medição</h2>
+      <p style="color:#bcc9c7;font-size:11px;margin-bottom:12px">Escopo completo × cada medição × acumulado × saldo, item a item</p>
+      <div style="overflow-x:auto;margin-bottom:24px">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:${640 + mapa.medicoesReais.length * 140}px">
+          <thead>
+            <tr style="background:#252a32">
+              <th rowspan="2" style="padding:6px 8px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Serviço</th>
+              <th rowspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">Unid.</th>
+              <th rowspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase">Qtd</th>
+              <th rowspan="2" style="padding:6px 8px;text-align:right;font-size:9px;color:#869391;text-transform:uppercase">Custo Total</th>
+              ${mapaCabecalhoMedicoes}
+              <th colspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#6ee9e0;text-transform:uppercase;border-left:1px solid #3d4948">Acumulado</th>
+              <th colspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#ffb4ab;text-transform:uppercase;border-left:1px solid #3d4948">Falta</th>
+            </tr>
+            <tr style="background:#1b2027">
+              <th></th><th></th><th></th><th></th>
+              ${mapaSubcabecalhoMedicoes}
+              <th style="padding:4px 8px;text-align:center;font-size:9px;color:#6ee9e0;border-left:1px solid #3d4948">%</th><th style="padding:4px 8px;text-align:center;font-size:9px;color:#6ee9e0">R$</th>
+              <th style="padding:4px 8px;text-align:center;font-size:9px;color:#ffb4ab;border-left:1px solid #3d4948">%</th><th style="padding:4px 8px;text-align:center;font-size:9px;color:#ffb4ab">R$</th>
+            </tr>
+          </thead>
+          <tbody>${mapaLinhasHtml || `<tr><td colspan="${8 + mapa.medicoesReais.length * 2}" style="padding:16px;text-align:center;color:#869391">Nenhum item de escopo encontrado para este ${grupo.tipo === 'cliente' ? 'cliente' : 'fornecedor'}</td></tr>`}</tbody>
+          <tfoot>
+            <tr style="background:#1b2027">
+              <td colspan="3" style="padding:8px;font-weight:700">TOTAL GERAL</td>
+              <td style="padding:8px;text-align:right;font-weight:700">${moeda(mapa.totalBase)}</td>
+              ${mapaRodapeMedicoes}
+              <td style="padding:8px;border-left:1px solid #3d4948;text-align:center;font-weight:900;color:#6ee9e0;font-size:12px">${mapa.totalPctAcum.toFixed(0)}%</td>
+              <td style="padding:8px;text-align:right;font-weight:900;color:#6ee9e0;font-size:12px">${moeda(mapa.totalAcum)}</td>
+              <td style="padding:8px;border-left:1px solid #3d4948;text-align:center;font-weight:900;color:#ffb4ab;font-size:12px">${mapa.totalPctFalta.toFixed(0)}%</td>
+              <td style="padding:8px;text-align:right;font-weight:900;color:#ffb4ab;font-size:12px">${moeda(mapa.totalFalta)}</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+
+      ${temCurvaGrupo ? `
+      <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px;margin-bottom:20px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Curva S — Físico × Financeiro</span>
+          <div style="display:flex;gap:12px;font-size:9px;color:#869391">
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#6ee9e0;margin-right:4px"></span>EXECUTADO (FÍSICO)</span>
+            <span><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#ffcbac;margin-right:4px"></span>PAGO (FINANCEIRO)</span>
+          </div>
+        </div>
+        <svg width="100%" height="220" viewBox="0 0 800 300" style="background:#171c23;border-radius:8px">
+          <path d="${fisicoPath}" fill="none" stroke="#6ee9e0" stroke-width="3" />
+          <path d="${financeiroPath}" fill="none" stroke="#ffcbac" stroke-width="3" stroke-dasharray="8 4" />
+        </svg>
+        <div style="display:flex;justify-content:space-between;margin-top:6px">
+          ${eixoDatasCurva.map(d => `<span style="font-size:9px;color:#869391">${d}</span>`).join('')}
+        </div>
+      </div>` : `<div style="text-align:center;color:#869391;padding:20px 0;margin-bottom:20px">Dados insuficientes para montar a Curva S — mínimo de 2 medições reais.</div>`}
+
       <div style="display:flex;justify-content:space-between;font-size:10px;color:#869391;padding-top:16px;border-top:1px solid #3d4948">
         <span>Documento Confidencial - ${nomeEmpresa}</span>
         <span>${obra?.codigo || ''}</span>

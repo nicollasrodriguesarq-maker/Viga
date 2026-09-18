@@ -281,6 +281,7 @@ export default function Obras() {
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
   const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '' })
+  const [grupoMedicaoAberto, setGrupoMedicaoAberto] = useState<string | null>(null)
   const [loading,  setLoading]  = useState(true)
   const [detalhe,  setDetalhe]  = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('resumo')
@@ -505,11 +506,16 @@ export default function Obras() {
   }
 
   // ── Medições ──────────────────────────────────────────────
-  function ultimoRegistro(servicoId: string, medicaoIdAtual: string | undefined, tipo: string, fornecedor?: string | null) {
+  // Busca o registro da medição IMEDIATAMENTE ANTERIOR (mesmo tipo/fornecedor, data
+  // estritamente anterior à da medição atual) para servir de base do "acumulado anterior".
+  // Sem o filtro de data, uma medição futura já lançada fora de ordem (ex.: setembro
+  // cadastrado antes de agosto ser corrigido) podia ser escolhida como "anterior" de uma
+  // medição mais antiga, gerando valor de período negativo/errado.
+  function ultimoRegistro(servicoId: string, medicaoIdAtual: string | undefined, tipo: string, fornecedor: string | null | undefined, dataAtual: string) {
     return medItens
       .filter(mi => mi.servico_id === servicoId && mi.medicao_id !== medicaoIdAtual)
       .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
-      .filter(mi => mi.medicao && mi.medicao.tipo === tipo && (tipo !== 'fornecedor' || mi.medicao.fornecedor === fornecedor))
+      .filter(mi => mi.medicao && mi.medicao.tipo === tipo && (tipo !== 'fornecedor' || mi.medicao.fornecedor === fornecedor) && mi.medicao.data < dataAtual)
       .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0] || null
   }
 
@@ -524,7 +530,7 @@ export default function Obras() {
     itensFiltrados.forEach(item => {
       const mi = medItens.find(x => x.medicao_id === med.id && x.servico_id === item.id)
       if (!mi) return
-      const ultimo = ultimoRegistro(item.id, med.id, med.tipo, med.fornecedor)
+      const ultimo = ultimoRegistro(item.id, med.id, med.tipo, med.fornecedor, med.data)
       const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
       const acumAtual = mi.valor_base * mi.percentual_acumulado
       const valorPeriodo = acumAtual - acumAnterior
@@ -538,7 +544,7 @@ export default function Obras() {
     const preench: Record<string, { valor_base: string; percentual: string }> = {}
     itensFiltrados.forEach(item => {
       const existente = medItens.find(mi => mi.medicao_id === medicao.id && mi.servico_id === item.id)
-      const ultimo = ultimoRegistro(item.id, medicao.id, medicao.tipo, medicao.fornecedor)
+      const ultimo = ultimoRegistro(item.id, medicao.id, medicao.tipo, medicao.fornecedor, medicao.data)
       preench[item.id] = {
         valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(baseParaMedicao(item, medicao.tipo))),
         percentual: existente ? String(existente.percentual_acumulado * 100) : (ultimo ? String(ultimo.percentual_acumulado * 100) : '0'),
@@ -702,6 +708,100 @@ export default function Obras() {
           <div style="width:100%;height:1px;background:#3d4948;margin-bottom:8px"></div>
           <p style="font-size:11px;font-weight:700">${medicao.tipo === 'fornecedor' ? (medicao.fornecedor || 'Fornecedor') : (obra?.cliente || 'Cliente')}</p>
         </div>
+      </div>
+    </div>
+    <script>window.onload = () => { window.print() }</script>
+    </body></html>`
+
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
+  // Relatório Completo de Medições — histórico acumulado de TODAS as medições já lançadas
+  // para um fornecedor (ou para o cliente) até o momento, com o panorama pago × falta pagar.
+  // Complementa gerarPDFMedicao (que só cobre a medição atual) para apresentar ao cliente/
+  // fornecedor o quanto já foi medido e pago desde o início.
+  async function gerarPDFMedicaoCompleta(grupo: { tipo: 'cliente' | 'fornecedor'; fornecedor: string | null; medicoes: any[] }, obra: any, previstoGrupo: number) {
+    const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
+    const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const nomeGrupo = grupo.tipo === 'cliente' ? (obra?.cliente || 'Cliente') : (grupo.fornecedor || 'Fornecedor')
+
+    let pagoGrupo = 0, totalLiquidoGeral = 0
+    const linhasHtml = grupo.medicoes.map((med, i) => {
+      const { totalLiquido } = totalsMedicao(med)
+      totalLiquidoGeral += totalLiquido
+      const lanc = med.lancamento_id ? lancs.find(l => l.id === med.lancamento_id) : null
+      const statusPag = !lanc ? 'Rascunho' : lanc.status === 'pago' ? 'Pago' : 'Programado'
+      const corStatus = statusPag === 'Pago' ? '#6ee9e0' : statusPag === 'Programado' ? '#ffcbac' : '#869391'
+      if (lanc?.status === 'pago') pagoGrupo += totalLiquido
+      return `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">Medição ${i + 1} <span style="color:#869391">· ${med.numero}</span></td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${new Date(med.data).toLocaleDateString('pt-BR')}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;font-weight:700;color:#6ee9e0">${moeda(totalLiquido)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center;font-weight:700;color:${corStatus}">${statusPag}</td>
+      </tr>`
+    }).join('')
+    const faltaGrupo = previstoGrupo - pagoGrupo
+
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>Relatório Completo — ${nomeGrupo} — ${nomeEmpresa}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
+      h1,h2 { font-family:'Manrope',sans-serif; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      ${PRINT_SAFE_CSS}
+    </style></head><body>
+    <div style="max-width:900px;margin:0 auto;padding:40px 36px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
+        <div>
+          <h1 style="font-size:24px;font-weight:700;color:#6ee9e0;text-transform:uppercase">Relatório Completo de Medições</h1>
+          <p style="color:#bcc9c7">${grupo.tipo === 'fornecedor' ? 'Panorama de Pagamentos ao Fornecedor' : 'Panorama de Cobranças ao Cliente'}</p>
+        </div>
+        <div style="text-align:right">
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:80px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Obra</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${obra?.nome || ''}</p>
+          <p style="font-size:12px;color:#bcc9c7">${obra?.cliente || ''}</p>
+        </div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#869391;text-transform:uppercase">${grupo.tipo === 'fornecedor' ? 'Fornecedor' : 'Cliente'}</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${nomeGrupo}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px"><span style="font-size:9px;color:#869391;text-transform:uppercase">${grupo.tipo === 'cliente' ? 'Contrato' : 'Previsto'}</span><p style="font-size:17px;font-weight:700;margin-top:4px">${moeda(previstoGrupo)}</p></div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px"><span style="font-size:9px;color:#869391;text-transform:uppercase">${grupo.tipo === 'cliente' ? 'Recebido' : 'Pago'}</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#6ee9e0">${moeda(pagoGrupo)}</p></div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px"><span style="font-size:9px;color:#869391;text-transform:uppercase">Falta ${grupo.tipo === 'cliente' ? 'Receber' : 'Pagar'}</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#ffb4ab">${moeda(faltaGrupo)}</p></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <thead>
+          <tr style="background:#252a32">
+            <th style="padding:8px 10px;text-align:left;font-size:10px;color:#869391;text-transform:uppercase">Medição</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#869391;text-transform:uppercase">Data</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;color:#869391;text-transform:uppercase">Valor Líquido</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#869391;text-transform:uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody>${linhasHtml || `<tr><td colspan="4" style="padding:16px;text-align:center;color:#869391">Nenhuma medição registrada</td></tr>`}</tbody>
+        <tfoot>
+          <tr style="background:#1b2027">
+            <td colspan="2" style="padding:10px;font-weight:700">TOTAL MEDIDO ATÉ AQUI</td>
+            <td style="padding:10px;text-align:right;font-weight:900;color:#6ee9e0;font-size:15px">${moeda(totalLiquidoGeral)}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#869391;padding-top:16px;border-top:1px solid #3d4948">
+        <span>Documento Confidencial - ${nomeEmpresa}</span>
+        <span>${obra?.codigo || ''}</span>
       </div>
     </div>
     <script>window.onload = () => { window.print() }</script>
@@ -1522,6 +1622,22 @@ export default function Obras() {
     const etapasObra = etapas.filter(e => e.obra_id === detalhe.id)
     const hoje = new Date(); hoje.setHours(0,0,0,0)
     const medicoesObra = medicoes.filter(m => m.obra_id === detalhe.id)
+    // Agrupa as medições por fornecedor (e o cliente como um grupo à parte), em vez da lista
+    // plana anterior que misturava tudo — cada grupo vira "Medição 1, Medição 2..." em ordem
+    // cronológica, com um painel de pago × falta pagar escopado àquele fornecedor/cliente.
+    const gruposMedicao = (() => {
+      const porChave = new Map<string, any[]>()
+      medicoesObra.forEach(m => {
+        const chave = m.tipo === 'cliente' ? '__cliente__' : (m.fornecedor || '—')
+        porChave.set(chave, [...(porChave.get(chave) || []), m])
+      })
+      return Array.from(porChave.entries()).map(([chave, meds]) => ({
+        chave,
+        tipo: (chave === '__cliente__' ? 'cliente' : 'fornecedor') as 'cliente' | 'fornecedor',
+        fornecedor: chave === '__cliente__' ? null : chave,
+        medicoes: meds.slice().sort((a, b) => a.data < b.data ? -1 : 1),
+      }))
+    })()
     const fornecedoresDisponiveis = Array.from(new Set(svs.map(s => s.fornecedor).filter(Boolean))) as string[]
     const visitasObra = relatoriosVisita.filter(r => r.obra_id === detalhe.id).filter(v => {
       if (!buscaRv) return true
@@ -2133,26 +2249,59 @@ export default function Obras() {
             {medicoesObra.length === 0 ? (
               <div className="text-center py-8 text-on-surface-variant">Nenhuma medição ainda</div>
             ) : (
-              <div className="flex flex-col gap-2">
-                {medicoesObra.map(med => {
-                  const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor)
-                  const itensMed = medItens.filter(mi => mi.medicao_id === med.id)
-                  const totalPeriodo = itensMed.reduce((acc, mi) => {
-                    const ultimo = ultimoRegistro(mi.servico_id, med.id, med.tipo, med.fornecedor)
-                    const acumAnt = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
-                    const acumAtual = mi.valor_base * mi.percentual_acumulado
-                    return acc + (acumAtual - acumAnt)
-                  }, 0)
+              <div className="flex flex-col gap-3">
+                {gruposMedicao.map(grupo => {
+                  const itensGrupo = svs.filter(s => grupo.tipo !== 'fornecedor' || s.fornecedor === grupo.fornecedor)
+                  const previstoGrupo = grupo.tipo === 'cliente' ? contrato : itensGrupo.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
+                  let pagoGrupo = 0
+                  const medsComTotais = grupo.medicoes.map((med, i) => {
+                    const { totalLiquido } = totalsMedicao(med)
+                    const lanc = med.lancamento_id ? lancs.find(l => l.id === med.lancamento_id) : null
+                    const statusPag: 'rascunho' | 'programado' | 'pago' = !lanc ? 'rascunho' : lanc.status === 'pago' ? 'pago' : 'programado'
+                    if (statusPag === 'pago') pagoGrupo += totalLiquido
+                    return { med, indice: i + 1, totalLiquido, statusPag }
+                  })
+                  const faltaGrupo = previstoGrupo - pagoGrupo
+                  const aberto = grupoMedicaoAberto === grupo.chave
                   return (
-                    <div key={med.id} className="flex justify-between items-center px-4 py-3 bg-surface-container-low rounded-lg border border-outline-variant flex-wrap gap-2">
-                      <div>
-                        <div className="font-semibold text-sm text-on-surface">{med.numero} · {med.tipo === 'fornecedor' ? `Fornecedor: ${med.fornecedor || '—'}` : 'Cliente'}</div>
-                        <div className="text-[11px] text-on-surface-variant">{dataBR(med.data)} · {itensFiltrados.length} item(ns) · {moeda(totalPeriodo)} no período</div>
+                    <div key={grupo.chave} className="bg-surface-container-low rounded-lg border border-outline-variant overflow-hidden">
+                      <div className="w-full flex justify-between items-center px-4 py-3 hover:bg-surface-variant/20 transition-all cursor-pointer flex-wrap gap-2" onClick={() => setGrupoMedicaoAberto(aberto ? null : grupo.chave)}>
+                        <div>
+                          <div className="font-semibold text-sm text-on-surface">{grupo.tipo === 'cliente' ? '💰 Cliente' : `🧱 Fornecedor: ${grupo.fornecedor}`}</div>
+                          <div className="text-[11px] text-on-surface-variant">{grupo.medicoes.length} medição(ões) · Previsto: {moeda(previstoGrupo)}</div>
+                        </div>
+                        <div className="flex items-center gap-4 flex-wrap">
+                          <div className="text-right">
+                            <div className="text-[10px] text-on-surface-variant uppercase">{grupo.tipo === 'cliente' ? 'Recebido' : 'Pago'}</div>
+                            <div className="text-sm font-bold text-primary-container">{moeda(pagoGrupo)}</div>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-[10px] text-on-surface-variant uppercase">Falta {grupo.tipo === 'cliente' ? 'Receber' : 'Pagar'}</div>
+                            <div className="text-sm font-bold text-error">{moeda(faltaGrupo)}</div>
+                          </div>
+                          <button className={btnEditSmCls} title="Relatório completo (histórico + panorama)" onClick={e => { e.stopPropagation(); gerarPDFMedicaoCompleta(grupo, detalhe, previstoGrupo) }}>🖨️</button>
+                          <span className="material-symbols-outlined text-on-surface-variant">{aberto ? 'expand_less' : 'expand_more'}</span>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                        <button className={btnEditSmCls} onClick={() => abrirPreenchimentoMedicao(med, itensFiltrados)}>Abrir</button>
-                        <button className={btnDangerSmCls} onClick={async () => { if (confirm('Excluir esta medição?')) { await remover('medicoes', med.id); carregar() } }}>×</button>
-                      </div>
+                      {aberto && (
+                        <div className="border-t border-outline-variant divide-y divide-outline-variant">
+                          {medsComTotais.map(({ med, indice, totalLiquido, statusPag }) => (
+                            <div key={med.id} className="flex justify-between items-center px-4 py-3 flex-wrap gap-2">
+                              <div>
+                                <div className="font-semibold text-sm text-on-surface">Medição {indice} <span className="text-on-surface-variant font-normal">· {med.numero}</span></div>
+                                <div className="text-[11px] text-on-surface-variant">{dataBR(med.data)} · {moeda(totalLiquido)} no período</div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusPag === 'pago' ? 'bg-primary-container/10 text-primary-container border-primary-container/20' : statusPag === 'programado' ? 'bg-tertiary/10 text-tertiary border-tertiary/20' : 'bg-surface-variant text-on-surface-variant border-outline-variant'}`}>
+                                  {statusPag === 'pago' ? '✅ Pago' : statusPag === 'programado' ? '📅 Programado' : '📝 Rascunho'}
+                                </span>
+                                <button className={btnEditSmCls} onClick={() => { const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor); abrirPreenchimentoMedicao(med, itensFiltrados) }}>Abrir</button>
+                                <button className={btnDangerSmCls} onClick={async () => { if (confirm('Excluir esta medição?')) { await remover('medicoes', med.id); carregar() } }}>×</button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   )
                 })}
@@ -2168,7 +2317,7 @@ export default function Obras() {
           let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
           const linhas = itensFiltrados.map(item => {
             const p = preenchimento[item.id] || { valor_base: String(baseParaMedicao(item, medicaoAtiva.tipo)), percentual: '0' }
-            const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor)
+            const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor, medicaoAtiva.data)
             const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
             const valorBase = parseFloat(p.valor_base || '0')
             const percAtual = parseFloat(p.percentual || '0') / 100
@@ -2179,6 +2328,9 @@ export default function Obras() {
             totalPeriodo += valorPeriodo; totalRetencao += retencao; totalLiquido += liquido
             return { item, p, acumAnterior, acumAtual, valorPeriodo, retencao, liquido }
           })
+          const chaveGrupoAtual = medicaoAtiva.tipo === 'cliente' ? '__cliente__' : (medicaoAtiva.fornecedor || '—')
+          const grupoAtual = gruposMedicao.find(g => g.chave === chaveGrupoAtual)
+          const previstoGrupoAtual = medicaoAtiva.tipo === 'cliente' ? contrato : itensFiltrados.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
           return (
             <div className={sectionCls}>
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
@@ -2209,6 +2361,7 @@ export default function Obras() {
                     <button className="bg-tertiary/10 border border-tertiary/30 text-tertiary rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-tertiary/20 transition-all cursor-pointer" onClick={() => abrirProgramarPagamento(medicaoAtiva, totalLiquido)}>📅 Programar Pagamento</button>
                   )}
                   <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPDFMedicao(medicaoAtiva, linhas, detalhe)}>🖨️ Gerar Boletim PDF</button>
+                  <button className={btnSecondaryCls} onClick={() => grupoAtual && gerarPDFMedicaoCompleta(grupoAtual, detalhe, previstoGrupoAtual)} title="Histórico completo de todas as medições já lançadas para este fornecedor/cliente">🖨️ Relatório Completo</button>
                 </div>
               </div>
               {linhas.length === 0 ? (

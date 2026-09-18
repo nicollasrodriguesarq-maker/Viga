@@ -179,6 +179,7 @@ export default function ObrasMobile() {
   const [rvEditando, setRvEditando] = useState<any>(null)
   const [buscaRv, setBuscaRv] = useState('')
   const [buscaMed, setBuscaMed] = useState('')
+  const [grupoMedicaoAberto, setGrupoMedicaoAberto] = useState<string | null>(null)
   const [fMedicao, setFMedicao] = useState(FMED_VAZIO)
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
@@ -331,11 +332,14 @@ export default function ObrasMobile() {
   }
 
   // ── Medições ──────────────────────────────────────────────────
-  function ultimoRegistro(servicoId: string, medicaoIdAtual: string | undefined, tipo: string, fornecedor?: string | null) {
+  // Só considera como "anterior" um registro com data estritamente anterior à da medição
+  // atual — sem isso, uma medição futura lançada fora de ordem podia virar base de uma
+  // medição mais antiga e gerar valor de período negativo (mesma correção do desktop).
+  function ultimoRegistro(servicoId: string, medicaoIdAtual: string | undefined, tipo: string, fornecedor: string | null | undefined, dataAtual: string) {
     return medItens
       .filter(mi => mi.servico_id === servicoId && mi.medicao_id !== medicaoIdAtual)
       .map(mi => ({ ...mi, medicao: medicoes.find(m => m.id === mi.medicao_id) }))
-      .filter(mi => mi.medicao && mi.medicao.tipo === tipo && (tipo !== 'fornecedor' || mi.medicao.fornecedor === fornecedor))
+      .filter(mi => mi.medicao && mi.medicao.tipo === tipo && (tipo !== 'fornecedor' || mi.medicao.fornecedor === fornecedor) && mi.medicao.data < dataAtual)
       .sort((a, b) => new Date(b.medicao.data).getTime() - new Date(a.medicao.data).getTime())[0] || null
   }
 
@@ -350,7 +354,7 @@ export default function ObrasMobile() {
     itensFiltrados.forEach(item => {
       const mi = medItens.find(x => x.medicao_id === med.id && x.servico_id === item.id)
       if (!mi) return
-      const ultimo = ultimoRegistro(item.id, med.id, med.tipo, med.fornecedor)
+      const ultimo = ultimoRegistro(item.id, med.id, med.tipo, med.fornecedor, med.data)
       const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
       const acumAtual = mi.valor_base * mi.percentual_acumulado
       const valorPeriodo = acumAtual - acumAnterior
@@ -359,11 +363,105 @@ export default function ObrasMobile() {
     })
     return { totalPeriodo, totalLiquido }
   }
+  // Relatório Completo de Medições — histórico acumulado de todas as medições já lançadas
+  // para um fornecedor (ou para o cliente), com o panorama pago × falta pagar. Mesmo padrão
+  // do desktop (app/obras/page.tsx).
+  async function gerarPDFMedicaoCompleta(grupo: { tipo: 'cliente' | 'fornecedor'; fornecedor: string | null; medicoes: any[] }, obra: any, previstoGrupo: number) {
+    const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
+    const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const nomeGrupo = grupo.tipo === 'cliente' ? (obra?.cliente || 'Cliente') : (grupo.fornecedor || 'Fornecedor')
+
+    let pagoGrupo = 0, totalLiquidoGeral = 0
+    const linhasHtml = grupo.medicoes.map((med, i) => {
+      const { totalLiquido } = totalsMedicao(med)
+      totalLiquidoGeral += totalLiquido
+      const lanc = med.lancamento_id ? lancs.find((l: any) => l.id === med.lancamento_id) : null
+      const statusPag = !lanc ? 'Rascunho' : lanc.status === 'pago' ? 'Pago' : 'Programado'
+      const corStatus = statusPag === 'Pago' ? '#6ee9e0' : statusPag === 'Programado' ? '#ffcbac' : '#869391'
+      if (lanc?.status === 'pago') pagoGrupo += totalLiquido
+      return `
+      <tr>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">Medição ${i + 1} <span style="color:#869391">· ${med.numero}</span></td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${new Date(med.data).toLocaleDateString('pt-BR')}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;font-weight:700;color:#6ee9e0">${moeda(totalLiquido)}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center;font-weight:700;color:${corStatus}">${statusPag}</td>
+      </tr>`
+    }).join('')
+    const faltaGrupo = previstoGrupo - pagoGrupo
+
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+    <title>Relatório Completo — ${nomeGrupo} — ${nomeEmpresa}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+    <style>
+      * { margin:0; padding:0; box-sizing:border-box; }
+      body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
+      h1,h2 { font-family:'Manrope',sans-serif; }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      ${PRINT_SAFE_CSS}
+    </style></head><body>
+    ${botaoVoltarApp('/m/obras')}
+    <div style="max-width:900px;margin:0 auto;padding:40px 36px">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
+        <div>
+          <h1 style="font-size:24px;font-weight:700;color:#6ee9e0;text-transform:uppercase">Relatório Completo de Medições</h1>
+          <p style="color:#bcc9c7">${grupo.tipo === 'fornecedor' ? 'Panorama de Pagamentos ao Fornecedor' : 'Panorama de Cobranças ao Cliente'}</p>
+        </div>
+        <div style="text-align:right">
+          ${cfg.logo_url ? `<img src="${cfg.logo_url}" style="height:80px;object-fit:contain;margin-bottom:6px" />` : `<div style="font-size:18px;font-weight:900;color:#6ee9e0">${nomeEmpresa}</div>`}
+          <p style="font-size:10px;color:#869391">Gerado em: ${new Date().toLocaleDateString('pt-BR')}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:20px">
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Obra</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${obra?.nome || ''}</p>
+          <p style="font-size:12px;color:#bcc9c7">${obra?.cliente || ''}</p>
+        </div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
+          <span style="font-size:10px;color:#869391;text-transform:uppercase">${grupo.tipo === 'fornecedor' ? 'Fornecedor' : 'Cliente'}</span>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${nomeGrupo}</p>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px"><span style="font-size:9px;color:#869391;text-transform:uppercase">${grupo.tipo === 'cliente' ? 'Contrato' : 'Previsto'}</span><p style="font-size:17px;font-weight:700;margin-top:4px">${moeda(previstoGrupo)}</p></div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px"><span style="font-size:9px;color:#869391;text-transform:uppercase">${grupo.tipo === 'cliente' ? 'Recebido' : 'Pago'}</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#6ee9e0">${moeda(pagoGrupo)}</p></div>
+        <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px"><span style="font-size:9px;color:#869391;text-transform:uppercase">Falta ${grupo.tipo === 'cliente' ? 'Receber' : 'Pagar'}</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#ffb4ab">${moeda(faltaGrupo)}</p></div>
+      </div>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+        <thead>
+          <tr style="background:#252a32">
+            <th style="padding:8px 10px;text-align:left;font-size:10px;color:#869391;text-transform:uppercase">Medição</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#869391;text-transform:uppercase">Data</th>
+            <th style="padding:8px 10px;text-align:right;font-size:10px;color:#869391;text-transform:uppercase">Valor Líquido</th>
+            <th style="padding:8px 10px;text-align:center;font-size:10px;color:#869391;text-transform:uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody>${linhasHtml || `<tr><td colspan="4" style="padding:16px;text-align:center;color:#869391">Nenhuma medição registrada</td></tr>`}</tbody>
+        <tfoot>
+          <tr style="background:#1b2027">
+            <td colspan="2" style="padding:10px;font-weight:700">TOTAL MEDIDO ATÉ AQUI</td>
+            <td style="padding:10px;text-align:right;font-weight:900;color:#6ee9e0;font-size:15px">${moeda(totalLiquidoGeral)}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+      <div style="display:flex;justify-content:space-between;font-size:10px;color:#869391;padding-top:16px;border-top:1px solid #3d4948">
+        <span>Documento Confidencial - ${nomeEmpresa}</span>
+        <span>${obra?.codigo || ''}</span>
+      </div>
+    </div>
+    <script>window.onload = () => { window.print() }</script>
+    </body></html>`
+
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
+  }
+
   function abrirPreenchimentoMedicao(medicao: any, itensFiltrados: any[]) {
     const preench: Record<string, { valor_base: string; percentual: string }> = {}
     itensFiltrados.forEach(item => {
       const existente = medItens.find(mi => mi.medicao_id === medicao.id && mi.servico_id === item.id)
-      const ultimo = ultimoRegistro(item.id, medicao.id, medicao.tipo, medicao.fornecedor)
+      const ultimo = ultimoRegistro(item.id, medicao.id, medicao.tipo, medicao.fornecedor, medicao.data)
       preench[item.id] = {
         valor_base: existente ? String(existente.valor_base) : (ultimo ? String(ultimo.valor_base) : String(baseParaMedicao(item, medicao.tipo))),
         percentual: existente ? String(existente.percentual_acumulado * 100) : (ultimo ? String(ultimo.percentual_acumulado * 100) : '0'),
@@ -1037,7 +1135,7 @@ export default function ObrasMobile() {
     let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
     const linhas = itensFiltrados.map(item => {
       const p = preenchimento[item.id] || { valor_base: String(baseParaMedicao(item, medicaoAtiva.tipo)), percentual: '0' }
-      const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor)
+      const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor, medicaoAtiva.data)
       const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
       const valorBase = parseFloat(p.valor_base || '0')
       const percAtual = parseFloat(p.percentual || '0') / 100
@@ -1048,6 +1146,10 @@ export default function ObrasMobile() {
       totalPeriodo += valorPeriodo; totalRetencao += retencao; totalLiquido += liquido
       return { item, p, acumAtual, valorPeriodo, retencao, liquido }
     })
+    const chaveGrupoAtual = medicaoAtiva.tipo === 'cliente' ? '__cliente__' : (medicaoAtiva.fornecedor || '—')
+    const medicoesGrupoAtual = medicoes.filter(m => m.obra_id === detalhe.id && (chaveGrupoAtual === '__cliente__' ? m.tipo === 'cliente' : m.fornecedor === chaveGrupoAtual)).sort((a, b) => a.data < b.data ? -1 : 1)
+    const grupoAtual = { tipo: (medicaoAtiva.tipo === 'cliente' ? 'cliente' : 'fornecedor') as 'cliente' | 'fornecedor', fornecedor: medicaoAtiva.tipo === 'cliente' ? null : medicaoAtiva.fornecedor, medicoes: medicoesGrupoAtual }
+    const previstoGrupoAtual = medicaoAtiva.tipo === 'cliente' ? parseFloat(detalhe.valor_contrato || 0) : itensFiltrados.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
     return (
       <MobileShell title={medicaoAtiva.numero}>
         <div className="p-4 flex flex-col gap-3 pb-8">
@@ -1108,6 +1210,7 @@ export default function ObrasMobile() {
               onClick={() => { setDataProgramar(new Date().toISOString().slice(0, 10)); setMostrarProgramar(true) }}>📅 Programar Pagamento</button>
           )}
           <button className={btnPrimaryCls} onClick={() => salvarPreenchimentoMedicao(itensFiltrados)}>Salvar Medição</button>
+          <button className={btnSecondaryCls} onClick={() => gerarPDFMedicaoCompleta(grupoAtual, detalhe, previstoGrupoAtual)}>🖨️ Relatório Completo do {medicaoAtiva.tipo === 'cliente' ? 'Cliente' : 'Fornecedor'}</button>
         </div>
         {mostrarProgramar && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setMostrarProgramar(false)}>
@@ -1215,6 +1318,22 @@ export default function ObrasMobile() {
     const svs = ordenarServicosObra(servicosObra(detalhe.id))
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
     const medicoesObra = medicoes.filter(m => m.obra_id === detalhe.id)
+    // Mesmo agrupamento por fornecedor/cliente do desktop — "Medição 1, Medição 2..." em ordem
+    // cronológica, com painel de pago × falta pagar escopado a cada fornecedor.
+    const gruposMedicao = (() => {
+      const filtradas = medicoesObra.filter(m => !buscaMed || ((m.numero || '') + ' ' + (m.fornecedor || '')).toLowerCase().includes(buscaMed.toLowerCase()))
+      const porChave = new Map<string, any[]>()
+      filtradas.forEach(m => {
+        const chave = m.tipo === 'cliente' ? '__cliente__' : (m.fornecedor || '—')
+        porChave.set(chave, [...(porChave.get(chave) || []), m])
+      })
+      return Array.from(porChave.entries()).map(([chave, meds]) => ({
+        chave,
+        tipo: (chave === '__cliente__' ? 'cliente' : 'fornecedor') as 'cliente' | 'fornecedor',
+        fornecedor: chave === '__cliente__' ? null : chave,
+        medicoes: meds.slice().sort((a, b) => a.data < b.data ? -1 : 1),
+      }))
+    })()
     const visitasObra = relatorios.filter(r => r.obra_id === detalhe.id)
     const funcionariosObra = funcionarios.filter(f => f.obra_id === detalhe.id)
 
@@ -1443,15 +1562,53 @@ export default function ObrasMobile() {
                   )
                 })()}
                 <input className={inputCls} placeholder="Pesquisar por número ou fornecedor..." value={buscaMed} onChange={e => setBuscaMed(e.target.value)} />
-                {medicoesObra.filter(m => !buscaMed || ((m.numero || '') + ' ' + (m.fornecedor || '')).toLowerCase().includes(buscaMed.toLowerCase())).length === 0 ? (
+                {gruposMedicao.length === 0 ? (
                   <div className="text-center py-6 text-on-surface-variant text-body-sm">Nenhuma medição encontrada</div>
-                ) : medicoesObra.filter(m => !buscaMed || ((m.numero || '') + ' ' + (m.fornecedor || '')).toLowerCase().includes(buscaMed.toLowerCase())).map(med => {
-                  const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor)
+                ) : gruposMedicao.map(grupo => {
+                  const itensGrupo = svs.filter(s => grupo.tipo !== 'fornecedor' || s.fornecedor === grupo.fornecedor)
+                  const previstoGrupo = grupo.tipo === 'cliente' ? contrato : itensGrupo.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
+                  let pagoGrupo = 0
+                  const medsComTotais = grupo.medicoes.map((med, i) => {
+                    const { totalLiquido } = totalsMedicao(med)
+                    const lanc = med.lancamento_id ? lancs.find(l => l.id === med.lancamento_id) : null
+                    const statusPag: 'rascunho' | 'programado' | 'pago' = !lanc ? 'rascunho' : lanc.status === 'pago' ? 'pago' : 'programado'
+                    if (statusPag === 'pago') pagoGrupo += totalLiquido
+                    return { med, indice: i + 1, totalLiquido, statusPag }
+                  })
+                  const faltaGrupo = previstoGrupo - pagoGrupo
+                  const aberto = grupoMedicaoAberto === grupo.chave
                   return (
-                    <button key={med.id} className="text-left bg-surface-container border border-outline-variant rounded-xl p-4" onClick={() => abrirPreenchimentoMedicao(med, itensFiltrados)}>
-                      <div className="font-semibold text-sm text-on-surface">{med.numero} · {med.tipo === 'fornecedor' ? `Fornecedor: ${med.fornecedor || '—'}` : 'Cliente'}</div>
-                      <div className="text-[11px] text-on-surface-variant mt-1">{dataBR(med.data)} · {itensFiltrados.length} item(ns)</div>
-                    </button>
+                    <div key={grupo.chave} className="bg-surface-container border border-outline-variant rounded-xl overflow-hidden">
+                      <div className="p-4 cursor-pointer" onClick={() => setGrupoMedicaoAberto(aberto ? null : grupo.chave)}>
+                        <div className="flex justify-between items-start gap-2">
+                          <div>
+                            <div className="font-semibold text-sm text-on-surface">{grupo.tipo === 'cliente' ? '💰 Cliente' : `🧱 ${grupo.fornecedor}`}</div>
+                            <div className="text-[11px] text-on-surface-variant mt-0.5">{grupo.medicoes.length} medição(ões) · Previsto: {moeda(previstoGrupo)}</div>
+                          </div>
+                          <span className="material-symbols-outlined text-on-surface-variant">{aberto ? 'expand_less' : 'expand_more'}</span>
+                        </div>
+                        <div className="flex justify-between text-[13px] mt-2.5 pt-2.5 border-t border-outline-variant">
+                          <span className="text-on-surface-variant">{grupo.tipo === 'cliente' ? 'Recebido' : 'Pago'}: <strong className="text-primary-container">{moeda(pagoGrupo)}</strong></span>
+                          <span className="text-on-surface-variant">Falta {grupo.tipo === 'cliente' ? 'receber' : 'pagar'}: <strong className="text-error">{moeda(faltaGrupo)}</strong></span>
+                        </div>
+                      </div>
+                      <button className="w-full text-center py-2 text-xs font-semibold text-primary border-t border-outline-variant" onClick={() => gerarPDFMedicaoCompleta(grupo, detalhe, previstoGrupo)}>🖨️ Relatório Completo</button>
+                      {aberto && (
+                        <div className="border-t border-outline-variant divide-y divide-outline-variant">
+                          {medsComTotais.map(({ med, indice, totalLiquido, statusPag }) => (
+                            <button key={med.id} className="w-full text-left px-4 py-3 flex justify-between items-center gap-2" onClick={() => { const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor); abrirPreenchimentoMedicao(med, itensFiltrados) }}>
+                              <div>
+                                <div className="font-semibold text-sm text-on-surface">Medição {indice} <span className="text-on-surface-variant font-normal">· {med.numero}</span></div>
+                                <div className="text-[11px] text-on-surface-variant mt-0.5">{dataBR(med.data)} · {moeda(totalLiquido)} no período</div>
+                              </div>
+                              <span className={`text-[10px] font-semibold px-2 py-1 rounded-full border shrink-0 ${statusPag === 'pago' ? 'bg-primary-container/10 text-primary-container border-primary-container/20' : statusPag === 'programado' ? 'bg-tertiary/10 text-tertiary border-tertiary/20' : 'bg-surface-variant text-on-surface-variant border-outline-variant'}`}>
+                                {statusPag === 'pago' ? '✅ Pago' : statusPag === 'programado' ? '📅 Programado' : '📝 Rascunho'}
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )
                 })}
               </div>

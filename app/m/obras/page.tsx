@@ -151,7 +151,7 @@ const btnSecondaryCls = 'bg-surface-container-low border border-outline-variant 
 const fileCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer'
 
 const FRV_VAZIO = { data: new Date().toISOString().slice(0, 10), clima: '', descricao: '', pendencias: '', equipe_presente: [] as string[], nomeEquipeAtual: '' }
-const FMED_VAZIO = { tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '' }
+const FMED_VAZIO = { tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' }
 
 export default function ObrasMobile() {
   const [obras, setObras] = useState<any[]>([])
@@ -346,6 +346,7 @@ export default function ObrasMobile() {
   // Total período (bruto) e líquido (após retenção) de uma medição já salva — mesma logica
   // de app/obras/page.tsx, usada no painel de credito/debito do contrato.
   function totalsMedicao(med: any) {
+    if (med.valor_adiantamento != null) return { totalPeriodo: parseFloat(med.valor_adiantamento), totalLiquido: parseFloat(med.valor_adiantamento) }
     const svsObra = servicosObra(med.obra_id)
     const itensFiltrados = svsObra.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor)
     const orcVinculado = orcamentos.find(o => o.obra_id === med.obra_id)
@@ -371,17 +372,19 @@ export default function ObrasMobile() {
     const nomeEmpresa = cfg.nome_empresa || 'VIGA'
     const nomeGrupo = grupo.tipo === 'cliente' ? (obra?.cliente || 'Cliente') : (grupo.fornecedor || 'Fornecedor')
 
-    let pagoGrupo = 0, totalLiquidoGeral = 0
-    const linhasHtml = grupo.medicoes.map((med, i) => {
+    let pagoGrupo = 0, totalLiquidoGeral = 0, contadorMedicao = 0
+    const linhasHtml = grupo.medicoes.map((med) => {
       const { totalLiquido } = totalsMedicao(med)
       totalLiquidoGeral += totalLiquido
       const lanc = med.lancamento_id ? lancs.find((l: any) => l.id === med.lancamento_id) : null
       const statusPag = !lanc ? 'Rascunho' : lanc.status === 'pago' ? 'Pago' : 'Programado'
       const corStatus = statusPag === 'Pago' ? '#6ee9e0' : statusPag === 'Programado' ? '#ffcbac' : '#869391'
       if (lanc?.status === 'pago') pagoGrupo += totalLiquido
+      const isAdiantamento = med.valor_adiantamento != null
+      const rotulo = isAdiantamento ? '💰 Adiantamento' : `Medição ${++contadorMedicao}`
       return `
       <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">Medição ${i + 1} <span style="color:#869391">· ${med.numero}</span></td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${rotulo} <span style="color:#869391">· ${med.numero}</span></td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${new Date(med.data).toLocaleDateString('pt-BR')}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;font-weight:700;color:#6ee9e0">${moeda(totalLiquido)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center;font-weight:700;color:${corStatus}">${statusPag}</td>
@@ -472,6 +475,8 @@ export default function ObrasMobile() {
     setTela('medicaoPreenchimento')
   }
   async function criarMedicao() {
+    const ehAdiantamento = fMedicao.tipo === 'fornecedor' && fMedicao.adiantamento
+    if (ehAdiantamento && !parseFloat(fMedicao.valor_adiantamento || '0')) return alert('Preencha o valor do adiantamento')
     const ano = new Date().getFullYear()
     const medicoesObraAno = medicoes.filter(m => m.obra_id === detalhe.id && m.numero?.startsWith('MED-' + ano))
     const numero = 'MED-' + ano + '-' + String(medicoesObraAno.length + 1).padStart(3, '0')
@@ -480,11 +485,13 @@ export default function ObrasMobile() {
       obra_id: detalhe.id, orcamento_id: orcVinculado?.id || null, tipo: fMedicao.tipo,
       fornecedor: fMedicao.tipo === 'fornecedor' ? (fMedicao.fornecedor || null) : null,
       numero, data: fMedicao.data, observacao: fMedicao.observacao, status: 'rascunho',
+      valor_adiantamento: ehAdiantamento ? parseFloat(fMedicao.valor_adiantamento) : null,
     })
     setTela('detalhe')
     if (nova?.id) {
       const [med, medIt] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('medicao_itens', '?order=created_at')])
       setMedicoes(med); setMedItens(medIt)
+      if (ehAdiantamento) return
       const svsObra = servicosObra(detalhe.id)
       const itensFiltrados = svsObra.filter(s => nova.tipo !== 'fornecedor' || !nova.fornecedor || s.fornecedor === nova.fornecedor)
       abrirPreenchimentoMedicao(nova, itensFiltrados)
@@ -1082,10 +1089,19 @@ export default function ObrasMobile() {
       const lanc = await criar('lancamentos', dados)
       if (lanc?.id) await editar('medicoes', medicaoAtiva.id, { data_pagamento_programada: dataProgramar, lancamento_id: lanc.id })
     }
-    const med = await buscar('medicoes', '?order=data.desc')
-    setMedicoes(med)
+    const [med, lc] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('lancamentos', '?order=data.desc')])
+    setMedicoes(med); setLancs(lc)
     setMedicaoAtiva(med.find((m: any) => m.id === medicaoAtiva.id) || null)
     setMostrarProgramar(false)
+  }
+  // Mesmo motivo do desktop: numa obra de Gerenciamento esse lançamento não aparece nas
+  // telas do Financeiro (não é dinheiro da Inverso), então confirmar o pagamento só é
+  // possível aqui, na aba Medições.
+  async function marcarMedicaoPaga(lancamentoId: string) {
+    const ok = await editar('lancamentos', lancamentoId, { status: 'pago' })
+    if (!ok) return alert('Não foi possível marcar como pago. Tente novamente.')
+    const lc = await buscar('lancamentos', '?order=data.desc')
+    setLancs(lc)
   }
 
   // ── Tela: Nova Medição ──────────────────────────────────────────
@@ -1110,6 +1126,21 @@ export default function ObrasMobile() {
               </select>
             </div>
           )}
+          {fMedicao.tipo === 'fornecedor' && (
+            <label className="flex items-start gap-2.5 px-3.5 py-2.5 bg-tertiary/5 border border-tertiary/20 rounded-lg cursor-pointer select-none">
+              <input type="checkbox" checked={fMedicao.adiantamento} onChange={e => setFMedicao({ ...fMedicao, adiantamento: e.target.checked })} className="w-4 h-4 accent-tertiary cursor-pointer mt-0.5" />
+              <span>
+                <span className="block text-body-sm font-semibold text-on-surface">💰 É um adiantamento</span>
+                <span className="block text-[11px] text-on-surface-variant mt-0.5">Valor fixo pago antes do início dos serviços — abate automaticamente das próximas medições.</span>
+              </span>
+            </label>
+          )}
+          {fMedicao.tipo === 'fornecedor' && fMedicao.adiantamento && (
+            <div>
+              <label className={labelCls}>Valor do Adiantamento (R$) *</label>
+              <input className={inputCls} type="number" placeholder="0,00" value={fMedicao.valor_adiantamento} onChange={e => setFMedicao({ ...fMedicao, valor_adiantamento: e.target.value })} />
+            </div>
+          )}
           <div>
             <label className={labelCls}>Data</label>
             <input className={inputCls} type="date" value={fMedicao.data} onChange={e => setFMedicao({ ...fMedicao, data: e.target.value })} />
@@ -1119,7 +1150,7 @@ export default function ObrasMobile() {
             <input className={inputCls} value={fMedicao.observacao} onChange={e => setFMedicao({ ...fMedicao, observacao: e.target.value })} />
           </div>
           <div className="flex flex-col gap-2 mt-2">
-            <button className={btnPrimaryCls} onClick={() => criarMedicao()}>Criar e Preencher</button>
+            <button className={btnPrimaryCls} onClick={() => criarMedicao()}>{fMedicao.adiantamento ? 'Registrar Adiantamento' : 'Criar e Preencher'}</button>
             <button className={btnSecondaryCls} onClick={() => setTela('detalhe')}>Cancelar</button>
           </div>
         </div>
@@ -1150,6 +1181,10 @@ export default function ObrasMobile() {
     const medicoesGrupoAtual = medicoes.filter(m => m.obra_id === detalhe.id && (chaveGrupoAtual === '__cliente__' ? m.tipo === 'cliente' : m.fornecedor === chaveGrupoAtual)).sort((a, b) => a.data < b.data ? -1 : 1)
     const grupoAtual = { tipo: (medicaoAtiva.tipo === 'cliente' ? 'cliente' : 'fornecedor') as 'cliente' | 'fornecedor', fornecedor: medicaoAtiva.tipo === 'cliente' ? null : medicaoAtiva.fornecedor, medicoes: medicoesGrupoAtual }
     const previstoGrupoAtual = medicaoAtiva.tipo === 'cliente' ? parseFloat(detalhe.valor_contrato || 0) : itensFiltrados.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
+    // Adiantamento: valor fixo definido na criação, sem itens por serviço — a tela mostra só
+    // o valor e as ações de pagamento/PDF, em vez da tabela de preenchimento item a item.
+    const ehAdiantamento = medicaoAtiva.valor_adiantamento != null
+    const totalLiquidoFinal = ehAdiantamento ? parseFloat(medicaoAtiva.valor_adiantamento) : totalLiquido
     return (
       <MobileShell title={medicaoAtiva.numero}>
         <div className="p-4 flex flex-col gap-3 pb-8">
@@ -1167,7 +1202,12 @@ export default function ObrasMobile() {
               className="w-14 bg-surface-container-low border border-outline-variant rounded px-1.5 py-0.5 text-on-surface text-[11px]" />
             <span>%</span>
           </div>
-          {linhas.length === 0 ? (
+          {ehAdiantamento ? (
+            <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
+              <div className="text-[11px] text-on-surface-variant uppercase tracking-widest mb-1">💰 Valor do Adiantamento</div>
+              <div className="text-xl font-black text-primary">{moeda(totalLiquidoFinal)}</div>
+            </div>
+          ) : linhas.length === 0 ? (
             <div className="text-center py-8 text-on-surface-variant text-body-sm">Nenhum item para medir</div>
           ) : linhas.map(({ item, p, acumAtual, valorPeriodo, retencao, liquido }) => (
             <div key={item.id} className="bg-surface-container border border-outline-variant rounded-xl p-4">
@@ -1194,22 +1234,30 @@ export default function ObrasMobile() {
               </div>
             </div>
           ))}
-          {linhas.length > 0 && (
+          {!ehAdiantamento && linhas.length > 0 && (
             <div className="bg-surface-container-low rounded-lg p-3 text-[12px] flex justify-between">
               <span className="font-bold text-on-surface">Total período</span>
               <span className="font-black text-primary">{moeda(totalPeriodo)}</span>
             </div>
           )}
           {medicaoAtiva.lancamento_id ? (
-            <div className="text-[12px] text-primary-container font-semibold text-center">
-              ✅ Programado para {dataBR(medicaoAtiva.data_pagamento_programada)}{' '}
-              <button className="text-primary underline font-semibold" onClick={() => { setDataProgramar(medicaoAtiva.data_pagamento_programada || new Date().toISOString().slice(0, 10)); setMostrarProgramar(true) }}>Alterar data</button>
+            <div className="text-[12px] text-primary-container font-semibold text-center flex flex-col gap-2">
+              {lancs.find((l: any) => l.id === medicaoAtiva.lancamento_id)?.status === 'pago' ? (
+                <span>✅ Pago</span>
+              ) : (
+                <>
+                  <span>📅 Programado para {dataBR(medicaoAtiva.data_pagamento_programada)}{' '}
+                    <button className="text-primary underline font-semibold" onClick={() => { setDataProgramar(medicaoAtiva.data_pagamento_programada || new Date().toISOString().slice(0, 10)); setMostrarProgramar(true) }}>Alterar data</button>
+                  </span>
+                  <button className={btnSecondaryCls} onClick={() => marcarMedicaoPaga(medicaoAtiva.lancamento_id)}>✓ Confirmar Pagamento</button>
+                </>
+              )}
             </div>
           ) : (
             <button className={btnSecondaryCls}
               onClick={() => { setDataProgramar(new Date().toISOString().slice(0, 10)); setMostrarProgramar(true) }}>📅 Programar Pagamento</button>
           )}
-          <button className={btnPrimaryCls} onClick={() => salvarPreenchimentoMedicao(itensFiltrados)}>Salvar Medição</button>
+          {!ehAdiantamento && <button className={btnPrimaryCls} onClick={() => salvarPreenchimentoMedicao(itensFiltrados)}>Salvar Medição</button>}
           <button className={btnSecondaryCls} onClick={() => gerarPDFMedicaoCompleta(grupoAtual, detalhe, previstoGrupoAtual)}>🖨️ Relatório Completo do {medicaoAtiva.tipo === 'cliente' ? 'Cliente' : 'Fornecedor'}</button>
         </div>
         {mostrarProgramar && (
@@ -1217,7 +1265,7 @@ export default function ObrasMobile() {
             <div className="bg-surface-container border border-outline-variant rounded-2xl p-6 w-full max-w-[400px]">
               <div className="text-base font-bold text-on-surface mb-1.5">📅 Programar Pagamento</div>
               <div className="text-body-sm text-on-surface-variant mb-4">
-                {medicaoAtiva.tipo === 'fornecedor' ? 'Saída' : 'Entrada'} de {moeda(totalLiquido)} referente à medição {medicaoAtiva.numero}
+                {medicaoAtiva.tipo === 'fornecedor' ? 'Saída' : 'Entrada'} de {moeda(totalLiquidoFinal)} referente à medição {medicaoAtiva.numero}
               </div>
               <div className="mb-5">
                 <label className={labelCls}>Data programada *</label>
@@ -1225,7 +1273,7 @@ export default function ObrasMobile() {
               </div>
               <div className="flex gap-2">
                 <button className={btnSecondaryCls + ' flex-1'} onClick={() => setMostrarProgramar(false)}>Cancelar</button>
-                <button className={btnPrimaryCls + ' flex-1'} onClick={() => confirmarProgramarPagamento(totalLiquido)}>Confirmar</button>
+                <button className={btnPrimaryCls + ' flex-1'} onClick={() => confirmarProgramarPagamento(totalLiquidoFinal)}>Confirmar</button>
               </div>
             </div>
           </div>
@@ -1570,13 +1618,15 @@ export default function ObrasMobile() {
                 ) : gruposMedicao.map(grupo => {
                   const itensGrupo = svs.filter(s => grupo.tipo !== 'fornecedor' || s.fornecedor === grupo.fornecedor)
                   const previstoGrupo = grupo.tipo === 'cliente' ? contrato : itensGrupo.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
-                  let pagoGrupo = 0
-                  const medsComTotais = grupo.medicoes.map((med, i) => {
+                  let pagoGrupo = 0, contadorMedicao = 0
+                  const medsComTotais = grupo.medicoes.map((med) => {
                     const { totalLiquido } = totalsMedicao(med)
                     const lanc = med.lancamento_id ? lancs.find(l => l.id === med.lancamento_id) : null
                     const statusPag: 'rascunho' | 'programado' | 'pago' = !lanc ? 'rascunho' : lanc.status === 'pago' ? 'pago' : 'programado'
                     if (statusPag === 'pago') pagoGrupo += totalLiquido
-                    return { med, indice: i + 1, totalLiquido, statusPag }
+                    const isAdiantamento = med.valor_adiantamento != null
+                    const indice = isAdiantamento ? null : ++contadorMedicao
+                    return { med, indice, totalLiquido, statusPag, isAdiantamento }
                   })
                   const faltaGrupo = previstoGrupo - pagoGrupo
                   const aberto = grupoMedicaoAberto === grupo.chave
@@ -1598,11 +1648,11 @@ export default function ObrasMobile() {
                       <button className="w-full text-center py-2 text-xs font-semibold text-primary border-t border-outline-variant" onClick={() => gerarPDFMedicaoCompleta(grupo, detalhe, previstoGrupo)}>🖨️ Relatório Completo</button>
                       {aberto && (
                         <div className="border-t border-outline-variant divide-y divide-outline-variant">
-                          {medsComTotais.map(({ med, indice, totalLiquido, statusPag }) => (
+                          {medsComTotais.map(({ med, indice, totalLiquido, statusPag, isAdiantamento }) => (
                             <button key={med.id} className="w-full text-left px-4 py-3 flex justify-between items-center gap-2" onClick={() => { const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor); abrirPreenchimentoMedicao(med, itensFiltrados) }}>
                               <div>
-                                <div className="font-semibold text-sm text-on-surface">Medição {indice} <span className="text-on-surface-variant font-normal">· {med.numero}</span></div>
-                                <div className="text-[11px] text-on-surface-variant mt-0.5">{dataBR(med.data)} · {moeda(totalLiquido)} no período</div>
+                                <div className="font-semibold text-sm text-on-surface">{isAdiantamento ? '💰 Adiantamento' : `Medição ${indice}`} <span className="text-on-surface-variant font-normal">· {med.numero}</span></div>
+                                <div className="text-[11px] text-on-surface-variant mt-0.5">{dataBR(med.data)} · {moeda(totalLiquido)}{isAdiantamento ? '' : ' no período'}</div>
                               </div>
                               <span className={`text-[10px] font-semibold px-2 py-1 rounded-full border shrink-0 ${statusPag === 'pago' ? 'bg-primary-container/10 text-primary-container border-primary-container/20' : statusPag === 'programado' ? 'bg-tertiary/10 text-tertiary border-tertiary/20' : 'bg-surface-variant text-on-surface-variant border-outline-variant'}`}>
                                 {statusPag === 'pago' ? '✅ Pago' : statusPag === 'programado' ? '📅 Programado' : '📝 Rascunho'}

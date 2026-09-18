@@ -280,7 +280,7 @@ export default function Obras() {
   const [medItens, setMedItens] = useState<any[]>([])
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
-  const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '' })
+  const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' })
   const [grupoMedicaoAberto, setGrupoMedicaoAberto] = useState<string | null>(null)
   const [loading,  setLoading]  = useState(true)
   const [detalhe,  setDetalhe]  = useState<any>(null)
@@ -523,6 +523,10 @@ export default function Obras() {
   // Total período (bruto) e líquido (após retenção) de uma medição já salva — usado no
   // painel de crédito/débito do contrato e na lista de medições.
   function totalsMedicao(med: any) {
+    // Adiantamento: valor fixo, pago à parte de qualquer % por serviço — sem retenção,
+    // e sem depender de medicao_itens (por isso também nunca vira "ultimoRegistro" de
+    // um serviço real: não tem itens vinculados a ele).
+    if (med.valor_adiantamento != null) return { totalPeriodo: parseFloat(med.valor_adiantamento), totalLiquido: parseFloat(med.valor_adiantamento) }
     const svsObra = servicosObra(med.obra_id)
     const itensFiltrados = svsObra.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor)
     const orcVinculado = orcamentos.find(o => o.obra_id === med.obra_id)
@@ -556,6 +560,8 @@ export default function Obras() {
   }
 
   async function criarMedicao() {
+    const ehAdiantamento = fMedicao.tipo === 'fornecedor' && fMedicao.adiantamento
+    if (ehAdiantamento && !parseFloat(fMedicao.valor_adiantamento || '0')) return alert('Preencha o valor do adiantamento')
     const ano = new Date().getFullYear()
     const medicoesObraAno = medicoes.filter(m => m.obra_id === detalhe.id && m.numero?.startsWith('MED-' + ano))
     const numero = 'MED-' + ano + '-' + String(medicoesObraAno.length + 1).padStart(3, '0')
@@ -569,11 +575,16 @@ export default function Obras() {
       data: fMedicao.data,
       observacao: fMedicao.observacao,
       status: 'rascunho',
+      valor_adiantamento: ehAdiantamento ? parseFloat(fMedicao.valor_adiantamento) : null,
     })
     setJanela(null)
     if (nova?.id) {
       const [med, medIt] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('medicao_itens', '?order=created_at')])
       setMedicoes(med); setMedItens(medIt)
+      // Adiantamento é valor fixo, sem itens por serviço — não faz sentido abrir a tela de
+      // preenchimento item a item (fica vazia); o valor já entra pronto no histórico do
+      // fornecedor e no painel de pago × falta pagar.
+      if (ehAdiantamento) return
       const svsObra = servicosObra(detalhe.id)
       const itensFiltrados = svsObra.filter(s => nova.tipo !== 'fornecedor' || !nova.fornecedor || s.fornecedor === nova.fornecedor)
       abrirPreenchimentoMedicao(nova, itensFiltrados)
@@ -625,9 +636,19 @@ export default function Obras() {
       if (lanc?.id) await editar('medicoes', medicaoProgramando.id, { data_pagamento_programada: dataProgramar, lancamento_id: lanc.id })
     }
     setJanela(null); setMedicaoProgramando(null); setDataProgramar('')
-    const [med] = await Promise.all([buscar('medicoes', '?order=data.desc')])
-    setMedicoes(med)
+    const [med, lc] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('lancamentos', '?order=data.desc')])
+    setMedicoes(med); setLancs(lc)
     if (medicaoAtiva) setMedicaoAtiva(med.find((m: any) => m.id === medicaoAtiva.id) || null)
+  }
+  // Marca o lançamento de uma medição/adiantamento como pago diretamente na aba Medições —
+  // necessário porque, numa obra de Gerenciamento, esse lançamento fica de fora das telas do
+  // Financeiro (não é dinheiro da Inverso), então o único lugar pra confirmar o pagamento e
+  // disparar o abatimento no painel de pago × falta pagar é aqui mesmo.
+  async function marcarMedicaoPaga(lancamentoId: string) {
+    const ok = await editar('lancamentos', lancamentoId, { status: 'pago' })
+    if (!ok) return alert('Não foi possível marcar como pago. Tente novamente.')
+    const lc = await buscar('lancamentos', '?order=data.desc')
+    setLancs(lc)
   }
 
   async function gerarPDFMedicao(medicao: any, linhas: any[], obra: any) {
@@ -727,17 +748,19 @@ export default function Obras() {
     const nomeEmpresa = cfg.nome_empresa || 'VIGA'
     const nomeGrupo = grupo.tipo === 'cliente' ? (obra?.cliente || 'Cliente') : (grupo.fornecedor || 'Fornecedor')
 
-    let pagoGrupo = 0, totalLiquidoGeral = 0
-    const linhasHtml = grupo.medicoes.map((med, i) => {
+    let pagoGrupo = 0, totalLiquidoGeral = 0, contadorMedicao = 0
+    const linhasHtml = grupo.medicoes.map((med) => {
       const { totalLiquido } = totalsMedicao(med)
       totalLiquidoGeral += totalLiquido
       const lanc = med.lancamento_id ? lancs.find(l => l.id === med.lancamento_id) : null
       const statusPag = !lanc ? 'Rascunho' : lanc.status === 'pago' ? 'Pago' : 'Programado'
       const corStatus = statusPag === 'Pago' ? '#6ee9e0' : statusPag === 'Programado' ? '#ffcbac' : '#869391'
       if (lanc?.status === 'pago') pagoGrupo += totalLiquido
+      const isAdiantamento = med.valor_adiantamento != null
+      const rotulo = isAdiantamento ? '💰 Adiantamento' : `Medição ${++contadorMedicao}`
       return `
       <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">Medição ${i + 1} <span style="color:#869391">· ${med.numero}</span></td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${rotulo} <span style="color:#869391">· ${med.numero}</span></td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${new Date(med.data).toLocaleDateString('pt-BR')}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;font-weight:700;color:#6ee9e0">${moeda(totalLiquido)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center;font-weight:700;color:${corStatus}">${statusPag}</td>
@@ -2227,7 +2250,7 @@ export default function Obras() {
                 <div className="text-sm font-bold text-on-surface">📐 Medições</div>
                 <div className="text-body-sm text-on-surface-variant mt-0.5">Avanço físico-financeiro para pagar fornecedores ou cobrar o cliente</div>
               </div>
-              <button className={btnPrimaryCls} onClick={() => { setFMedicao({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '' }); setJanela('nova_medicao') }}>+ Nova Medição</button>
+              <button className={btnPrimaryCls} onClick={() => { setFMedicao({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' }); setJanela('nova_medicao') }}>+ Nova Medição</button>
             </div>
             {(() => {
               const recebidoCliente = medicoesObra.filter(m => m.tipo === 'cliente').reduce((a, m) => a + totalsMedicao(m).totalPeriodo, 0)
@@ -2264,13 +2287,15 @@ export default function Obras() {
                 {gruposMedicao.map(grupo => {
                   const itensGrupo = svs.filter(s => grupo.tipo !== 'fornecedor' || s.fornecedor === grupo.fornecedor)
                   const previstoGrupo = grupo.tipo === 'cliente' ? contrato : itensGrupo.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
-                  let pagoGrupo = 0
-                  const medsComTotais = grupo.medicoes.map((med, i) => {
+                  let pagoGrupo = 0, contadorMedicao = 0
+                  const medsComTotais = grupo.medicoes.map(med => {
                     const { totalLiquido } = totalsMedicao(med)
                     const lanc = med.lancamento_id ? lancs.find(l => l.id === med.lancamento_id) : null
                     const statusPag: 'rascunho' | 'programado' | 'pago' = !lanc ? 'rascunho' : lanc.status === 'pago' ? 'pago' : 'programado'
                     if (statusPag === 'pago') pagoGrupo += totalLiquido
-                    return { med, indice: i + 1, totalLiquido, statusPag }
+                    const isAdiantamento = med.valor_adiantamento != null
+                    const indice = isAdiantamento ? null : ++contadorMedicao
+                    return { med, indice, totalLiquido, statusPag, isAdiantamento }
                   })
                   const faltaGrupo = previstoGrupo - pagoGrupo
                   const aberto = grupoMedicaoAberto === grupo.chave
@@ -2296,17 +2321,24 @@ export default function Obras() {
                       </div>
                       {aberto && (
                         <div className="border-t border-outline-variant divide-y divide-outline-variant">
-                          {medsComTotais.map(({ med, indice, totalLiquido, statusPag }) => (
+                          {medsComTotais.map(({ med, indice, totalLiquido, statusPag, isAdiantamento }) => (
                             <div key={med.id} className="flex justify-between items-center px-4 py-3 flex-wrap gap-2">
                               <div>
-                                <div className="font-semibold text-sm text-on-surface">Medição {indice} <span className="text-on-surface-variant font-normal">· {med.numero}</span></div>
-                                <div className="text-[11px] text-on-surface-variant">{dataBR(med.data)} · {moeda(totalLiquido)} no período</div>
+                                <div className="font-semibold text-sm text-on-surface">{isAdiantamento ? '💰 Adiantamento' : `Medição ${indice}`} <span className="text-on-surface-variant font-normal">· {med.numero}</span></div>
+                                <div className="text-[11px] text-on-surface-variant">{dataBR(med.data)} · {moeda(totalLiquido)}{isAdiantamento ? '' : ' no período'}</div>
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusPag === 'pago' ? 'bg-primary-container/10 text-primary-container border-primary-container/20' : statusPag === 'programado' ? 'bg-tertiary/10 text-tertiary border-tertiary/20' : 'bg-surface-variant text-on-surface-variant border-outline-variant'}`}>
                                   {statusPag === 'pago' ? '✅ Pago' : statusPag === 'programado' ? '📅 Programado' : '📝 Rascunho'}
                                 </span>
-                                <button className={btnEditSmCls} onClick={() => { const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor); abrirPreenchimentoMedicao(med, itensFiltrados) }}>Abrir</button>
+                                {statusPag === 'programado' && (
+                                  <button className={btnEditSmCls} onClick={() => marcarMedicaoPaga(med.lancamento_id)} title="Confirmar que o pagamento já foi feito">✓ Pago</button>
+                                )}
+                                {isAdiantamento ? (
+                                  <button className={btnEditSmCls} onClick={() => abrirProgramarPagamento(med, totalLiquido)}>{statusPag === 'rascunho' ? '📅 Programar' : 'Alterar data'}</button>
+                                ) : (
+                                  <button className={btnEditSmCls} onClick={() => { const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor); abrirPreenchimentoMedicao(med, itensFiltrados) }}>Abrir</button>
+                                )}
                                 <button className={btnDangerSmCls} onClick={async () => { if (confirm('Excluir esta medição?')) { await remover('medicoes', med.id); carregar() } }}>×</button>
                               </div>
                             </div>
@@ -2580,6 +2612,21 @@ export default function Obras() {
                   </select>
                 </div>
               )}
+              {fMedicao.tipo === 'fornecedor' && (
+                <label className="flex items-start gap-2.5 mb-3.5 px-3.5 py-2.5 bg-tertiary/5 border border-tertiary/20 rounded-lg cursor-pointer select-none">
+                  <input type="checkbox" checked={fMedicao.adiantamento} onChange={e => setFMedicao({ ...fMedicao, adiantamento: e.target.checked })} className="w-4 h-4 accent-tertiary cursor-pointer mt-0.5" />
+                  <span>
+                    <span className="block text-body-sm font-semibold text-on-surface">💰 É um adiantamento</span>
+                    <span className="block text-[11px] text-on-surface-variant mt-0.5">Valor fixo pago ao fornecedor antes do início dos serviços — entra no histórico dele e abate automaticamente das próximas medições.</span>
+                  </span>
+                </label>
+              )}
+              {fMedicao.tipo === 'fornecedor' && fMedicao.adiantamento && (
+                <div className="mb-3.5">
+                  <label className={labelCls}>Valor do Adiantamento (R$) *</label>
+                  <input className={inputCls} type="number" placeholder="0,00" value={fMedicao.valor_adiantamento} onChange={e => setFMedicao({ ...fMedicao, valor_adiantamento: e.target.value })} />
+                </div>
+              )}
               <div className="mb-3.5">
                 <label className={labelCls}>Data</label>
                 <input className={inputCls} type="date" value={fMedicao.data} onChange={e => setFMedicao({ ...fMedicao, data: e.target.value })} />
@@ -2590,7 +2637,7 @@ export default function Obras() {
               </div>
               <div className="flex gap-2 justify-end">
                 <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
-                <button className={btnPrimaryCls} onClick={() => criarMedicao()}>Criar e Preencher</button>
+                <button className={btnPrimaryCls} onClick={() => criarMedicao()}>{fMedicao.adiantamento ? 'Registrar Adiantamento' : 'Criar e Preencher'}</button>
               </div>
             </div>
           </div>

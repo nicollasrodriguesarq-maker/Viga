@@ -62,10 +62,14 @@ const PRINT_SAFE_CSS = `
 // Relatório Financeiro Mensal em PDF — visão geral (balanço, lucro, impostos, distribuição
 // por categoria) seguida da lista completa de lançamentos com link direto para a NF anexada.
 // Pensado para encaminhar à contabilidade ou levar para reunião financeira.
-async function gerarPDFRelatorioMensal(lancamentos: any[], obras: any[], mes: string) {
+async function gerarPDFRelatorioMensal(lancamentosTodos: any[], obras: any[], mes: string) {
   const cfg = (await get('empresa_config', '?limit=1'))[0] || {}
   const nomeEmpresa = cfg.nome_empresa || 'VIGA'
   const mesNome = meses[parseInt(mes.slice(5,7))-1] + ' ' + mes.slice(0,4)
+  // Obra de Gerenciamento: custo de fornecedor é do cliente, não da Inverso — fora do
+  // relatório financeiro da empresa, mesma regra da Visão Geral (ver componente principal).
+  const obrasGerenciamento = new Set(obras.filter((o: any) => o.gerenciamento).map((o: any) => o.id))
+  const lancamentos = lancamentosTodos.filter(l => !(l.tipo === 'saida' && l.obra_id && obrasGerenciamento.has(l.obra_id)))
   const lancMesBase = lancamentos.filter(l => l.data?.slice(0,7) === mes)
 
   // Pendência (atrasada ou vencendo nos próximos 7 dias) de fora do mês entra no relatório
@@ -998,7 +1002,7 @@ export default function Financeiro() {
             {aPagar > 0 && (
               <div className="bg-surface-container border border-error/30 rounded-xl p-5">
                 <div className="text-sm font-bold text-on-surface mb-3">⚠️ A Pagar — {fmt(aPagar)}</div>
-                {lancamentos.filter(l=>l.tipo==='saida'&&l.status==='pendente').map(l=>(
+                {lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status==='pendente').map(l=>(
                   <div key={l.id} className={rowCls}>
                     <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">Venc: {l.data_vencimento||l.data}</div></div>
                     <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
@@ -1314,9 +1318,9 @@ export default function Financeiro() {
 
           <div className={sectionCls}>
             <div className="text-sm font-bold text-on-surface mb-3">📅 Todos os pagamentos — {mesNome}</div>
-            {lancamentos.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes).length===0 ? (
+            {lancamentosEmpresa.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes).length===0 ? (
               <div className="text-center py-8 text-on-surface-variant">Nenhum pagamento neste mês</div>
-            ) : lancamentos.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes)
+            ) : lancamentosEmpresa.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes)
               .sort((a,b)=>((a.data_vencimento||a.data)<(b.data_vencimento||b.data)?-1:1))
               .map(l=>{
                 const venc = l.data_vencimento||l.data
@@ -1339,7 +1343,7 @@ export default function Financeiro() {
               })}
             <div className="pt-3 border-t border-outline-variant mt-1">
               <span className="text-sm text-error font-bold">
-                Total: {fmt(lancamentos.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0))}
+                Total: {fmt(lancamentosEmpresa.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0))}
               </span>
             </div>
           </div>

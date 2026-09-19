@@ -460,23 +460,25 @@ export default function ObrasMobile() {
     // Curva S Físico × Financeiro — eixo de datas real do grupo (não um cronograma fixo),
     // físico = acumulado medido (mesma lógica de progressoFisico, escopada ao grupo),
     // financeiro = acumulado pago (inclui adiantamento, já que ele também conta como pago
-    // no painel Pago × Falta Pagar acima).
+    // no painel Pago × Falta Pagar acima). Ambas as séries terminam no mesmo ponto (a data
+    // mais recente do grupo) segurando o último valor conhecido — senão a linha física para
+    // no meio do gráfico enquanto a financeira segue até a borda, parecendo "cortada".
     const datasGrupoCurva = grupo.medicoes.map(m => new Date(m.data + 'T00:00:00'))
-    const inicioCurva = datasGrupoCurva.length ? new Date(Math.min(...datasGrupoCurva.map(d => d.getTime()))) : new Date()
+    const primeiraDataCurva = datasGrupoCurva.length ? new Date(Math.min(...datasGrupoCurva.map(d => d.getTime()))) : new Date()
     const fimCurva = datasGrupoCurva.length ? new Date(Math.max(...datasGrupoCurva.map(d => d.getTime()))) : new Date()
+    // Âncora do "zero" um pouco ANTES da primeira medição real — se ficasse na mesma data,
+    // os dois primeiros pontos caem no mesmo x e a subida inicial fica invisível.
+    const folgaCurva = Math.max((fimCurva.getTime() - primeiraDataCurva.getTime()) * 0.08, 3 * 86400000)
+    const inicioCurva = new Date(primeiraDataCurva.getTime() - folgaCurva)
     const totalMsCurva = Math.max(fimCurva.getTime() - inicioCurva.getTime(), 1)
-    function serieParaPathGrupo(serie: { data: Date; pct: number }[]) {
-      return serie.map((p, i) => {
-        const x = Math.max(0, Math.min(800, ((p.data.getTime() - inicioCurva.getTime()) / totalMsCurva) * 800))
-        const y = 300 - (p.pct / 100) * 300
-        return (i === 0 ? 'M ' : 'L ') + x.toFixed(1) + ' ' + y.toFixed(1)
-      }).join(' ')
-    }
     const fisicoSerie: { data: Date; pct: number }[] = [{ data: inicioCurva, pct: 0 }]
     mapa.medicoesReais.forEach((med, idx) => {
       const acumAte = mapa.linhas.reduce((a, l) => a + (l.porMedicao[idx]?.acumAtual || 0), 0)
       fisicoSerie.push({ data: new Date(med.data + 'T00:00:00'), pct: mapa.totalBase > 0 ? Math.min((acumAte / mapa.totalBase) * 100, 100) : 0 })
     })
+    if (fisicoSerie[fisicoSerie.length - 1].data.getTime() < fimCurva.getTime()) {
+      fisicoSerie.push({ data: fimCurva, pct: fisicoSerie[fisicoSerie.length - 1].pct })
+    }
     let pagoAcumCurva = 0
     const financeiroSerie: { data: Date; pct: number }[] = [{ data: inicioCurva, pct: 0 }]
     grupo.medicoes.slice().sort((a, b) => a.data < b.data ? -1 : 1).forEach(med => {
@@ -484,6 +486,18 @@ export default function ObrasMobile() {
       if (lanc?.status === 'pago') pagoAcumCurva += totalsMedicao(med).totalLiquido
       financeiroSerie.push({ data: new Date(med.data + 'T00:00:00'), pct: mapa.totalBase > 0 ? Math.min((pagoAcumCurva / mapa.totalBase) * 100, 100) : 0 })
     })
+    // Escala do eixo Y auto-ajustada ao maior valor das duas séries (arredondado pra cima em
+    // múltiplos de 5, mínimo 10%) — em vez de sempre 0-100%, senão uma obra no início (poucos
+    // % executados) fica com uma linha achatada e ilegível colada no eixo.
+    const maxPctCurva = Math.max(1, ...fisicoSerie.map(p => p.pct), ...financeiroSerie.map(p => p.pct))
+    const escalaMaxCurva = Math.min(100, Math.max(10, Math.ceil((maxPctCurva * 1.15) / 5) * 5))
+    function serieParaPathGrupo(serie: { data: Date; pct: number }[]) {
+      return serie.map((p, i) => {
+        const x = Math.max(0, Math.min(800, ((p.data.getTime() - inicioCurva.getTime()) / totalMsCurva) * 800))
+        const y = 300 - Math.min(p.pct / escalaMaxCurva, 1) * 300
+        return (i === 0 ? 'M ' : 'L ') + x.toFixed(1) + ' ' + y.toFixed(1)
+      }).join(' ')
+    }
     const fisicoPath = serieParaPathGrupo(fisicoSerie)
     const financeiroPath = serieParaPathGrupo(financeiroSerie)
     const temCurvaGrupo = mapa.medicoesReais.length >= 2
@@ -492,6 +506,11 @@ export default function ObrasMobile() {
       const d = new Date(inicioCurva.getTime() + (totalMsCurva * i) / 4)
       eixoDatasCurva.push(d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', ''))
     }
+    // Tabela de escopo e curva de gráfico ficam bem mais largas que uma folha retrato — a
+    // impressão sai em paisagem, e se mesmo assim não couber (muitas medições), a tabela
+    // encolhe proporcionalmente (zoom) até caber na largura útil da página.
+    const mapaLarguraMin = 640 + mapa.medicoesReais.length * 140
+    const mapaEscalaPagina = Math.min(1, 1020 / mapaLarguraMin)
 
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
     <title>Relatório Completo — ${nomeGrupo} — ${nomeEmpresa}</title>
@@ -500,7 +519,7 @@ export default function ObrasMobile() {
       * { margin:0; padding:0; box-sizing:border-box; }
       body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
       h1,h2 { font-family:'Manrope',sans-serif; }
-      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } @page { size: landscape; margin: 10mm; } }
       ${PRINT_SAFE_CSS}
     </style></head><body>
     ${botaoVoltarApp('/m/obras')}
@@ -553,7 +572,7 @@ export default function ObrasMobile() {
       <h2 style="font-size:16px;font-weight:700;color:#6ee9e0;text-transform:uppercase;margin-bottom:4px">Mapa Geral de Medição</h2>
       <p style="color:#bcc9c7;font-size:11px;margin-bottom:12px">Escopo completo × cada medição × acumulado × saldo, item a item</p>
       <div style="overflow-x:auto;margin-bottom:24px">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:${640 + mapa.medicoesReais.length * 140}px">
+        <table style="width:${mapaLarguraMin}px;border-collapse:collapse;font-size:11px;zoom:${mapaEscalaPagina.toFixed(3)}">
           <thead>
             <tr style="background:#252a32">
               <th rowspan="2" style="padding:6px 8px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Serviço</th>
@@ -565,7 +584,6 @@ export default function ObrasMobile() {
               <th colspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#ffb4ab;text-transform:uppercase;border-left:1px solid #3d4948">Falta</th>
             </tr>
             <tr style="background:#1b2027">
-              <th></th><th></th><th></th><th></th>
               ${mapaSubcabecalhoMedicoes}
               <th style="padding:4px 8px;text-align:center;font-size:9px;color:#6ee9e0;border-left:1px solid #3d4948">%</th><th style="padding:4px 8px;text-align:center;font-size:9px;color:#6ee9e0">R$</th>
               <th style="padding:4px 8px;text-align:center;font-size:9px;color:#ffb4ab;border-left:1px solid #3d4948">%</th><th style="padding:4px 8px;text-align:center;font-size:9px;color:#ffb4ab">R$</th>
@@ -589,7 +607,7 @@ export default function ObrasMobile() {
       ${temCurvaGrupo ? `
       <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px;margin-bottom:20px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Curva S — Físico × Financeiro</span>
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Curva S — Físico × Financeiro <span style="color:#869391;font-weight:400">(escala 0–${escalaMaxCurva}%)</span></span>
           <div style="display:flex;gap:12px;font-size:9px;color:#869391">
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#6ee9e0;margin-right:4px"></span>EXECUTADO (FÍSICO)</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#ffcbac;margin-right:4px"></span>PAGO (FINANCEIRO)</span>

@@ -839,23 +839,25 @@ export default function Obras() {
     // Curva S Físico × Financeiro — eixo de datas real do grupo (não um cronograma fixo),
     // físico = acumulado medido (mesma lógica de progressoFisico, escopada ao grupo),
     // financeiro = acumulado pago (inclui adiantamento, já que ele também conta como pago
-    // no painel Pago × Falta Pagar acima).
+    // no painel Pago × Falta Pagar acima). Ambas as séries terminam no mesmo ponto (a data
+    // mais recente do grupo) segurando o último valor conhecido — senão a linha física para
+    // no meio do gráfico enquanto a financeira segue até a borda, parecendo "cortada".
     const datasGrupoCurva = grupo.medicoes.map(m => new Date(m.data + 'T00:00:00'))
-    const inicioCurva = datasGrupoCurva.length ? new Date(Math.min(...datasGrupoCurva.map(d => d.getTime()))) : new Date()
+    const primeiraDataCurva = datasGrupoCurva.length ? new Date(Math.min(...datasGrupoCurva.map(d => d.getTime()))) : new Date()
     const fimCurva = datasGrupoCurva.length ? new Date(Math.max(...datasGrupoCurva.map(d => d.getTime()))) : new Date()
+    // Âncora do "zero" um pouco ANTES da primeira medição real — se ficasse na mesma data,
+    // os dois primeiros pontos caem no mesmo x e a subida inicial fica invisível.
+    const folgaCurva = Math.max((fimCurva.getTime() - primeiraDataCurva.getTime()) * 0.08, 3 * 86400000)
+    const inicioCurva = new Date(primeiraDataCurva.getTime() - folgaCurva)
     const totalMsCurva = Math.max(fimCurva.getTime() - inicioCurva.getTime(), 1)
-    function serieParaPathGrupo(serie: { data: Date; pct: number }[]) {
-      return serie.map((p, i) => {
-        const x = Math.max(0, Math.min(800, ((p.data.getTime() - inicioCurva.getTime()) / totalMsCurva) * 800))
-        const y = 300 - (p.pct / 100) * 300
-        return (i === 0 ? 'M ' : 'L ') + x.toFixed(1) + ' ' + y.toFixed(1)
-      }).join(' ')
-    }
     const fisicoSerie: { data: Date; pct: number }[] = [{ data: inicioCurva, pct: 0 }]
     mapa.medicoesReais.forEach((med, idx) => {
       const acumAte = mapa.linhas.reduce((a, l) => a + (l.porMedicao[idx]?.acumAtual || 0), 0)
       fisicoSerie.push({ data: new Date(med.data + 'T00:00:00'), pct: mapa.totalBase > 0 ? Math.min((acumAte / mapa.totalBase) * 100, 100) : 0 })
     })
+    if (fisicoSerie[fisicoSerie.length - 1].data.getTime() < fimCurva.getTime()) {
+      fisicoSerie.push({ data: fimCurva, pct: fisicoSerie[fisicoSerie.length - 1].pct })
+    }
     let pagoAcumCurva = 0
     const financeiroSerie: { data: Date; pct: number }[] = [{ data: inicioCurva, pct: 0 }]
     grupo.medicoes.slice().sort((a, b) => a.data < b.data ? -1 : 1).forEach(med => {
@@ -863,6 +865,18 @@ export default function Obras() {
       if (lanc?.status === 'pago') pagoAcumCurva += totalsMedicao(med).totalLiquido
       financeiroSerie.push({ data: new Date(med.data + 'T00:00:00'), pct: mapa.totalBase > 0 ? Math.min((pagoAcumCurva / mapa.totalBase) * 100, 100) : 0 })
     })
+    // Escala do eixo Y auto-ajustada ao maior valor das duas séries (arredondado pra cima em
+    // múltiplos de 5, mínimo 10%) — em vez de sempre 0-100%, senão uma obra no início (poucos
+    // % executados) fica com uma linha achatada e ilegível colada no eixo.
+    const maxPctCurva = Math.max(1, ...fisicoSerie.map(p => p.pct), ...financeiroSerie.map(p => p.pct))
+    const escalaMaxCurva = Math.min(100, Math.max(10, Math.ceil((maxPctCurva * 1.15) / 5) * 5))
+    function serieParaPathGrupo(serie: { data: Date; pct: number }[]) {
+      return serie.map((p, i) => {
+        const x = Math.max(0, Math.min(800, ((p.data.getTime() - inicioCurva.getTime()) / totalMsCurva) * 800))
+        const y = 300 - Math.min(p.pct / escalaMaxCurva, 1) * 300
+        return (i === 0 ? 'M ' : 'L ') + x.toFixed(1) + ' ' + y.toFixed(1)
+      }).join(' ')
+    }
     const fisicoPath = serieParaPathGrupo(fisicoSerie)
     const financeiroPath = serieParaPathGrupo(financeiroSerie)
     const temCurvaGrupo = mapa.medicoesReais.length >= 2
@@ -871,6 +885,11 @@ export default function Obras() {
       const d = new Date(inicioCurva.getTime() + (totalMsCurva * i) / 4)
       eixoDatasCurva.push(d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }).replace('.', ''))
     }
+    // Tabela de escopo e curva de gráfico ficam bem mais largas que uma folha retrato — a
+    // impressão sai em paisagem, e se mesmo assim não couber (muitas medições), a tabela
+    // encolhe proporcionalmente (zoom) até caber na largura útil da página.
+    const mapaLarguraMin = 640 + mapa.medicoesReais.length * 140
+    const mapaEscalaPagina = Math.min(1, 1020 / mapaLarguraMin)
 
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
     <title>Relatório Completo — ${nomeGrupo} — ${nomeEmpresa}</title>
@@ -879,7 +898,7 @@ export default function Obras() {
       * { margin:0; padding:0; box-sizing:border-box; }
       body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
       h1,h2 { font-family:'Manrope',sans-serif; }
-      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } @page { size: landscape; margin: 10mm; } }
       ${PRINT_SAFE_CSS}
     </style></head><body>
     <div style="max-width:1200px;margin:0 auto;padding:40px 36px">
@@ -931,7 +950,7 @@ export default function Obras() {
       <h2 style="font-size:16px;font-weight:700;color:#6ee9e0;text-transform:uppercase;margin-bottom:4px">Mapa Geral de Medição</h2>
       <p style="color:#bcc9c7;font-size:11px;margin-bottom:12px">Escopo completo × cada medição × acumulado × saldo, item a item</p>
       <div style="overflow-x:auto;margin-bottom:24px">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;min-width:${640 + mapa.medicoesReais.length * 140}px">
+        <table style="width:${mapaLarguraMin}px;border-collapse:collapse;font-size:11px;zoom:${mapaEscalaPagina.toFixed(3)}">
           <thead>
             <tr style="background:#252a32">
               <th rowspan="2" style="padding:6px 8px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Serviço</th>
@@ -943,7 +962,6 @@ export default function Obras() {
               <th colspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#ffb4ab;text-transform:uppercase;border-left:1px solid #3d4948">Falta</th>
             </tr>
             <tr style="background:#1b2027">
-              <th></th><th></th><th></th><th></th>
               ${mapaSubcabecalhoMedicoes}
               <th style="padding:4px 8px;text-align:center;font-size:9px;color:#6ee9e0;border-left:1px solid #3d4948">%</th><th style="padding:4px 8px;text-align:center;font-size:9px;color:#6ee9e0">R$</th>
               <th style="padding:4px 8px;text-align:center;font-size:9px;color:#ffb4ab;border-left:1px solid #3d4948">%</th><th style="padding:4px 8px;text-align:center;font-size:9px;color:#ffb4ab">R$</th>
@@ -967,7 +985,7 @@ export default function Obras() {
       ${temCurvaGrupo ? `
       <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px;margin-bottom:20px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Curva S — Físico × Financeiro</span>
+          <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Curva S — Físico × Financeiro <span style="color:#869391;font-weight:400">(escala 0–${escalaMaxCurva}%)</span></span>
           <div style="display:flex;gap:12px;font-size:9px;color:#869391">
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#6ee9e0;margin-right:4px"></span>EXECUTADO (FÍSICO)</span>
             <span><span style="display:inline-block;width:8px;height:8px;border-radius:999px;background:#ffcbac;margin-right:4px"></span>PAGO (FINANCEIRO)</span>
@@ -2498,7 +2516,6 @@ export default function Obras() {
                                   <th colSpan={2} className="text-center px-2.5 py-1 text-[9px] text-error uppercase border-l border-outline-variant whitespace-nowrap">Falta</th>
                                 </tr>
                                 <tr className="bg-surface-container-high">
-                                  <th></th><th></th><th></th><th></th>
                                   {mapa.medicoesReais.map(med => (
                                     <Fragment key={med.id}>
                                       <th className="text-center px-2.5 py-1 text-[9px] text-on-surface-variant border-l border-outline-variant">%</th>
@@ -2602,9 +2619,19 @@ export default function Obras() {
         {/* aba medições — preenchimento */}
         {abaDetalhe === 'medicoes' && medicaoAtiva && (() => {
           const itensFiltrados = svs.filter(s => medicaoAtiva.tipo !== 'fornecedor' || !medicaoAtiva.fornecedor || s.fornecedor === medicaoAtiva.fornecedor)
+          const itensOrdenadosPreench = ordenarServicosObra(itensFiltrados)
           const retPct = parseFloat(orcamentoObra?.retencao_percentual || 0)
+          const chaveGrupoAtual = medicaoAtiva.tipo === 'cliente' ? '__cliente__' : (medicaoAtiva.fornecedor || '—')
+          const grupoAtual = gruposMedicao.find(g => g.chave === chaveGrupoAtual)
+          const previstoGrupoAtual = medicaoAtiva.tipo === 'cliente' ? contrato : itensFiltrados.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
+          // Histórico das medições ANTERIORES do mesmo grupo (tudo, menos a que está sendo
+          // preenchida agora), pivotado com o mesmo motor do Mapa Geral — pra a pessoa
+          // enxergar Medição 1, Medição 2... lado a lado com a que está preenchendo agora,
+          // em vez de precisar abrir cada uma separadamente.
+          const grupoHistorico = grupoAtual ? { ...grupoAtual, medicoes: grupoAtual.medicoes.filter(m => m.id !== medicaoAtiva.id) } : null
+          const mapaHistorico = grupoHistorico ? mapaGeralGrupo(grupoHistorico, itensFiltrados) : null
           let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
-          const linhas = itensFiltrados.map(item => {
+          const linhas = itensOrdenadosPreench.map(item => {
             const p = preenchimento[item.id] || { valor_base: String(baseParaMedicao(item, medicaoAtiva.tipo)), percentual: '0' }
             const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor, medicaoAtiva.data)
             const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
@@ -2615,11 +2642,15 @@ export default function Obras() {
             const retencao = valorPeriodo * retPct
             const liquido = valorPeriodo - retencao
             totalPeriodo += valorPeriodo; totalRetencao += retencao; totalLiquido += liquido
-            return { item, p, acumAnterior, acumAtual, valorPeriodo, retencao, liquido }
+            const historico = mapaHistorico?.linhas.find(l => l.item.id === item.id)
+            return { item, p, acumAnterior, acumAtual, valorBase, valorPeriodo, retencao, liquido, porMedicaoHistorico: historico?.porMedicao || [] }
           })
-          const chaveGrupoAtual = medicaoAtiva.tipo === 'cliente' ? '__cliente__' : (medicaoAtiva.fornecedor || '—')
-          const grupoAtual = gruposMedicao.find(g => g.chave === chaveGrupoAtual)
-          const previstoGrupoAtual = medicaoAtiva.tipo === 'cliente' ? contrato : itensFiltrados.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
+          let pagoGrupoAtual = 0
+          grupoAtual?.medicoes.forEach(med => {
+            const lanc = med.lancamento_id ? lancs.find(l => l.id === med.lancamento_id) : null
+            if (lanc?.status === 'pago') pagoGrupoAtual += totalsMedicao(med).totalLiquido
+          })
+          const faltaGrupoAtual = previstoGrupoAtual - pagoGrupoAtual
           return (
             <div className={sectionCls}>
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
@@ -2653,57 +2684,121 @@ export default function Obras() {
                   <button className={btnSecondaryCls} onClick={() => grupoAtual && gerarPDFMedicaoCompleta(grupoAtual, detalhe, previstoGrupoAtual)} title="Histórico completo de todas as medições já lançadas para este fornecedor/cliente">🖨️ Relatório Completo</button>
                 </div>
               </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                  <div className="text-[10px] text-on-surface-variant uppercase">{medicaoAtiva.tipo === 'cliente' ? 'Contrato' : 'Previsto'} (grupo)</div>
+                  <div className="text-sm font-bold text-on-surface">{moeda(previstoGrupoAtual)}</div>
+                </div>
+                <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                  <div className="text-[10px] text-on-surface-variant uppercase">{medicaoAtiva.tipo === 'cliente' ? 'Recebido' : 'Pago'} até agora</div>
+                  <div className="text-sm font-bold text-primary-container">{moeda(pagoGrupoAtual)}</div>
+                </div>
+                <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                  <div className="text-[10px] text-on-surface-variant uppercase">Falta {medicaoAtiva.tipo === 'cliente' ? 'Receber' : 'Pagar'}</div>
+                  <div className="text-sm font-bold text-error">{moeda(faltaGrupoAtual)}</div>
+                </div>
+              </div>
               {linhas.length === 0 ? (
                 <div className="text-center py-8 text-on-surface-variant">Nenhum item para medir (verifique o fornecedor filtrado)</div>
-              ) : (
+              ) : (() => {
+                let categoriaAnteriorPreench: string | null = null
+                return (
                 <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-sm">
+                  <table className="w-full border-collapse text-xs" style={{ minWidth: 560 + (mapaHistorico?.medicoesReais.length || 0) * 140 }}>
                     <thead>
                       <tr className="border-b border-outline-variant">
-                        {['Serviço', 'Valor Base', '% Acumulado', 'Progresso', 'Valor Acum.', 'Valor Período', 'Retenção', 'Líquido'].map(h => (
-                          <th key={h} className="text-left px-2.5 py-2 text-[10px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
+                        <th rowSpan={2} className="text-left px-2.5 py-2 text-[10px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">Serviço</th>
+                        <th rowSpan={2} className="text-right px-2.5 py-2 text-[10px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">Custo Total</th>
+                        {(mapaHistorico?.medicoesReais || []).map((med, i) => (
+                          <th key={med.id} colSpan={2} className="text-center px-2.5 py-1 text-[9px] text-on-surface-variant uppercase bg-surface-container-high border-l border-outline-variant whitespace-nowrap">Medição {i + 1}<br /><span className="font-normal normal-case">{dataBR(med.data)}</span></th>
                         ))}
+                        <th colSpan={2} className="text-center px-2.5 py-1 text-[9px] text-tertiary uppercase bg-tertiary/10 border-l border-outline-variant whitespace-nowrap">Medição {(mapaHistorico?.medicoesReais.length || 0) + 1} (atual)</th>
+                        <th colSpan={2} className="text-center px-2.5 py-1 text-[9px] text-primary uppercase bg-surface-container-high border-l border-outline-variant whitespace-nowrap">Acumulado</th>
+                        <th colSpan={2} className="text-center px-2.5 py-1 text-[9px] text-error uppercase bg-surface-container-high border-l border-outline-variant whitespace-nowrap">Falta</th>
+                      </tr>
+                      <tr className="border-b border-outline-variant">
+                        {(mapaHistorico?.medicoesReais || []).map(med => (
+                          <Fragment key={med.id}>
+                            <th className="text-center px-2.5 py-1 text-[9px] text-on-surface-variant bg-surface-container-high border-l border-outline-variant">%</th>
+                            <th className="text-center px-2.5 py-1 text-[9px] text-on-surface-variant bg-surface-container-high">R$</th>
+                          </Fragment>
+                        ))}
+                        <th className="text-center px-2.5 py-1 text-[9px] text-tertiary bg-tertiary/10 border-l border-outline-variant">%</th>
+                        <th className="text-center px-2.5 py-1 text-[9px] text-tertiary bg-tertiary/10">R$</th>
+                        <th className="text-center px-2.5 py-1 text-[9px] text-primary bg-surface-container-high border-l border-outline-variant">%</th>
+                        <th className="text-center px-2.5 py-1 text-[9px] text-primary bg-surface-container-high">R$</th>
+                        <th className="text-center px-2.5 py-1 text-[9px] text-error bg-surface-container-high border-l border-outline-variant">%</th>
+                        <th className="text-center px-2.5 py-1 text-[9px] text-error bg-surface-container-high">R$</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {linhas.map(({ item, p, acumAtual, valorPeriodo, retencao, liquido }) => (
-                        <tr key={item.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                          <td className="px-2.5 py-2.5 font-semibold text-on-surface">
-                            {item.nome}
-                            {item.fornecedor && <div className="text-[10px] text-on-surface-variant font-normal">{item.fornecedor}</div>}
-                          </td>
-                          <td className="px-2.5 py-2.5">
-                            <input className={inputCls + ' text-xs py-1.5 w-28'} type="number" value={p.valor_base}
-                              onChange={e => setPreenchimento({ ...preenchimento, [item.id]: { ...p, valor_base: e.target.value } })} />
-                          </td>
-                          <td className="px-2.5 py-2.5">
-                            <input className={inputCls + ' text-xs py-1.5 w-20'} type="number" min="0" max="100" value={p.percentual}
-                              onChange={e => setPreenchimento({ ...preenchimento, [item.id]: { ...p, percentual: e.target.value } })} />
-                          </td>
-                          <td className="px-2.5 py-2.5 min-w-[90px]">
-                            <div className="h-1.5 bg-surface-variant rounded overflow-hidden mb-1">
-                              <div className={`h-full rounded ${corProgresso(parseFloat(p.percentual || '0'))}`} style={{ width: Math.min(parseFloat(p.percentual || '0'), 100) + '%' }} />
-                            </div>
-                            <div className="text-[10px] text-on-surface-variant">{parseFloat(p.percentual || '0').toFixed(0)}%</div>
-                          </td>
-                          <td className="px-2.5 py-2.5 text-on-surface-variant">{moeda(acumAtual)}</td>
-                          <td className="px-2.5 py-2.5 font-semibold text-primary">{moeda(valorPeriodo)}</td>
-                          <td className="px-2.5 py-2.5 text-error">{moeda(retencao)}</td>
-                          <td className="px-2.5 py-2.5 font-bold text-primary-container">{moeda(liquido)}</td>
-                        </tr>
-                      ))}
+                      {linhas.map(({ item, p, acumAtual, valorBase, valorPeriodo, porMedicaoHistorico }) => {
+                        const categoriaAtual = item.categoria || 'Outros'
+                        const mostrarCategoria = categoriaAtual !== categoriaAnteriorPreench
+                        categoriaAnteriorPreench = categoriaAtual
+                        const pctAcum = valorBase > 0 ? (acumAtual / valorBase) * 100 : 0
+                        const pctAtualInput = parseFloat(p.percentual || '0')
+                        return (
+                          <Fragment key={item.id}>
+                            {mostrarCategoria && (
+                              <tr><td colSpan={8 + (mapaHistorico?.medicoesReais.length || 0) * 2} className="px-2.5 py-1.5 bg-surface-container-high text-primary font-bold text-[10px] uppercase">{categoriaAtual}</td></tr>
+                            )}
+                            <tr className="border-b border-outline-variant hover:bg-surface-variant/20">
+                              <td className="px-2.5 py-2 font-semibold text-on-surface whitespace-nowrap">{item.nome}</td>
+                              <td className="px-2.5 py-2 whitespace-nowrap">
+                                <input className={inputCls + ' text-xs py-1 w-24'} type="number" value={p.valor_base}
+                                  onChange={e => setPreenchimento({ ...preenchimento, [item.id]: { ...p, valor_base: e.target.value } })} />
+                              </td>
+                              {porMedicaoHistorico.map((pm, i) => (
+                                <Fragment key={i}>
+                                  <td className="px-2.5 py-2 text-center text-on-surface-variant border-l border-outline-variant whitespace-nowrap">{pm.pctPeriodo.toFixed(0)}%</td>
+                                  <td className="px-2.5 py-2 text-right text-on-surface-variant whitespace-nowrap">{moeda(pm.valorPeriodo)}</td>
+                                </Fragment>
+                              ))}
+                              <td className="px-2.5 py-2 text-center bg-tertiary/5 border-l border-outline-variant whitespace-nowrap">
+                                <input className={inputCls + ' text-xs py-1 w-16 text-center'} type="number" min="0" max="100" value={p.percentual}
+                                  onChange={e => setPreenchimento({ ...preenchimento, [item.id]: { ...p, percentual: e.target.value } })} />
+                              </td>
+                              <td className="px-2.5 py-2 text-right font-semibold text-tertiary bg-tertiary/5 whitespace-nowrap">{moeda(valorPeriodo)}</td>
+                              <td className="px-2.5 py-2 text-center font-bold text-primary border-l border-outline-variant whitespace-nowrap">{pctAcum.toFixed(0)}%</td>
+                              <td className="px-2.5 py-2 text-right font-bold text-primary whitespace-nowrap">{moeda(acumAtual)}</td>
+                              <td className="px-2.5 py-2 text-center text-error border-l border-outline-variant whitespace-nowrap">{Math.max(100 - pctAcum, 0).toFixed(0)}%</td>
+                              <td className="px-2.5 py-2 text-right text-error whitespace-nowrap">{moeda(Math.max(valorBase - acumAtual, 0))}</td>
+                            </tr>
+                          </Fragment>
+                        )
+                      })}
                     </tbody>
                     <tfoot>
-                      <tr className="bg-surface-container-low">
-                        <td colSpan={5} className="px-2.5 py-2.5 font-bold text-on-surface">Total desta medição</td>
-                        <td className="px-2.5 py-2.5 font-black text-primary">{moeda(totalPeriodo)}</td>
-                        <td className="px-2.5 py-2.5 font-bold text-error">{moeda(totalRetencao)}</td>
-                        <td className="px-2.5 py-2.5 font-black text-primary-container">{moeda(totalLiquido)}</td>
+                      <tr className="bg-surface-container-low font-bold">
+                        <td className="px-2.5 py-2 whitespace-nowrap">Total desta medição</td>
+                        <td className="px-2.5 py-2 text-right whitespace-nowrap">{moeda(linhas.reduce((a, l) => a + l.valorBase, 0))}</td>
+                        {(mapaHistorico?.totaisPorMedicao || []).map((v, i) => (
+                          <td key={i} colSpan={2} className="px-2.5 py-2 text-right text-[10px] text-on-surface-variant border-l border-outline-variant whitespace-nowrap">{moeda(v)}</td>
+                        ))}
+                        <td colSpan={2} className="px-2.5 py-2 text-right text-tertiary bg-tertiary/5 border-l border-outline-variant whitespace-nowrap">{moeda(totalPeriodo)}</td>
+                        <td colSpan={2} className="px-2.5 py-2 text-right text-primary border-l border-outline-variant whitespace-nowrap">{moeda(linhas.reduce((a, l) => a + l.acumAtual, 0))}</td>
+                        <td colSpan={2} className="px-2.5 py-2 text-right text-error border-l border-outline-variant whitespace-nowrap">{moeda(linhas.reduce((a, l) => a + Math.max(l.valorBase - l.acumAtual, 0), 0))}</td>
                       </tr>
                     </tfoot>
                   </table>
                 </div>
-              )}
+                )
+              })()}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                  <div className="text-[10px] text-on-surface-variant uppercase">Bruto desta medição</div>
+                  <div className="text-sm font-bold text-on-surface">{moeda(totalPeriodo)}</div>
+                </div>
+                <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                  <div className="text-[10px] text-on-surface-variant uppercase">Retenção</div>
+                  <div className="text-sm font-bold text-error">{moeda(totalRetencao)}</div>
+                </div>
+                <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                  <div className="text-[10px] text-on-surface-variant uppercase">Líquido desta medição</div>
+                  <div className="text-sm font-bold text-primary-container">{moeda(totalLiquido)}</div>
+                </div>
+              </div>
               <div className="flex gap-2 justify-end mt-4">
                 <button className={btnPrimaryCls} onClick={() => salvarPreenchimentoMedicao(itensFiltrados)}>Salvar Medição</button>
               </div>

@@ -8,7 +8,7 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const H = { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` }
 
 type Alerta = {
-  categoria: 'obra' | 'financeiro' | 'levantamento' | 'orcamento'
+  categoria: 'obra' | 'financeiro' | 'levantamento' | 'orcamento' | 'crm'
   titulo: string
   descricao: string
   href: string
@@ -88,6 +88,20 @@ export default function AlertsBell() {
         const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
         const em7 = new Date(hoje); em7.setDate(hoje.getDate() + 7)
 
+        // Proposta enviada há 3+ dias corridos sem sair da etapa "Proposta Enviada" — mesmo
+        // limiar combinado com o usuário para o alerta de follow-up do CRM.
+        let crmAlertas: Alerta[] = []
+        try {
+          const propRes = await fetch(`${SUPABASE_URL}/rest/v1/crm_leads?etapa=eq.proposta_enviada&select=id,nome,data_proposta_enviada`, { headers: H })
+          const props = await propRes.json()
+          crmAlertas = (Array.isArray(props) ? props : [])
+            .filter((l: any) => l.data_proposta_enviada && new Date(l.data_proposta_enviada + 'T00:00:00') <= new Date(hoje.getTime() - 3 * 86400000))
+            .map((l: any) => {
+              const dias = Math.floor((hoje.getTime() - new Date(l.data_proposta_enviada + 'T00:00:00').getTime()) / 86400000)
+              return { categoria: 'crm' as const, titulo: l.nome, descricao: `Proposta enviada há ${dias} dia(s) sem retorno`, href: '/crm' }
+            })
+        } catch {}
+
         const obraAlertas: Alerta[] = (Array.isArray(obras) ? obras : [])
           .filter((o: any) => o.data_previsao && new Date(o.data_previsao) < hoje)
           .map((o: any) => {
@@ -112,7 +126,7 @@ export default function AlertsBell() {
             }
           })
 
-        setAlertas([...obraAlertas, ...lancAlertas, ...levAlertas, ...orcAlertas])
+        setAlertas([...obraAlertas, ...lancAlertas, ...levAlertas, ...orcAlertas, ...crmAlertas])
       } catch {
         setAlertas([])
       }
@@ -132,6 +146,7 @@ export default function AlertsBell() {
   const financeiroAlertas = alertas.filter(a => a.categoria === 'financeiro')
   const levantamentoAlertas = alertas.filter(a => a.categoria === 'levantamento')
   const orcamentoAlertas = alertas.filter(a => a.categoria === 'orcamento')
+  const crmAlertas = alertas.filter(a => a.categoria === 'crm')
 
   function irPara(href: string) {
     setAberto(false)
@@ -221,6 +236,23 @@ export default function AlertsBell() {
                     >
                       <div className="text-sm text-on-surface font-semibold">{a.titulo}</div>
                       <div className="text-xs text-on-surface-variant">{a.descricao}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+              {crmAlertas.length > 0 && (
+                <div>
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-tertiary px-2 py-1.5">
+                    🤝 Propostas paradas (CRM)
+                  </div>
+                  {crmAlertas.map((a, i) => (
+                    <button
+                      key={i}
+                      onClick={() => irPara(a.href)}
+                      className="w-full text-left px-3 py-2 rounded-lg hover:bg-surface-variant/40 transition-all"
+                    >
+                      <div className="text-sm text-on-surface font-semibold">{a.titulo}</div>
+                      <div className="text-xs text-tertiary">{a.descricao}</div>
                     </button>
                   ))}
                 </div>

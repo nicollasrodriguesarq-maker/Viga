@@ -20,8 +20,9 @@ const NAV: NavItem[] = [
   { icon: 'account_balance_wallet', label: 'Financeiro', href: '/financeiro', modulo: 'financeiro' },
   { icon: 'architecture', label: 'Levantamento', href: '/levantamento', modulo: 'levantamento' },
   { icon: 'work', label: 'Orçamento', href: '/orcamento', modulo: 'orcamento' },
+  { icon: 'real_estate_agent', label: 'Oportunidades', href: '/oportunidades', modulo: 'oportunidades' },
   { icon: 'inventory_2', label: 'Suprimentos', href: '/suprimentos', disabled: true },
-  { icon: 'group', label: 'Clientes & CRM', href: '/crm', disabled: true },
+  { icon: 'group', label: 'Clientes & CRM', href: '/crm', modulo: 'crm' },
   { icon: 'assignment', label: 'Equipes & Times', href: '/equipes', adminOnly: true },
   { icon: 'calendar_today', label: 'Agenda', href: '/agenda', modulo: 'agenda' },
 ]

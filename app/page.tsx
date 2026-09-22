@@ -37,8 +37,9 @@ const MODULOS = [
   { icon: '💰', nome: 'Financeiro', desc: 'Empresa e obras', href: '/financeiro', ativo: true },
   { icon: '📐', nome: 'Levantamento', desc: 'Registro de campo', href: '/levantamento', ativo: true },
   { icon: '💼', nome: 'Orçamento', desc: 'Composição e proposta', href: '/orcamento', ativo: true },
+  { icon: '🏚️', nome: 'Oportunidades', desc: 'Captação de imóveis para flip', href: '/oportunidades', ativo: true },
   { icon: '📦', nome: 'Suprimentos', desc: 'Compras e estoque', href: '/suprimentos', ativo: false },
-  { icon: '🤝', nome: 'CRM', desc: 'Clientes e vendas', href: '/crm', ativo: false },
+  { icon: '🤝', nome: 'CRM', desc: 'Clientes e vendas', href: '/crm', ativo: true },
   { icon: '👥', nome: 'Equipes', desc: 'Tarefas e alocação', href: '/equipes', ativo: true, adminOnly: true },
   { icon: '📅', nome: 'Agenda', desc: 'Compromissos', href: '/agenda', ativo: true },
 ]

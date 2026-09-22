@@ -20,8 +20,8 @@ async function criar(tabela: string, dados: object) {
 async function editar(tabela: string, id: string, dados: object) {
   try { const r = await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }); return r.ok } catch { return false }
 }
-async function remover(tabela: string, id: string) {
-  try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }) } catch {}
+async function remover(tabela: string, id: string): Promise<boolean> {
+  try { const r = await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }); return r.ok } catch { return false }
 }
 
 const moeda = (v: number) => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
@@ -112,6 +112,8 @@ export default function CRM() {
   const [detalhe, setDetalhe] = useState<any>(null)
   const [atividades, setAtividades] = useState<any[]>([])
   const [fAtividade, setFAtividade] = useState({ tipo: 'ligacao', descricao: '' })
+  const [editandoAtividadeId, setEditandoAtividadeId] = useState<string | null>(null)
+  const [textoAtividadeEditando, setTextoAtividadeEditando] = useState('')
 
   const [etapaAlvo, setEtapaAlvo] = useState<string>('')
   const [fExtra, setFExtra] = useState({ valor_proposta: '', motivo_perda: '', data_visita: '', hora_visita: '' })
@@ -185,7 +187,18 @@ export default function CRM() {
   }
   async function excluirLead(id: string) {
     if (!confirm('Excluir este lead? O histórico de atividades também será apagado.')) return
-    await remover('crm_leads', id)
+    // Orçamento, compromisso de agenda e cliente vinculados a este lead têm uma FK apontando
+    // pra ele — sem desvincular antes, o banco recusa o DELETE (violação de chave estrangeira)
+    // e o lead simplesmente reaparece depois do carregar(), sem nenhum aviso do motivo. Só
+    // desvincula (não apaga) esses registros — eles são reais e continuam existindo.
+    const orcVinculado = orcamentos.find(o => o.crm_lead_id === id)
+    if (orcVinculado) await editar('orcamentos', orcVinculado.id, { crm_lead_id: null })
+    const compromissos = await buscar('agenda_compromissos', '?lead_id=eq.' + id + '&select=id')
+    for (const c of compromissos) await editar('agenda_compromissos', c.id, { lead_id: null })
+    const clientesVinculados = await buscar('clientes', '?lead_id=eq.' + id + '&select=id')
+    for (const c of clientesVinculados) await editar('clientes', c.id, { lead_id: null })
+    const ok = await remover('crm_leads', id)
+    if (!ok) return alert('Não foi possível excluir o lead. Tente novamente.')
     if (detalhe?.id === id) { setJanela(null); setDetalhe(null) }
     carregar()
   }
@@ -207,6 +220,23 @@ export default function CRM() {
     if (!fAtividade.descricao.trim()) return alert('Descreva a atividade')
     await registrarAtividade(fAtividade.tipo, fAtividade.descricao.trim())
     setFAtividade({ tipo: 'ligacao', descricao: '' })
+  }
+  function iniciarEdicaoAtividade(a: any) {
+    setEditandoAtividadeId(a.id)
+    setTextoAtividadeEditando(a.descricao || '')
+  }
+  async function salvarEdicaoAtividade(id: string) {
+    const ok = await editar('crm_atividades', id, { descricao: textoAtividadeEditando.trim() || null })
+    if (!ok) return alert('Não foi possível salvar. Tente novamente.')
+    setEditandoAtividadeId(null)
+    const a = await buscar('crm_atividades', '?lead_id=eq.' + detalhe.id + '&order=created_at.desc')
+    setAtividades(a)
+  }
+  async function excluirAtividade(id: string) {
+    if (!confirm('Excluir esta atividade da linha do tempo?')) return
+    const ok = await remover('crm_atividades', id)
+    if (!ok) return alert('Não foi possível excluir. Tente novamente.')
+    setAtividades(atividades.filter(a => a.id !== id))
   }
 
   // Motor de transição de etapa — mesma ideia do mudarStatus() de Oportunidades: a maioria das
@@ -398,7 +428,12 @@ export default function CRM() {
   }
   async function excluirCliente(id: string) {
     if (!confirm('Excluir este cliente?')) return
-    await remover('clientes', id)
+    // Leads que já fecharam com esse cliente apontam pra ele (crm_leads.cliente_id) — desvincula
+    // antes, senão o DELETE falha por FK e o cliente reaparece sem explicação nenhuma.
+    const leadsVinculados = leads.filter(l => l.cliente_id === id)
+    for (const l of leadsVinculados) await editar('crm_leads', l.id, { cliente_id: null })
+    const ok = await remover('clientes', id)
+    if (!ok) return alert('Não foi possível excluir o cliente. Tente novamente.')
     if (clienteDetalhe?.id === id) { setJanela(null); setClienteDetalhe(null) }
     carregar()
   }
@@ -837,11 +872,29 @@ export default function CRM() {
                 <div className="flex flex-col gap-2">
                   {atividades.map(a => (
                     <div key={a.id} className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
-                      <div className="flex items-center justify-between mb-1">
+                      <div className="flex items-center justify-between mb-1 gap-2">
                         <span className="text-xs font-semibold text-on-surface">{ATIVIDADE_NOME[a.tipo] || a.tipo}</span>
-                        <span className="text-[10px] text-on-surface-variant">{new Date(a.created_at).toLocaleString('pt-BR')}</span>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <span className="text-[10px] text-on-surface-variant">{new Date(a.created_at).toLocaleString('pt-BR')}</span>
+                          {editandoAtividadeId !== a.id && (
+                            <>
+                              <button className="text-on-surface-variant hover:text-primary text-xs" title="Editar" onClick={() => iniciarEdicaoAtividade(a)}>✏️</button>
+                              <button className="text-on-surface-variant hover:text-error text-xs" title="Excluir" onClick={() => excluirAtividade(a.id)}>×</button>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      {a.descricao && <div className="text-sm text-on-surface-variant">{a.descricao}</div>}
+                      {editandoAtividadeId === a.id ? (
+                        <div className="flex flex-col gap-2">
+                          <textarea className={inputCls + ' min-h-[60px] resize-y text-sm'} autoFocus value={textoAtividadeEditando} onChange={e => setTextoAtividadeEditando(e.target.value)} />
+                          <div className="flex gap-2 justify-end">
+                            <button className={btnEditSmCls} onClick={() => setEditandoAtividadeId(null)}>Cancelar</button>
+                            <button className={btnEditSmCls + ' text-primary'} onClick={() => salvarEdicaoAtividade(a.id)}>Salvar</button>
+                          </div>
+                        </div>
+                      ) : (
+                        a.descricao && <div className="text-sm text-on-surface-variant whitespace-pre-wrap">{a.descricao}</div>
+                      )}
                     </div>
                   ))}
                 </div>

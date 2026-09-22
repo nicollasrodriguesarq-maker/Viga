@@ -88,18 +88,28 @@ export default function AlertsBell() {
         const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
         const em7 = new Date(hoje); em7.setDate(hoje.getDate() + 7)
 
-        // Proposta enviada há 3+ dias corridos sem sair da etapa "Proposta Enviada" — mesmo
-        // limiar combinado com o usuário para o alerta de follow-up do CRM.
+        // Alerta de follow-up de proposta: se o lead tem uma data de follow-up programada
+        // (crm_leads.proximo_followup) e ela já chegou, usa ela. Senão, cai no limiar padrão
+        // combinado com o usuário — 3 dias corridos sem sair de "Proposta Enviada".
         let crmAlertas: Alerta[] = []
         try {
-          const propRes = await fetch(`${SUPABASE_URL}/rest/v1/crm_leads?etapa=eq.proposta_enviada&select=id,nome,data_proposta_enviada`, { headers: H })
+          const propRes = await fetch(`${SUPABASE_URL}/rest/v1/crm_leads?etapa=eq.proposta_enviada&select=id,nome,data_proposta_enviada,proximo_followup`, { headers: H })
           const props = await propRes.json()
           crmAlertas = (Array.isArray(props) ? props : [])
-            .filter((l: any) => l.data_proposta_enviada && new Date(l.data_proposta_enviada + 'T00:00:00') <= new Date(hoje.getTime() - 3 * 86400000))
-            .map((l: any) => {
-              const dias = Math.floor((hoje.getTime() - new Date(l.data_proposta_enviada + 'T00:00:00').getTime()) / 86400000)
+            .map((l: any): Alerta | null => {
+              if (l.proximo_followup) {
+                const dataFollowup = new Date(l.proximo_followup + 'T00:00:00')
+                if (dataFollowup > hoje) return null
+                const dias = Math.floor((hoje.getTime() - dataFollowup.getTime()) / 86400000)
+                return { categoria: 'crm' as const, titulo: l.nome, descricao: dias <= 0 ? 'Follow-up agendado para hoje' : `Follow-up atrasado há ${dias} dia(s)`, href: '/crm' }
+              }
+              if (!l.data_proposta_enviada) return null
+              const dataEnvio = new Date(l.data_proposta_enviada + 'T00:00:00')
+              if (dataEnvio > new Date(hoje.getTime() - 3 * 86400000)) return null
+              const dias = Math.floor((hoje.getTime() - dataEnvio.getTime()) / 86400000)
               return { categoria: 'crm' as const, titulo: l.nome, descricao: `Proposta enviada há ${dias} dia(s) sem retorno`, href: '/crm' }
             })
+            .filter((a): a is Alerta => a !== null)
         } catch {}
 
         const obraAlertas: Alerta[] = (Array.isArray(obras) ? obras : [])

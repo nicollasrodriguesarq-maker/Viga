@@ -64,6 +64,15 @@ const TIPO_LEAD_NOME: Record<string, string> = { novo: 'Novo', carteira: 'Cartei
 const ATIVIDADE_NOME: Record<string, string> = {
   ligacao: '📞 Ligação', email: '✉️ E-mail', reuniao: '🤝 Reunião', visita: '📍 Visita', nota: '📝 Nota', mudanca_etapa: '🔀 Mudança de etapa',
 }
+// Temperatura do lead (pedido do usuário, pra priorizar atendimento) — vale a qualquer etapa,
+// não só em Lead Novo, por isso fica sempre editável no cabeçalho do detalhe.
+const STATUS_LEAD_OPCOES = ['frio', 'morno', 'quente'] as const
+const STATUS_LEAD_NOME: Record<string, string> = { frio: '🔵 Frio', morno: '🟡 Morno', quente: '🔴 Quente' }
+const STATUS_LEAD_BADGE: Record<string, string> = {
+  frio: 'bg-secondary/10 text-secondary border-secondary/20',
+  morno: 'bg-tertiary/10 text-tertiary border-tertiary/20',
+  quente: 'bg-error/10 text-error border-error/20',
+}
 
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
 const labelCls = 'text-[11px] text-on-surface-variant font-semibold uppercase tracking-wide block mb-1.5'
@@ -87,6 +96,8 @@ export default function CRM() {
   const [leads, setLeads] = useState<any[]>([])
   const [clientes, setClientes] = useState<any[]>([])
   const [usuarios, setUsuarios] = useState<any[]>([])
+  const [orcamentos, setOrcamentos] = useState<any[]>([])
+  const [levantamentos, setLevantamentos] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [userEmail, setUserEmail] = useState('')
   const [abaTopo, setAbaTopo] = useState<'pipeline' | 'clientes'>('pipeline')
@@ -121,12 +132,14 @@ export default function CRM() {
 
   async function carregar() {
     setLoading(true)
-    const [l, c, u] = await Promise.all([
+    const [l, c, u, o, lev] = await Promise.all([
       buscar('crm_leads', '?order=created_at.desc'),
       buscar('clientes', '?order=nome.asc'),
       buscar('usuarios', '?select=id,nome,email,role&order=nome'),
+      buscar('orcamentos', '?select=id,codigo,cliente_nome,total_geral,condicao_pagamento,validade_dias,crm_lead_id&order=created_at.desc'),
+      buscar('levantamentos', '?select=id,codigo,nome,cliente,cliente_nome&order=created_at.desc'),
     ])
-    setLeads(l); setClientes(c); setUsuarios(u)
+    setLeads(l); setClientes(c); setUsuarios(u); setOrcamentos(o); setLevantamentos(lev)
     setLoading(false)
   }
 
@@ -202,10 +215,7 @@ export default function CRM() {
   function mudarEtapa(novaEtapa: string) {
     if (!detalhe || novaEtapa === detalhe.etapa) return
     setEtapaAlvo(novaEtapa)
-    if (novaEtapa === 'proposta_enviada') {
-      setFExtra(f => ({ ...f, valor_proposta: detalhe.valor_proposta != null ? String(detalhe.valor_proposta) : '' }))
-      setJanela('extraEtapa')
-    } else if (novaEtapa === 'fechado_perdido') {
+    if (novaEtapa === 'fechado_perdido') {
       setFExtra(f => ({ ...f, motivo_perda: '' }))
       setJanela('extraEtapa')
     } else if (novaEtapa === 'visita_agendada') {
@@ -238,10 +248,7 @@ export default function CRM() {
   }
 
   async function confirmarExtraEtapa() {
-    if (etapaAlvo === 'proposta_enviada') {
-      if (!fExtra.valor_proposta) return alert('Informe o valor da proposta')
-      await confirmarMudancaEtapa('proposta_enviada', { valor_proposta: num(fExtra.valor_proposta), data_proposta_enviada: new Date().toISOString().slice(0, 10) })
-    } else if (etapaAlvo === 'fechado_perdido') {
+    if (etapaAlvo === 'fechado_perdido') {
       if (!fExtra.motivo_perda.trim()) return alert('Informe o motivo da perda')
       await confirmarMudancaEtapa('fechado_perdido', { motivo_perda: fExtra.motivo_perda.trim() })
     } else if (etapaAlvo === 'visita_agendada') {
@@ -253,6 +260,56 @@ export default function CRM() {
       if (!compromisso) return alert('Não foi possível criar o compromisso na Agenda. Tente novamente.')
       await confirmarMudancaEtapa('visita_agendada')
     }
+  }
+
+  // ── Campos por etapa (Qualificação / Visita / Proposta) ─────────
+  // Ficam sempre visíveis e editáveis no detalhe do lead, independente da etapa atual em que
+  // ele está agora — assim dá pra voltar e linkar/editar informação retroativamente (ex.: uma
+  // proposta que já tinha sido enviada antes do CRM existir), não só no momento da transição.
+  async function salvarCampoLead(campo: string, valor: any) {
+    if (!detalhe) return
+    await editar('crm_leads', detalhe.id, { [campo]: valor })
+  }
+  async function definirStatusLead(v: string) {
+    if (!detalhe) return
+    const valor = v || null
+    await editar('crm_leads', detalhe.id, { status_lead: valor })
+    setDetalhe({ ...detalhe, status_lead: valor })
+    carregar()
+  }
+  async function vincularLevantamento(id: string) {
+    if (!detalhe) return
+    const valor = id || null
+    await editar('crm_leads', detalhe.id, { levantamento_id: valor })
+    setDetalhe({ ...detalhe, levantamento_id: valor })
+    carregar()
+  }
+  // O vínculo mora no lado do orçamento (orcamentos.crm_lead_id), não em crm_leads — assim um
+  // orçamento continua sendo o dono de seus próprios dados (valor, condição, validade) e o CRM só
+  // aponta pra ele, sem duplicar número que pode ficar desatualizado.
+  async function vincularOrcamento(orcamentoId: string) {
+    if (!detalhe) return
+    const anterior = orcamentos.find(o => o.crm_lead_id === detalhe.id)
+    if (anterior && anterior.id !== orcamentoId) await editar('orcamentos', anterior.id, { crm_lead_id: null })
+    let dadosLead: any = {}
+    if (orcamentoId) {
+      const orc = orcamentos.find(o => o.id === orcamentoId)
+      await editar('orcamentos', orcamentoId, { crm_lead_id: detalhe.id })
+      dadosLead.valor_proposta = orc ? num(orc.total_geral) : detalhe.valor_proposta
+      if (!detalhe.data_proposta_enviada) dadosLead.data_proposta_enviada = new Date().toISOString().slice(0, 10)
+      await editar('crm_leads', detalhe.id, dadosLead)
+    }
+    setDetalhe({ ...detalhe, ...dadosLead })
+    carregar()
+  }
+  async function salvarFollowup(data: string) {
+    if (!detalhe) return
+    const valor = data || null
+    await editar('crm_leads', detalhe.id, { proximo_followup: valor })
+    setDetalhe({ ...detalhe, proximo_followup: valor })
+  }
+  async function avancarParaQualificacao() {
+    await confirmarMudancaEtapa('qualificacao')
   }
 
   // Ao ganhar o negócio: pergunta antes de criar/vincular o Cliente (confirmado com o usuário —
@@ -455,9 +512,14 @@ export default function CRM() {
                           <span className="material-symbols-outlined text-[13px]">campaign</span>
                           <span className="truncate">{l.canal === 'Outro' ? (l.canal_outro || 'Outro') : l.canal || '—'}</span>
                         </div>
-                        {l.valor_proposta != null && (
-                          <div className="text-xs font-semibold text-primary">{moeda(l.valor_proposta)}</div>
-                        )}
+                        <div className="flex items-center justify-between gap-2">
+                          {l.valor_proposta != null ? (
+                            <div className="text-xs font-semibold text-primary">{moeda(l.valor_proposta)}</div>
+                          ) : <span />}
+                          {l.status_lead && (
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${STATUS_LEAD_BADGE[l.status_lead]}`}>{STATUS_LEAD_NOME[l.status_lead]}</span>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -619,6 +681,10 @@ export default function CRM() {
                 <select className={inputCls + ' w-auto py-1.5'} value={detalhe.etapa} onChange={e => mudarEtapa(e.target.value)}>
                   {ETAPA_ORDEM.map(e => <option key={e} value={e}>Mover para: {ETAPA_NOME[e]}</option>)}
                 </select>
+                <select className={inputCls + ' w-auto py-1.5 ' + (detalhe.status_lead ? STATUS_LEAD_BADGE[detalhe.status_lead] : '')} value={detalhe.status_lead || ''} onChange={e => definirStatusLead(e.target.value)} title="Prioridade do lead">
+                  <option value="">Prioridade: —</option>
+                  {STATUS_LEAD_OPCOES.map(s => <option key={s} value={s}>{STATUS_LEAD_NOME[s]}</option>)}
+                </select>
                 {detalhe.cliente_id && <span className="text-[11px] text-primary">🤝 Cliente vinculado</span>}
               </div>
             </div>
@@ -644,6 +710,117 @@ export default function CRM() {
                   <div className="text-sm text-on-surface whitespace-pre-wrap">{detalhe.observacao}</div>
                 </div>
               )}
+
+              {/* Ficam sempre visíveis (não só na etapa correspondente) pra dar pra preencher ou
+                  linkar informação retroativamente — ex.: uma proposta já enviada antes do CRM
+                  existir, como o caso do Matheus Cordeiro. */}
+              <div className={cardCls + ' mb-4'}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-bold text-on-surface">📋 Dados do Lead</div>
+                  {detalhe.etapa === 'lead_novo' && (
+                    <button className={btnEditSmCls} onClick={avancarParaQualificacao}>✓ Avançar para Qualificação</button>
+                  )}
+                </div>
+                <div className="mb-3">
+                  <label className={labelCls}>Localização</label>
+                  <input className={inputCls} placeholder="Endereço do imóvel/obra" defaultValue={detalhe.localizacao || ''} key={'loc' + detalhe.id}
+                    onBlur={e => salvarCampoLead('localizacao', e.target.value || null)} />
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className={labelCls}>Tipo de obra</label>
+                    <input className={inputCls} placeholder="Ex: Projeto de apartamento — 36m²" defaultValue={detalhe.tipo_obra || ''} key={'tob' + detalhe.id}
+                      onBlur={e => salvarCampoLead('tipo_obra', e.target.value || null)} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Prazo estimado</label>
+                    <input className={inputCls} placeholder="Ex: 2 meses" defaultValue={detalhe.prazo_estimado || ''} key={'prz' + detalhe.id}
+                      onBlur={e => salvarCampoLead('prazo_estimado', e.target.value || null)} />
+                  </div>
+                </div>
+                <div>
+                  <label className={labelCls}>Ticket estimado (R$)</label>
+                  <input className={inputCls} type="number" placeholder="Se já houver uma média ou algo adiantado com o cliente" defaultValue={detalhe.ticket_estimado ?? ''} key={'tkt' + detalhe.id}
+                    onBlur={e => salvarCampoLead('ticket_estimado', e.target.value ? num(e.target.value) : null)} />
+                </div>
+              </div>
+
+              <div className={cardCls + ' mb-4'}>
+                <div className="text-sm font-bold text-on-surface mb-3">🔍 Visita Técnica</div>
+                <div className="mb-3">
+                  <label className={labelCls}>Levantamento técnico vinculado</label>
+                  <select className={inputCls} value={detalhe.levantamento_id || ''} onChange={e => vincularLevantamento(e.target.value)}>
+                    <option value="">Nenhum vinculado</option>
+                    {levantamentos.map(lv => <option key={lv.id} value={lv.id}>{lv.codigo} — {lv.cliente_nome || lv.cliente || lv.nome}</option>)}
+                  </select>
+                </div>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  <div>
+                    <label className={labelCls}>Feedback</label>
+                    <textarea className={inputCls + ' min-h-[60px] resize-y'} defaultValue={detalhe.feedback_visita || ''} key={'fb' + detalhe.id}
+                      onBlur={e => salvarCampoLead('feedback_visita', e.target.value || null)} />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Observações</label>
+                    <textarea className={inputCls + ' min-h-[60px] resize-y'} defaultValue={detalhe.observacao_visita || ''} key={'obv' + detalhe.id}
+                      onBlur={e => salvarCampoLead('observacao_visita', e.target.value || null)} />
+                  </div>
+                </div>
+                <div className="mb-3">
+                  <label className={labelCls}>Interesse</label>
+                  <textarea className={inputCls + ' min-h-[50px] resize-y'} defaultValue={detalhe.interesse || ''} key={'int' + detalhe.id}
+                    onBlur={e => salvarCampoLead('interesse', e.target.value || null)} />
+                </div>
+                <div className="mb-3">
+                  <label className={labelCls}>Necessidades</label>
+                  <textarea className={inputCls + ' min-h-[50px] resize-y'} defaultValue={detalhe.necessidades || ''} key={'nec' + detalhe.id}
+                    onBlur={e => salvarCampoLead('necessidades', e.target.value || null)} />
+                </div>
+                <div>
+                  <label className={labelCls}>Próximos passos</label>
+                  <textarea className={inputCls + ' min-h-[50px] resize-y'} defaultValue={detalhe.proximos_passos || ''} key={'pxp' + detalhe.id}
+                    onBlur={e => salvarCampoLead('proximos_passos', e.target.value || null)} />
+                </div>
+              </div>
+
+              {(() => {
+                const orcVinculado = orcamentos.find(o => o.crm_lead_id === detalhe.id)
+                const validadeDias = orcVinculado?.validade_dias || 30
+                const validoAte = detalhe.data_proposta_enviada
+                  ? new Date(new Date(detalhe.data_proposta_enviada + 'T00:00:00').getTime() + validadeDias * 86400000).toLocaleDateString('pt-BR')
+                  : null
+                return (
+                  <div className={cardCls + ' mb-4'}>
+                    <div className="text-sm font-bold text-on-surface mb-3">💰 Proposta</div>
+                    <div className="mb-3">
+                      <label className={labelCls}>Orçamento vinculado</label>
+                      <select className={inputCls} value={orcVinculado?.id || ''} onChange={e => vincularOrcamento(e.target.value)}>
+                        <option value="">Nenhum vinculado</option>
+                        {orcamentos.filter(o => !o.crm_lead_id || o.crm_lead_id === detalhe.id).map(o => (
+                          <option key={o.id} value={o.id}>{o.codigo} — {o.cliente_nome} ({moeda(num(o.total_geral))})</option>
+                        ))}
+                      </select>
+                    </div>
+                    {orcVinculado && (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
+                        <div className="bg-surface-container-low rounded-lg p-2.5"><div className="text-[10px] text-on-surface-variant mb-0.5">Valor</div><div className="text-sm font-bold text-primary">{moeda(num(orcVinculado.total_geral))}</div></div>
+                        <div className="bg-surface-container-low rounded-lg p-2.5"><div className="text-[10px] text-on-surface-variant mb-0.5">Condições de pagamento</div><div className="text-sm text-on-surface">{orcVinculado.condicao_pagamento || '—'}</div></div>
+                        <div className="bg-surface-container-low rounded-lg p-2.5"><div className="text-[10px] text-on-surface-variant mb-0.5">Válido até ({validadeDias}d)</div><div className="text-sm text-on-surface">{validoAte || '—'}</div></div>
+                      </div>
+                    )}
+                    <div className="mb-3">
+                      <label className={labelCls}>Produtos/serviços</label>
+                      <textarea className={inputCls + ' min-h-[60px] resize-y'} defaultValue={detalhe.produtos_servicos || ''} key={'psv' + detalhe.id}
+                        onBlur={e => salvarCampoLead('produtos_servicos', e.target.value || null)} />
+                    </div>
+                    <div>
+                      <label className={labelCls}>Alerta de follow-up</label>
+                      <input className={inputCls} type="date" value={detalhe.proximo_followup || ''} onChange={e => salvarFollowup(e.target.value)} />
+                      <p className="text-[11px] text-on-surface-variant mt-1">Some no sininho de notificações quando a data chegar. Se deixar em branco, o sistema avisa sozinho 3 dias depois do envio sem retorno.</p>
+                    </div>
+                  </div>
+                )
+              })()}
 
               <div className="text-sm font-bold text-on-surface mb-3">🕐 Linha do tempo</div>
               <div className="flex gap-2 mb-4">

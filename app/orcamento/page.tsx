@@ -91,6 +91,7 @@ export default function Orcamento() {
   const [itens, setItens] = useState<any[]>([])
   const [bancoItens, setBancoItens] = useState<any[]>([])
   const [obras, setObras] = useState<any[]>([])
+  const [crmLeads, setCrmLeads] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [detalhe, setDetalhe] = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('itens')
@@ -109,7 +110,7 @@ export default function Orcamento() {
   const [abaBanco, setAbaBanco] = useState<'obras' | 'house_flipping'>('obras')
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
 
-  const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra' })
+  const [fOrc, setFOrc] = useState({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra', crm_lead_id: '' })
   const [fItem, setFItem] = useState({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias' })
   const [editItem, setEditItem] = useState<any>(null)
   const [fBanco, setFBanco] = useState({ nome: '', unidade: 'm²', categoria: '', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias', tipo_banco: 'obras' })
@@ -147,15 +148,16 @@ export default function Orcamento() {
 
   async function carregar() {
     setLoading(true)
-    const [o, a, it, b, ob, s] = await Promise.all([
+    const [o, a, it, b, ob, s, cl] = await Promise.all([
       buscar('orcamentos', '?order=created_at.desc'),
       buscar('orcamento_ambientes', '?order=ordem'),
       buscar('orcamento_itens', '?order=created_at'),
       buscar('banco_itens', '?order=nome'),
       buscar('obras', '?select=id,nome,dias_trabalho&order=nome'),
       buscar('orcamento_solicitacoes', '?order=created_at.desc'),
+      buscar('crm_leads', '?select=id,codigo,nome&order=nome'),
     ])
-    setOrcamentos(o); setAmbientes(a); setItens(it); setBancoItens(b); setObras(ob); setSolicitacoes(s)
+    setOrcamentos(o); setAmbientes(a); setItens(it); setBancoItens(b); setObras(ob); setSolicitacoes(s); setCrmLeads(cl)
     setLoading(false)
   }
 
@@ -183,6 +185,7 @@ export default function Orcamento() {
       validade_dias: parseInt(fOrc.validade_dias || '30'),
       observacao: fOrc.observacao,
       tipo_execucao: fOrc.tipo_execucao,
+      crm_lead_id: fOrc.crm_lead_id || null,
       status: 'rascunho',
       total_material: 0,
       total_mao_obra: 0,
@@ -196,7 +199,7 @@ export default function Orcamento() {
       await criar('orcamento_ambientes', { orcamento_id: orcId, nome: 'Geral', ordem: 0 })
     }
     setJanela(null)
-    setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra' })
+    setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra', crm_lead_id: '' })
     const [o, a, it, b] = await Promise.all([
       buscar('orcamentos', '?order=created_at.desc'),
       buscar('orcamento_ambientes', '?order=ordem'),
@@ -1430,6 +1433,14 @@ export default function Orcamento() {
                 {detalhe.obra_id && <div className="text-[11px] text-primary mt-1">✓ Etapas de cronograma criadas em Obras</div>}
               </div>
               <div>
+                <label className={labelCls}>Lead do CRM Vinculado</label>
+                <select className={inputCls + ' disabled:opacity-50'} disabled={!podeEditar} value={detalhe.crm_lead_id || ''}
+                  onChange={e => { const v = e.target.value || null; editar('orcamentos', detalhe.id, { crm_lead_id: v }); setDetalhe({ ...detalhe, crm_lead_id: v }) }}>
+                  <option value="">Nenhum / prospecção direta</option>
+                  {crmLeads.map(l => <option key={l.id} value={l.id}>{l.codigo} — {l.nome}</option>)}
+                </select>
+              </div>
+              <div>
                 <label className={labelCls}>Retenção de Garantia (%)</label>
                 <input className={inputCls + ' disabled:opacity-50'} disabled={!podeEditar} type="number" step="0.1" placeholder="0" value={detalhe.retencao_percentual != null ? detalhe.retencao_percentual * 100 : ''}
                   onChange={e => setDetalhe({ ...detalhe, retencao_percentual: parseFloat(e.target.value || '0') / 100 })}
@@ -1768,7 +1779,7 @@ export default function Orcamento() {
             Banco de Itens
           </button>
           <button
-            onClick={() => { setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra' }); setJanela('orcamento') }}
+            onClick={() => { setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra', crm_lead_id: '' }); setJanela('orcamento') }}
             className="flex items-center gap-2 px-4 py-2 bg-primary-container text-on-primary-container rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary-container/20"
           >
             <span className="material-symbols-outlined text-[20px]">post_add</span>
@@ -1892,6 +1903,13 @@ export default function Orcamento() {
             <div className="mb-3.5">
               <label className={labelCls}>Cliente *</label>
               <input className={inputCls} placeholder="Nome do cliente" value={fOrc.cliente_nome} onChange={e => setFOrc({ ...fOrc, cliente_nome: e.target.value })} />
+            </div>
+            <div className="mb-3.5">
+              <label className={labelCls}>Lead do CRM vinculado</label>
+              <select className={inputCls} value={fOrc.crm_lead_id} onChange={e => setFOrc({ ...fOrc, crm_lead_id: e.target.value })}>
+                <option value="">Nenhum / prospecção direta</option>
+                {crmLeads.map(l => <option key={l.id} value={l.id}>{l.codigo} — {l.nome}</option>)}
+              </select>
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Execução *</label>

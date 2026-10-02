@@ -49,6 +49,13 @@ const UNIDADES = ['m²', 'm³', 'ml', 'un', 'vb', 'cj', 'kg', 'hr']
 const AMBIENTES_COMUNS = ['Sala de Estar', 'Sala de Jantar', 'Cozinha', 'Quarto 1', 'Quarto 2', 'Quarto 3', 'Banheiro Social', 'Banheiro Suíte', 'Área de Serviço', 'Varanda', 'Fachada', 'Área Externa', 'Corredor', 'Hall', 'Escritório', 'Garagem']
 // Ordem = sequência real de execução de obra (usada para ordenar/agrupar itens e etapas).
 const CATEGORIAS = ['Serviços Preliminares', 'Demolição e Remoção', 'Terraplanagem e Fundação', 'Estrutura', 'Alvenaria', 'Cobertura', 'Impermeabilização', 'Instalações Elétricas', 'Instalações Hidráulicas', 'Instalações de Gás', 'Instalações de Incêndio', 'Climatização (AC)', 'Revestimento de Parede', 'Revestimento de Piso', 'Forro', 'Esquadrias', 'Vidraçaria', 'Serralheria', 'Marmoraria', 'Louças e Metais', 'Marcenaria', 'Pintura', 'Mobiliário', 'Paisagismo', 'Limpeza Pós-Obra', 'Outros']
+function ordemCategoria(categoria: string | null | undefined) {
+  const idx = CATEGORIAS.indexOf(categoria || '')
+  return idx === -1 ? CATEGORIAS.length : idx
+}
+function ordenarPorCategoria(itensList: any[]) {
+  return [...itensList].sort((a, b) => ordemCategoria(a.categoria) - ordemCategoria(b.categoria))
+}
 
 // Usa o maior número já usado (não a contagem) — se algum levantamento do ano foi
 // excluído, contar de novo geraria um código repetido e o insert seria rejeitado (409).
@@ -657,15 +664,34 @@ export default function LevantamentoMobile() {
       ['Projeto', 'Construção', 'Reforma'],
       ['/proposta/marajoara-1.jpg', '/proposta/marajoara-2.jpg', '/proposta/marajoara-3.jpg', '/proposta/marajoara-4.jpg'], origin, cfg)
   }
-  function paginaInvestimentoInverso(itensOrc: any[], codigo: string, cfg: any) {
-    const rows = itensOrc.map(item => `
+  function paginaInvestimentoInverso(itensOrc: any[], ambientesOrc: any[], codigo: string, cfg: any) {
+    const ambientesOrdenados = [...ambientesOrc].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    const idsAmbientesValidos = new Set(ambientesOrc.map(a => a.id))
+    const semAmbiente = itensOrc.filter(i => !i.ambiente_id || !idsAmbientesValidos.has(i.ambiente_id))
+    const grupos = [
+      ...ambientesOrdenados.map(amb => ({ nome: amb.nome, itens: ordenarPorCategoria(itensOrc.filter(i => i.ambiente_id === amb.id)) })),
+      ...(semAmbiente.length ? [{ nome: 'Geral', itens: ordenarPorCategoria(semAmbiente) }] : []),
+    ].filter(g => g.itens.length > 0)
+    const rows = grupos.map(grupo => {
+      const headerAmbiente = `<tr style="break-inside:avoid"><td colspan="5" style="padding:10px 16px;background:#1A1A1A;border-top:2px solid #fff;color:#fff;font-weight:700;font-size:12px;letter-spacing:0.08em;text-transform:uppercase">🏠 ${grupo.nome}</td></tr>`
+      let categoriaAnterior: string | null = null
+      const itensHtml = grupo.itens.map(item => {
+        const categoriaAtual = item.categoria || 'Outros'
+        const headerCategoria = categoriaAtual !== categoriaAnterior
+          ? `<tr style="break-inside:avoid"><td colspan="5" style="padding:8px 16px;background:#F5F4F1;color:#1A1A1A;font-weight:700;font-size:11px;letter-spacing:0.05em;text-transform:uppercase">${categoriaAtual}</td></tr>`
+          : ''
+        categoriaAnterior = categoriaAtual
+        return `${headerCategoria}
       <tr style="break-inside:avoid">
         <td style="padding:12px 16px;border-bottom:1px solid #333;color:#eee">${item.servico}${item.descricao ? `<br/><span style="color:#999;font-size:11px">${item.descricao}</span>` : ''}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${item.unidade}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${Number(item.quantidade||1).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;color:#ccc">${moeda(calcularValorUnitarioLev(item))}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;font-weight:700;color:#fff">${moeda(calcularTotalItemLev(item))}</td>
-      </tr>`).join('')
+      </tr>`
+      }).join('')
+      return headerAmbiente + itensHtml
+    }).join('')
     const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItemLev(i), 0)
     return `
     <div class="page-flow" style="background:#1A1A1A;color:#fff;padding:36px 40px">
@@ -794,6 +820,7 @@ export default function LevantamentoMobile() {
     const orcs = await buscar('orcamentos', `?levantamento_id=eq.${lev.id}&limit=1`)
     const orc = orcs[0]
     const orcItens = orc ? await buscar('orcamento_itens', `?orcamento_id=eq.${orc.id}`) : []
+    const orcAmbientes = orc ? await buscar('orcamento_ambientes', `?orcamento_id=eq.${orc.id}`) : []
 
     const totalDiasUteis = Math.max(1, Math.round(orcItens.reduce((a: number, i: any) => a + tempoExecucaoItemLev(i), 0)))
     const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
@@ -807,7 +834,7 @@ export default function LevantamentoMobile() {
       paginaDivisorPortfolio(cfg) +
       paginasPortfolioInverso(origin, cfg) +
       paginasLevantamentoEncarte(lev, ambs, itensList, cfg) +
-      paginaInvestimentoInverso(orcItens, orc?.codigo || lev.codigo, cfg) +
+      paginaInvestimentoInverso(orcItens, orcAmbientes, orc?.codigo || lev.codigo, cfg) +
       paginaCondicoesInverso(prazoDias, orc?.condicao_pagamento, parseInt(orc?.validade_dias || '30'), cfg) +
       paginaFechamentoInverso(cfg)
 

@@ -226,14 +226,24 @@ export default function OrcamentoMobile() {
       ['/proposta/marajoara-1.jpg', '/proposta/marajoara-2.jpg', '/proposta/marajoara-3.jpg', '/proposta/marajoara-4.jpg'], origin, cfg)
   }
 
-  function paginaInvestimentoInverso(itensOrc: any[], codigo: string, cfg: any) {
-    const rows = itensOrc.map((item, idx) => {
-      const categoriaAtual = item.categoria || 'Outros'
-      const categoriaAnterior = idx > 0 ? (itensOrc[idx - 1].categoria || 'Outros') : null
-      const headerCategoria = categoriaAtual !== categoriaAnterior
-        ? `<tr style="break-inside:avoid"><td colspan="5" style="padding:8px 16px;background:#F5F4F1;color:#1A1A1A;font-weight:700;font-size:11px;letter-spacing:0.05em;text-transform:uppercase">${categoriaAtual}</td></tr>`
-        : ''
-      return `${headerCategoria}
+  function paginaInvestimentoInverso(itensOrc: any[], ambientesOrc: any[], codigo: string, cfg: any) {
+    const ambientesOrdenados = [...ambientesOrc].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
+    const idsAmbientesValidos = new Set(ambientesOrc.map(a => a.id))
+    const semAmbiente = itensOrc.filter(i => !i.ambiente_id || !idsAmbientesValidos.has(i.ambiente_id))
+    const grupos = [
+      ...ambientesOrdenados.map(amb => ({ nome: amb.nome, itens: ordenarPorCategoria(itensOrc.filter(i => i.ambiente_id === amb.id)) })),
+      ...(semAmbiente.length ? [{ nome: 'Geral', itens: ordenarPorCategoria(semAmbiente) }] : []),
+    ].filter(g => g.itens.length > 0)
+    const rows = grupos.map(grupo => {
+      const headerAmbiente = `<tr style="break-inside:avoid"><td colspan="5" style="padding:10px 16px;background:#1A1A1A;border-top:2px solid #fff;color:#fff;font-weight:700;font-size:12px;letter-spacing:0.08em;text-transform:uppercase">🏠 ${grupo.nome}</td></tr>`
+      let categoriaAnterior: string | null = null
+      const itensHtml = grupo.itens.map(item => {
+        const categoriaAtual = item.categoria || 'Outros'
+        const headerCategoria = categoriaAtual !== categoriaAnterior
+          ? `<tr style="break-inside:avoid"><td colspan="5" style="padding:8px 16px;background:#F5F4F1;color:#1A1A1A;font-weight:700;font-size:11px;letter-spacing:0.05em;text-transform:uppercase">${categoriaAtual}</td></tr>`
+          : ''
+        categoriaAnterior = categoriaAtual
+        return `${headerCategoria}
       <tr style="break-inside:avoid">
         <td style="padding:12px 16px;border-bottom:1px solid #333;color:#eee">${item.servico}${item.descricao ? `<br/><span style="color:#999;font-size:11px">${item.descricao}</span>` : ''}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${item.unidade}</td>
@@ -241,6 +251,8 @@ export default function OrcamentoMobile() {
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;color:#ccc">${fmt(calcularValorUnitario(parseFloat(item.preco_material||0), parseFloat(item.preco_mao_obra||0), parseFloat(item.lucro_percentual||0), parseFloat(item.imposto_percentual||0)))}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;font-weight:700;color:#fff">${fmt(calcularTotalItem(item))}</td>
       </tr>`
+      }).join('')
+      return headerAmbiente + itensHtml
     }).join('')
     const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
     return `
@@ -364,6 +376,7 @@ export default function OrcamentoMobile() {
     if (!detalhe) return
     const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
     const itensDoOrc = ordenarPorCategoria(itens.filter(i => i.orcamento_id === detalhe.id))
+    const ambientesDoOrc = ambientes.filter(a => a.orcamento_id === detalhe.id)
     const origin = window.location.origin
 
     let paginasLev = ''
@@ -389,7 +402,7 @@ export default function OrcamentoMobile() {
       paginaDivisorPortfolio(cfg) +
       paginasPortfolioInverso(origin, cfg) +
       paginasLev +
-      paginaInvestimentoInverso(itensDoOrc, detalhe.codigo, cfg) +
+      paginaInvestimentoInverso(itensDoOrc, ambientesDoOrc, detalhe.codigo, cfg) +
       paginaCondicoesInverso(prazoDias, detalhe.condicao_pagamento, parseInt(detalhe.validade_dias || '30'), cfg) +
       paginaFechamentoInverso(cfg)
 

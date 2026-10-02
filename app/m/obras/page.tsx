@@ -351,18 +351,24 @@ export default function ObrasMobile() {
     const itensFiltrados = svsObra.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor)
     const orcVinculado = orcamentos.find(o => o.obra_id === med.obra_id)
     const retPct = parseFloat(orcVinculado?.retencao_percentual || 0)
-    let totalPeriodo = 0, totalLiquido = 0
+    let totalPeriodo = 0, totalBaseGrupo = 0
     itensFiltrados.forEach(item => {
       const mi = medItens.find(x => x.medicao_id === med.id && x.servico_id === item.id)
-      if (!mi) return
       const ultimo = ultimoRegistro(item.id, med.id, med.tipo, med.fornecedor, med.data)
+      const valorBase = mi ? mi.valor_base : (ultimo ? ultimo.valor_base : baseParaMedicao(item, med.tipo))
+      totalBaseGrupo += valorBase
+      if (!mi) return
       const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
       const acumAtual = mi.valor_base * mi.percentual_acumulado
-      const valorPeriodo = acumAtual - acumAnterior
-      totalPeriodo += valorPeriodo
-      totalLiquido += valorPeriodo - valorPeriodo * retPct
+      totalPeriodo += acumAtual - acumAnterior
     })
-    return { totalPeriodo, totalLiquido }
+    // Desconto proporcional do(s) adiantamento(s) do mesmo grupo — mesma lógica do desktop.
+    const totalAdiantamento = medicoes
+      .filter(m => m.obra_id === med.obra_id && m.tipo === med.tipo && (med.tipo !== 'fornecedor' || m.fornecedor === med.fornecedor) && m.valor_adiantamento != null)
+      .reduce((a, m) => a + parseFloat(m.valor_adiantamento || 0), 0)
+    const descontoAdiantamento = totalAdiantamento > 0 && totalBaseGrupo > 0 ? (totalPeriodo / totalBaseGrupo) * totalAdiantamento : 0
+    const totalLiquido = totalPeriodo - totalPeriodo * retPct - descontoAdiantamento
+    return { totalPeriodo, totalLiquido, descontoAdiantamento }
   }
   // Mapa Geral: pivota medicao_itens numa linha por item × uma coluna por medição real do
   // grupo (estilo planilha "Medição Física" que o cliente usa). Mesmo motor do desktop
@@ -415,7 +421,7 @@ export default function ObrasMobile() {
       const rotulo = isAdiantamento ? '💰 Adiantamento' : `Medição ${++contadorMedicao}`
       return `
       <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${rotulo} <span style="color:#869391">· ${med.numero}</span></td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${rotulo} <span style="color:#869391">· ${med.numero}</span>${isAdiantamento && med.observacao ? ` <span style="color:#869391">— ${med.observacao}</span>` : ''}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${new Date(med.data).toLocaleDateString('pt-BR')}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;font-weight:700;color:#6ee9e0">${moeda(totalLiquido)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center;font-weight:700;color:${corStatus}">${statusPag}</td>
@@ -651,6 +657,7 @@ export default function ObrasMobile() {
   async function criarMedicao() {
     const ehAdiantamento = fMedicao.tipo === 'fornecedor' && fMedicao.adiantamento
     if (ehAdiantamento && !parseFloat(fMedicao.valor_adiantamento || '0')) return alert('Preencha o valor do adiantamento')
+    if (ehAdiantamento && !fMedicao.observacao.trim()) return alert('Preencha a que se refere o adiantamento')
     const ano = new Date().getFullYear()
     const medicoesObraAno = medicoes.filter(m => m.obra_id === detalhe.id && m.numero?.startsWith('MED-' + ano))
     const numero = 'MED-' + ano + '-' + String(medicoesObraAno.length + 1).padStart(3, '0')
@@ -1320,8 +1327,8 @@ export default function ObrasMobile() {
             <input className={inputCls} type="date" value={fMedicao.data} onChange={e => setFMedicao({ ...fMedicao, data: e.target.value })} />
           </div>
           <div>
-            <label className={labelCls}>Observação</label>
-            <input className={inputCls} value={fMedicao.observacao} onChange={e => setFMedicao({ ...fMedicao, observacao: e.target.value })} />
+            <label className={labelCls}>{fMedicao.tipo === 'fornecedor' && fMedicao.adiantamento ? 'Referente a *' : 'Observação'}</label>
+            <input className={inputCls} placeholder={fMedicao.tipo === 'fornecedor' && fMedicao.adiantamento ? 'Ex: Entrada para início dos serviços...' : ''} value={fMedicao.observacao} onChange={e => setFMedicao({ ...fMedicao, observacao: e.target.value })} />
           </div>
           <div className="flex flex-col gap-2 mt-2">
             <button className={btnPrimaryCls} onClick={() => criarMedicao()}>{fMedicao.adiantamento ? 'Registrar Adiantamento' : 'Criar e Preencher'}</button>
@@ -1337,8 +1344,7 @@ export default function ObrasMobile() {
     const orcamentoObra = orcamentos.find(o => o.obra_id === detalhe.id)
     const itensFiltrados = servicosObra(detalhe.id).filter(s => medicaoAtiva.tipo !== 'fornecedor' || !medicaoAtiva.fornecedor || s.fornecedor === medicaoAtiva.fornecedor)
     const retPct = parseFloat(orcamentoObra?.retencao_percentual || 0)
-    let totalPeriodo = 0, totalRetencao = 0, totalLiquido = 0
-    const linhas = itensFiltrados.map(item => {
+    const itensComValores = itensFiltrados.map(item => {
       const p = preenchimento[item.id] || { valor_base: String(baseParaMedicao(item, medicaoAtiva.tipo)), percentual: '0' }
       const ultimo = ultimoRegistro(item.id, medicaoAtiva.id, medicaoAtiva.tipo, medicaoAtiva.fornecedor, medicaoAtiva.data)
       const acumAnterior = ultimo ? ultimo.valor_base * ultimo.percentual_acumulado : 0
@@ -1346,10 +1352,23 @@ export default function ObrasMobile() {
       const percAtual = parseFloat(p.percentual || '0') / 100
       const acumAtual = valorBase * percAtual
       const valorPeriodo = acumAtual - acumAnterior
-      const retencao = valorPeriodo * retPct
-      const liquido = valorPeriodo - retencao
-      totalPeriodo += valorPeriodo; totalRetencao += retencao; totalLiquido += liquido
-      return { item, p, acumAtual, valorPeriodo, retencao, liquido }
+      return { item, p, acumAtual, valorBase, valorPeriodo }
+    })
+    const totalPeriodo = itensComValores.reduce((a, l) => a + l.valorPeriodo, 0)
+    // Desconto proporcional do adiantamento, com os valores AO VIVO desta tela — mesma lógica
+    // de totalsMedicao, mas antes de salvar.
+    const totalBaseGrupoAtual = itensComValores.reduce((a, l) => a + l.valorBase, 0)
+    const totalAdiantamentoGrupo = medicoes
+      .filter(m => m.obra_id === detalhe.id && m.tipo === medicaoAtiva.tipo && (medicaoAtiva.tipo !== 'fornecedor' || m.fornecedor === medicaoAtiva.fornecedor) && m.valor_adiantamento != null)
+      .reduce((a, m) => a + parseFloat(m.valor_adiantamento || 0), 0)
+    const descontoAdiantamentoTotal = totalAdiantamentoGrupo > 0 && totalBaseGrupoAtual > 0 ? (totalPeriodo / totalBaseGrupoAtual) * totalAdiantamentoGrupo : 0
+    let totalRetencao = 0, totalLiquido = 0
+    const linhas = itensComValores.map(l => {
+      const retencao = l.valorPeriodo * retPct
+      const descontoAdiantamento = totalPeriodo !== 0 ? (l.valorPeriodo / totalPeriodo) * descontoAdiantamentoTotal : 0
+      const liquido = l.valorPeriodo - retencao - descontoAdiantamento
+      totalRetencao += retencao; totalLiquido += liquido
+      return { ...l, retencao, descontoAdiantamento, liquido }
     })
     const chaveGrupoAtual = medicaoAtiva.tipo === 'cliente' ? '__cliente__' : (medicaoAtiva.fornecedor || '—')
     const medicoesGrupoAtual = medicoes.filter(m => m.obra_id === detalhe.id && (chaveGrupoAtual === '__cliente__' ? m.tipo === 'cliente' : m.fornecedor === chaveGrupoAtual)).sort((a, b) => a.data < b.data ? -1 : 1)
@@ -1409,9 +1428,21 @@ export default function ObrasMobile() {
             </div>
           ))}
           {!ehAdiantamento && linhas.length > 0 && (
-            <div className="bg-surface-container-low rounded-lg p-3 text-[12px] flex justify-between">
-              <span className="font-bold text-on-surface">Total período</span>
-              <span className="font-black text-primary">{moeda(totalPeriodo)}</span>
+            <div className="bg-surface-container-low rounded-lg p-3 text-[12px] flex flex-col gap-1">
+              <div className="flex justify-between">
+                <span className="font-bold text-on-surface">Total período</span>
+                <span className="font-black text-primary">{moeda(totalPeriodo)}</span>
+              </div>
+              {descontoAdiantamentoTotal > 0 && (
+                <div className="flex justify-between" title="Desconto proporcional do adiantamento pago ao fornecedor">
+                  <span className="text-on-surface-variant">Desconto Adiantamento</span>
+                  <span className="font-semibold text-tertiary">{moeda(descontoAdiantamentoTotal)}</span>
+                </div>
+              )}
+              <div className="flex justify-between border-t border-outline-variant pt-1 mt-1">
+                <span className="font-bold text-on-surface">Líquido total</span>
+                <span className="font-black text-primary-container">{moeda(totalLiquido)}</span>
+              </div>
             </div>
           )}
           {medicaoAtiva.lancamento_id ? (
@@ -1825,7 +1856,7 @@ export default function ObrasMobile() {
                           {medsComTotais.map(({ med, indice, totalLiquido, statusPag, isAdiantamento }) => (
                             <button key={med.id} className="w-full text-left px-4 py-3 flex justify-between items-center gap-2" onClick={() => { const itensFiltrados = svs.filter(s => med.tipo !== 'fornecedor' || !med.fornecedor || s.fornecedor === med.fornecedor); abrirPreenchimentoMedicao(med, itensFiltrados) }}>
                               <div>
-                                <div className="font-semibold text-sm text-on-surface">{isAdiantamento ? '💰 Adiantamento' : `Medição ${indice}`} <span className="text-on-surface-variant font-normal">· {med.numero}</span></div>
+                                <div className="font-semibold text-sm text-on-surface">{isAdiantamento ? '💰 Adiantamento' : `Medição ${indice}`} <span className="text-on-surface-variant font-normal">· {med.numero}</span>{isAdiantamento && med.observacao && <span className="text-on-surface-variant font-normal"> — {med.observacao}</span>}</div>
                                 <div className="text-[11px] text-on-surface-variant mt-0.5">{dataBR(med.data)} · {moeda(totalLiquido)}{isAdiantamento ? '' : ' no período'}</div>
                               </div>
                               <span className={`text-[10px] font-semibold px-2 py-1 rounded-full border shrink-0 ${statusPag === 'pago' ? 'bg-primary-container/10 text-primary-container border-primary-container/20' : statusPag === 'programado' ? 'bg-tertiary/10 text-tertiary border-tertiary/20' : 'bg-surface-variant text-on-surface-variant border-outline-variant'}`}>

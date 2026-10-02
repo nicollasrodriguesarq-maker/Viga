@@ -35,9 +35,11 @@ async function uploadFotoServico(file: File): Promise<string | null> {
 }
 
 const num = (v: string) => parseFloat(String(v || '0').replace(',', '.')) || 0
-function calcularArea(unidade: string, comprimento: string, largura: string, altura: string): string {
+// "piso" usa comprimento x largura (ambiente/piso), "parede" usa comprimento x altura — nunca os
+// dois ao mesmo tempo, mesmo com os três campos preenchidos (mesma correção do desktop).
+function calcularArea(unidade: string, comprimento: string, largura: string, altura: string, tipoMedida?: string): string {
   const c = num(comprimento), l = num(largura), a = num(altura)
-  if (unidade === 'm²') { if (c && a) return (c * a).toFixed(2); if (c && l) return (c * l).toFixed(2); return '' }
+  if (unidade === 'm²') { if (tipoMedida === 'parede') return c && a ? (c * a).toFixed(2) : ''; return c && l ? (c * l).toFixed(2) : '' }
   if (unidade === 'm³') { if (c && l && a) return (c * l * a).toFixed(2); return '' }
   return ''
 }
@@ -92,7 +94,7 @@ function botaoVoltarApp(path: string) {
 const FLEV_VAZIO = { codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }
 const TIPOS_EXECUCAO = [{ v: 'obra', l: '🏗️ Execução de Obra' }, { v: 'projeto', l: '📐 Execução de Projeto' }]
 const EXECUCAO_NOME: Record<string, string> = { obra: '🏗️ Obra', projeto: '📐 Projeto' }
-const FITEM_VAZIO = { servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', observacao: '', foto_url: '', banco_item_id: '', categoria: '' }
+const FITEM_VAZIO = { servico: '', descricao: '', comprimento: '', largura: '', altura: '', area: '', unidade: 'm²', tipo_medida: 'piso', observacao: '', foto_url: '', banco_item_id: '', categoria: '' }
 const FAMB_VAZIO = { nome: '', nomeCustom: '' }
 
 export default function LevantamentoMobile() {
@@ -251,11 +253,11 @@ export default function LevantamentoMobile() {
 
   async function salvarItem() {
     if (!ambienteAtivo || !fItem.servico) return alert('Preencha o serviço')
-    const area = fItem.area ? num(fItem.area) : num(calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura))
+    const area = fItem.area ? num(fItem.area) : num(calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura, fItem.tipo_medida))
     const dados = {
       ambiente: ambienteAtivo.id, levantamento_id: detalhe.id, servico: fItem.servico, descricao: fItem.descricao,
       comprimento: num(fItem.comprimento) || null, largura: num(fItem.largura) || null, altura: num(fItem.altura) || null,
-      area: area || null, unidade: fItem.unidade, observacao: fItem.observacao, foto_url: fotoCompartilhada || fItem.foto_url || null,
+      area: area || null, unidade: fItem.unidade, tipo_medida: fItem.unidade === 'm²' ? fItem.tipo_medida : null, observacao: fItem.observacao, foto_url: fotoCompartilhada || fItem.foto_url || null,
       banco_item_id: fItem.banco_item_id || null, categoria: fItem.categoria || null,
     }
     let itemSalvo: any
@@ -930,30 +932,46 @@ export default function LevantamentoMobile() {
             </div>
           </div>
           {usaMedidas ? (
-            <div className="grid grid-cols-2 gap-2.5">
-              <div>
-                <label className={labelCls}>Comprim. (m)</label>
-                <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.comprimento}
-                  onChange={e => { const c = e.target.value; setFItem({ ...fItem, comprimento: c, area: calcularArea(fItem.unidade, c, fItem.largura, fItem.altura) }) }} />
+            <>
+              {fItem.unidade === 'm²' && (
+                <div className="mb-1">
+                  <label className={labelCls}>Tipo de medida</label>
+                  <div className="flex gap-1 p-1 bg-surface-container-low border border-outline-variant rounded-lg w-fit">
+                    {[{ v: 'piso', l: '📐 Piso/Ambiente' }, { v: 'parede', l: '🧱 Parede' }].map(t => (
+                      <button key={t.v} type="button"
+                        className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${fItem.tipo_medida === t.v ? 'bg-primary/20 text-primary' : 'text-on-surface-variant'}`}
+                        onClick={() => setFItem({ ...fItem, tipo_medida: t.v, area: calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, fItem.altura, t.v) })}>
+                        {t.l}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className={labelCls}>Comprim. (m)</label>
+                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.comprimento}
+                    onChange={e => { const c = e.target.value; setFItem({ ...fItem, comprimento: c, area: calcularArea(fItem.unidade, c, fItem.largura, fItem.altura, fItem.tipo_medida) }) }} />
+                </div>
+                <div>
+                  <label className={labelCls}>Largura (m)</label>
+                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.largura}
+                    onChange={e => { const l = e.target.value; setFItem({ ...fItem, largura: l, area: calcularArea(fItem.unidade, fItem.comprimento, l, fItem.altura, fItem.tipo_medida) }) }} />
+                </div>
+                <div>
+                  <label className={labelCls}>Altura (m)</label>
+                  <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.altura}
+                    onChange={e => { const a = e.target.value; setFItem({ ...fItem, altura: a, area: calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, a, fItem.tipo_medida) }) }} />
+                </div>
+                <div>
+                  <label className={labelCls}>Unidade</label>
+                  <select className={inputCls} value={fItem.unidade}
+                    onChange={e => { const u = e.target.value; setFItem({ ...fItem, unidade: u, area: calcularArea(u, fItem.comprimento, fItem.largura, fItem.altura, fItem.tipo_medida) }) }}>
+                    {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
               </div>
-              <div>
-                <label className={labelCls}>Largura (m)</label>
-                <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.largura}
-                  onChange={e => { const l = e.target.value; setFItem({ ...fItem, largura: l, area: calcularArea(fItem.unidade, fItem.comprimento, l, fItem.altura) }) }} />
-              </div>
-              <div>
-                <label className={labelCls}>Altura (m)</label>
-                <input className={inputCls} type="text" inputMode="decimal" placeholder="0,00" value={fItem.altura}
-                  onChange={e => { const a = e.target.value; setFItem({ ...fItem, altura: a, area: calcularArea(fItem.unidade, fItem.comprimento, fItem.largura, a) }) }} />
-              </div>
-              <div>
-                <label className={labelCls}>Unidade</label>
-                <select className={inputCls} value={fItem.unidade}
-                  onChange={e => { const u = e.target.value; setFItem({ ...fItem, unidade: u, area: calcularArea(u, fItem.comprimento, fItem.largura, fItem.altura) }) }}>
-                  {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-                </select>
-              </div>
-            </div>
+            </>
           ) : (
             <div className="grid grid-cols-2 gap-2.5">
               <div>
@@ -1051,7 +1069,7 @@ export default function LevantamentoMobile() {
                         <div className="w-11 h-11 rounded-lg bg-surface-container-low border border-outline-variant overflow-hidden shrink-0 flex items-center justify-center cursor-pointer"
                           onClick={() => {
                             setAmbienteAtivo(amb)
-                            setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento ? String(item.comprimento) : '', largura: item.largura ? String(item.largura) : '', altura: item.altura ? String(item.altura) : '', area: item.area ? String(item.area) : '', unidade: item.unidade || 'm²', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
+                            setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento ? String(item.comprimento) : '', largura: item.largura ? String(item.largura) : '', altura: item.altura ? String(item.altura) : '', area: item.area ? String(item.area) : '', unidade: item.unidade || 'm²', tipo_medida: item.tipo_medida || 'piso', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
                             setArquivoFoto(null); setFotoCompartilhada(item.foto_url || null); setEditItem(item); setTela('novoItem')
                           }}>
                           {item.foto_url ? (
@@ -1062,11 +1080,11 @@ export default function LevantamentoMobile() {
                         <div className="min-w-0 flex-1 cursor-pointer"
                           onClick={() => {
                             setAmbienteAtivo(amb)
-                            setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento ? String(item.comprimento) : '', largura: item.largura ? String(item.largura) : '', altura: item.altura ? String(item.altura) : '', area: item.area ? String(item.area) : '', unidade: item.unidade || 'm²', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
+                            setFItem({ servico: item.servico, descricao: item.descricao || '', comprimento: item.comprimento ? String(item.comprimento) : '', largura: item.largura ? String(item.largura) : '', altura: item.altura ? String(item.altura) : '', area: item.area ? String(item.area) : '', unidade: item.unidade || 'm²', tipo_medida: item.tipo_medida || 'piso', observacao: item.observacao || '', foto_url: item.foto_url || '', banco_item_id: item.banco_item_id || '', categoria: item.categoria || '' })
                             setArquivoFoto(null); setFotoCompartilhada(item.foto_url || null); setEditItem(item); setTela('novoItem')
                           }}>
                           <div className="text-sm text-on-surface truncate">{item.servico}</div>
-                          {item.area && <div className="text-[11px] text-on-surface-variant">{item.area} {item.unidade}</div>}
+                          {item.area && <div className="text-[11px] text-on-surface-variant">{item.area} {item.unidade}{item.unidade === 'm²' && item.tipo_medida ? ' · ' + (item.tipo_medida === 'parede' ? '🧱 parede' : '📐 piso') : ''}</div>}
                         </div>
                         <button className="text-error text-xs font-semibold shrink-0" onClick={() => excluirItemLevantamento(item)}>×</button>
                       </div>

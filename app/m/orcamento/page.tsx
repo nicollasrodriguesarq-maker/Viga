@@ -64,6 +64,7 @@ export default function OrcamentoMobile() {
   const [ambienteAberto, setAmbienteAberto] = useState<string | null>(null)
   const [mostrarRegimeProposta, setMostrarRegimeProposta] = useState(false)
   const [regimeProposta, setRegimeProposta] = useState('seg_sex')
+  const [observacaoProposta, setObservacaoProposta] = useState('')
 
   useEffect(() => {
     if (typeof window !== 'undefined' && !localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -117,6 +118,7 @@ export default function OrcamentoMobile() {
   function abrirRegimeProposta(orc: any) {
     const obraVinculada = obras.find(o => o.id === orc.obra_id)
     setRegimeProposta(obraVinculada?.dias_trabalho || 'seg_sex')
+    setObservacaoProposta('')
     setMostrarRegimeProposta(true)
   }
 
@@ -282,7 +284,7 @@ export default function OrcamentoMobile() {
     </div>`
   }
 
-  function paginaCondicoesInverso(prazoDias: number, condicaoPagamento: string, validadeDias: number, cfg: any) {
+  function paginaCondicoesInverso(prazoDias: number, condicaoPagamento: string, validadeDias: number, cfg: any, observacoes?: string) {
     return `
     <div class="page" style="background:#fff;display:flex;flex-direction:column">
       <div style="background:#1A1A1A;color:#fff;padding:14px 40px;display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em">
@@ -303,6 +305,10 @@ export default function OrcamentoMobile() {
             ${condicaoPagamento ? `<div style="font-size:13px;color:#eee;white-space:pre-line;line-height:1.7">${condicaoPagamento}</div>` : `<div style="font-size:13px;color:#777;font-style:italic">A combinar — preencha em "Forma de Pagamento" no orçamento.</div>`}
           </div>
         </div>
+        ${observacoes ? `<div style="margin-top:20px;background:#F5F4F1;border-radius:4px;padding:20px 24px">
+          <div style="font-size:10px;letter-spacing:0.1em;color:#888;border-bottom:1px solid #DEDBD6;padding-bottom:10px;margin-bottom:14px">OBSERVAÇÕES</div>
+          <div style="font-size:13px;color:#333;white-space:pre-line;line-height:1.7">${observacoes}</div>
+        </div>` : ''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:26px">
           <div style="background:#1A1A1A;color:#fff;font-weight:700;font-size:12px;padding:12px 20px;border-radius:4px">✦ Validade desta proposta: ${validadeDias} dias</div>
           <div style="font-size:11px;color:#888;font-style:italic;max-width:420px;text-align:right">* Quaisquer serviços não descritos nesta proposta deverão ser acordados separadamente.</div>
@@ -403,7 +409,7 @@ export default function OrcamentoMobile() {
       paginasPortfolioInverso(origin, cfg) +
       paginasLev +
       paginaInvestimentoInverso(itensDoOrc, ambientesDoOrc, detalhe.codigo, cfg) +
-      paginaCondicoesInverso(prazoDias, detalhe.condicao_pagamento, parseInt(detalhe.validade_dias || '30'), cfg) +
+      paginaCondicoesInverso(prazoDias, detalhe.condicao_pagamento, parseInt(detalhe.validade_dias || '30'), cfg, observacaoProposta) +
       paginaFechamentoInverso(cfg)
 
     const html = envolverPropostaInversa(`Proposta ${detalhe.codigo} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
@@ -573,6 +579,10 @@ export default function OrcamentoMobile() {
                     <option value="seg_sab">Segunda a Sábado</option>
                     <option value="todos_dias">Todos os dias (dias corridos)</option>
                   </select>
+                </div>
+                <div className="mb-5">
+                  <label className={labelCls}>Observações (opcional)</label>
+                  <textarea className={inputCls} rows={3} placeholder="Algo específico desta proposta que o cliente precisa saber..." value={observacaoProposta} onChange={e => setObservacaoProposta(e.target.value)} />
                 </div>
                 <div className="flex gap-2">
                   <button className={btnSecondaryCls + ' flex-1'} onClick={() => setMostrarRegimeProposta(false)}>Cancelar</button>

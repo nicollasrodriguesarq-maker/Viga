@@ -174,6 +174,7 @@ export default function Levantamento() {
   const [meuId, setMeuId] = useState('')
   const [souAdmin, setSouAdmin] = useState(false)
   const [regimeProposta, setRegimeProposta] = useState('seg_sex')
+  const [observacaoProposta, setObservacaoProposta] = useState('')
   const [propostaAlvo, setPropostaAlvo] = useState<{ lev: any, ambs: any[], itensList: any[] } | null>(null)
 
   const [fLev, setFLev] = useState({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' })
@@ -892,7 +893,7 @@ export default function Levantamento() {
       </div>
     </div>`
   }
-  function paginaCondicoesInverso(prazoDias: number, condicaoPagamento: string, validadeDias: number, cfg: any) {
+  function paginaCondicoesInverso(prazoDias: number, condicaoPagamento: string, validadeDias: number, cfg: any, observacoes?: string) {
     return `
     <div class="page" style="background:#fff;display:flex;flex-direction:column">
       <div style="background:#1A1A1A;color:#fff;padding:14px 40px;display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em">
@@ -913,6 +914,10 @@ export default function Levantamento() {
             ${condicaoPagamento ? `<div style="font-size:13px;color:#eee;white-space:pre-line;line-height:1.7">${condicaoPagamento}</div>` : `<div style="font-size:13px;color:#777;font-style:italic">A combinar — preencha em "Forma de Pagamento" no orçamento.</div>`}
           </div>
         </div>
+        ${observacoes ? `<div style="margin-top:20px;background:#F5F4F1;border-radius:4px;padding:20px 24px">
+          <div style="font-size:10px;letter-spacing:0.1em;color:#888;border-bottom:1px solid #DEDBD6;padding-bottom:10px;margin-bottom:14px">OBSERVAÇÕES</div>
+          <div style="font-size:13px;color:#333;white-space:pre-line;line-height:1.7">${observacoes}</div>
+        </div>` : ''}
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:26px">
           <div style="background:#1A1A1A;color:#fff;font-weight:700;font-size:12px;padding:12px 20px;border-radius:4px">✦ Validade desta proposta: ${validadeDias} dias</div>
           <div style="font-size:11px;color:#888;font-style:italic;max-width:420px;text-align:right">* Quaisquer serviços não descritos nesta proposta deverão ser acordados separadamente.</div>
@@ -982,6 +987,7 @@ export default function Levantamento() {
   function abrirRegimeProposta(lev: any, ambs: any[], itensList: any[]) {
     const obraVinculada = obras.find(o => o.id === lev.obra_id)
     setRegimeProposta(obraVinculada?.dias_trabalho || 'seg_sex')
+    setObservacaoProposta('')
     setPropostaAlvo({ lev, ambs, itensList })
     setJanela('regimeProposta')
   }
@@ -1009,7 +1015,7 @@ export default function Levantamento() {
       paginasPortfolioInverso(origin, cfg) +
       paginasLevantamentoEncarte(lev, ambs, itensList, cfg) +
       paginaInvestimentoInverso(orcItens, orcAmbientes, orc?.codigo || lev.codigo, cfg) +
-      paginaCondicoesInverso(prazoDias, orc?.condicao_pagamento, parseInt(orc?.validade_dias || '30'), cfg) +
+      paginaCondicoesInverso(prazoDias, orc?.condicao_pagamento, parseInt(orc?.validade_dias || '30'), cfg, observacaoProposta) +
       paginaFechamentoInverso(cfg)
 
     const html = envolverPropostaInversa(`Proposta ${lev.codigo} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
@@ -1363,6 +1369,10 @@ export default function Levantamento() {
                   <option value="seg_sab">Segunda a Sábado</option>
                   <option value="todos_dias">Todos os dias (dias corridos)</option>
                 </select>
+              </div>
+              <div className="mb-5">
+                <label className={labelCls}>Observações (opcional)</label>
+                <textarea className={inputCls} rows={3} placeholder="Algo específico desta proposta que o cliente precisa saber..." value={observacaoProposta} onChange={e => setObservacaoProposta(e.target.value)} />
               </div>
               <div className="flex gap-2 justify-end">
                 <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>

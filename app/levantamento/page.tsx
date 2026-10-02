@@ -158,6 +158,8 @@ export default function Levantamento() {
   const [solicitacoes, setSolicitacoes] = useState<any[]>([])
   const [bancoItens, setBancoItens] = useState<any[]>([])
   const [arquivos, setArquivos] = useState<any[]>([])
+  const [orcamentos, setOrcamentos] = useState<any[]>([])
+  const [orcamentoParaVincular, setOrcamentoParaVincular] = useState('')
   const [arquivoUpload, setArquivoUpload] = useState<File | null>(null)
   const [enviandoArquivo, setEnviandoArquivo] = useState(false)
   const [loading, setLoading] = useState(true)
@@ -202,7 +204,7 @@ export default function Levantamento() {
 
   async function carregar() {
     setLoading(true)
-    const [l, a, it, o, s, b, arq] = await Promise.all([
+    const [l, a, it, o, s, b, arq, orc] = await Promise.all([
       buscar('levantamentos', '?order=created_at.desc'),
       buscar('levantamento_ambientes', '?order=ordem'),
       buscar('levantamento_itens', '?order=created_at'),
@@ -210,8 +212,9 @@ export default function Levantamento() {
       buscar('levantamento_solicitacoes', '?order=created_at.desc'),
       buscar('banco_itens', '?order=nome'),
       buscar('levantamento_arquivos', '?order=created_at.desc'),
+      buscar('orcamentos', '?select=id,codigo,cliente_nome,levantamento_id,obra_id&order=created_at.desc'),
     ])
-    setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setSolicitacoes(s); setBancoItens(b); setArquivos(arq)
+    setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setSolicitacoes(s); setBancoItens(b); setArquivos(arq); setOrcamentos(orc)
     setLoading(false)
   }
 
@@ -476,22 +479,51 @@ export default function Levantamento() {
       const oa = await buscar('orcamento_ambientes', `?levantamento_ambiente_id=eq.${amb.id}`)
       for (const o of oa) await remover('orcamento_ambientes', o.id)
     }
-    for (const orc of orcs) await remover('orcamentos', orc.id)
+    // Se sobrou algum item no orçamento depois de remover os que vieram deste levantamento,
+    // é porque ele tem conteúdo próprio (foi vinculado manualmente a um orçamento já
+    // existente) — nesse caso só desvincula, não apaga um orçamento real de verdade.
+    for (const orc of orcs) {
+      const itensRestantes = await buscar('orcamento_itens', `?orcamento_id=eq.${orc.id}&limit=1`)
+      if (itensRestantes.length > 0) await editar('orcamentos', orc.id, { levantamento_id: null })
+      else await remover('orcamentos', orc.id)
+    }
     for (const item of itensLev) await remover('levantamento_itens', item.id)
     for (const amb of ambs) await remover('levantamento_ambientes', amb.id)
     await remover('levantamentos', lev.id)
     if (detalhe?.id === lev.id) { setDetalhe(null) }
     carregar()
   }
-  async function verOrcamentoVinculado() {
+  // Se já existe orçamento vinculado (criado automaticamente ao sincronizar um item, ou
+  // vinculado manualmente), abre ele. Senão, abre o seletor pra vincular um já existente —
+  // "caso necessário", pedido do usuário: nem todo levantamento gera itens que criam um
+  // orçamento sozinho, e às vezes o orçamento já foi feito à parte.
+  function verOrcamentoVinculado() {
     if (!detalhe) return
-    const existentes = await buscar('orcamentos', `?levantamento_id=eq.${detalhe.id}&limit=1`)
-    if (existentes[0]) {
-      localStorage.setItem('viga_orcamento_abrir', existentes[0].id)
+    const existente = orcamentos.find(o => o.levantamento_id === detalhe.id)
+    if (existente) {
+      localStorage.setItem('viga_orcamento_abrir', existente.id)
       window.location.href = '/orcamento'
     } else {
-      alert('Nenhum orçamento vinculado ainda. Adicione um serviço no levantamento para criar automaticamente.')
+      setOrcamentoParaVincular('')
+      setJanela('vincularOrcamento')
     }
+  }
+  async function vincularOrcamentoExistente() {
+    if (!detalhe || !orcamentoParaVincular) return alert('Selecione um orçamento')
+    const ok = await editar('orcamentos', orcamentoParaVincular, { levantamento_id: detalhe.id })
+    if (!ok) return alert('Não foi possível vincular. Tente novamente.')
+    setJanela(null)
+    localStorage.setItem('viga_orcamento_abrir', orcamentoParaVincular)
+    window.location.href = '/orcamento'
+  }
+  async function desvincularOrcamento() {
+    if (!detalhe) return
+    const existente = orcamentos.find(o => o.levantamento_id === detalhe.id)
+    if (!existente) return
+    if (!confirm(`Desvincular o orçamento ${existente.codigo}? O orçamento em si não será excluído, só deixa de aparecer aqui.`)) return
+    const ok = await editar('orcamentos', existente.id, { levantamento_id: null })
+    if (!ok) return alert('Não foi possível desvincular. Tente novamente.')
+    carregar()
   }
 
   function paginasLevantamento(lev: any, ambs: any[], itensList: any[], cfg: any) {
@@ -988,6 +1020,8 @@ export default function Levantamento() {
   if (detalhe) {
     const ambsDetalhe = ambientes.filter(a => a.levantamento_id === detalhe.id).sort((a, b) => a.ordem - b.ordem)
     const itensDetalhe = ordenarPorCategoria(itens.filter(i => i.levantamento_id === detalhe.id))
+    const orcamentoVinculadoDetalhe = orcamentos.find(o => o.levantamento_id === detalhe.id)
+    const orcamentosDisponiveis = orcamentos.filter(o => !o.levantamento_id)
     const podeEditar = podeEditarLevantamento(detalhe)
     const souCriadorOuAdmin = souAdmin || detalhe.criado_por === meuId
     const pendentesDoLevantamento = souCriadorOuAdmin ? solicitacoesDoLevantamento(detalhe.id).filter(s => s.status === 'pendente') : []
@@ -1039,7 +1073,12 @@ export default function Levantamento() {
               <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
             )}
             {podeEditar && <button className={btnSecondaryCls} onClick={() => abrirEditarLevantamento(detalhe)}>✏️ Editar Levantamento</button>}
-            <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>🔗 Ver Orçamento Vinculado</button>
+            <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>
+              {orcamentoVinculadoDetalhe ? `🔗 Ver Orçamento Vinculado (${orcamentoVinculadoDetalhe.codigo})` : '🔗 Vincular Orçamento'}
+            </button>
+            {orcamentoVinculadoDetalhe && podeEditar && (
+              <button className={btnSecondaryCls} title="Desvincular (o orçamento não é excluído)" onClick={desvincularOrcamento}>🔓 Desvincular</button>
+            )}
             <button className="bg-surface-container-high border border-outline-variant text-on-surface rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-surface-variant transition-all cursor-pointer" onClick={() => gerarPDFLevantamento(detalhe, ambsDetalhe, itensDetalhe)}>🖨️ Gerar Relatório PDF</button>
             <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => abrirRegimeProposta(detalhe, ambsDetalhe, itensDetalhe)}>📄 Gerar Proposta Completa</button>
           </div>
@@ -1224,7 +1263,7 @@ export default function Levantamento() {
             </div>
             <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2">
               <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={verOrcamentoVinculado}>
-                🔗 Ver Orçamento Vinculado
+                {orcamentoVinculadoDetalhe ? `🔗 Ver Orçamento Vinculado (${orcamentoVinculadoDetalhe.codigo})` : '🔗 Vincular Orçamento'}
               </button>
               <button className="w-full bg-primary-container text-on-primary-container rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => abrirRegimeProposta(detalhe, ambsDetalhe, itensDetalhe)}>
                 📄 Gerar Proposta Completa
@@ -1505,6 +1544,30 @@ export default function Levantamento() {
             </div>
           </div>
         )})()}
+
+        {janela === 'vincularOrcamento' && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
+              <div className="text-base font-bold text-on-surface mb-1.5">🔗 Vincular Orçamento Existente</div>
+              <p className="text-body-sm text-on-surface-variant mb-5">Use isso quando o orçamento já foi feito à parte (não a partir dos itens deste levantamento).</p>
+              {orcamentosDisponiveis.length === 0 ? (
+                <p className="text-body-sm text-on-surface-variant mb-5">Nenhum orçamento disponível pra vincular — todos já estão vinculados a algum levantamento. Adicione um serviço aqui que um orçamento novo é criado automaticamente.</p>
+              ) : (
+                <div className="mb-5">
+                  <label className={labelCls}>Orçamento</label>
+                  <select className={inputCls} value={orcamentoParaVincular} onChange={e => setOrcamentoParaVincular(e.target.value)}>
+                    <option value="">Selecione...</option>
+                    {orcamentosDisponiveis.map(o => <option key={o.id} value={o.id}>{o.codigo} — {o.cliente_nome}</option>)}
+                  </select>
+                </div>
+              )}
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
+                {orcamentosDisponiveis.length > 0 && <button className={btnPrimaryCls} onClick={vincularOrcamentoExistente}>Vincular</button>}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Editar Levantamento — precisa existir aqui também: o botão "Editar Levantamento"
             fica na tela de detalhe, que é um branch de retorno separado da listagem abaixo. */}

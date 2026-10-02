@@ -13,8 +13,8 @@ async function buscar(tabela: string, q = '') {
 async function criar(tabela: string, dados: object) {
   try { const r = await fetch(BASE + '/' + tabela, { method: 'POST', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(dados) }); const d = await r.json(); return Array.isArray(d) ? d[0] : d } catch { return null }
 }
-async function editar(tabela: string, id: string, dados: object) {
-  try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }) } catch {}
+async function editar(tabela: string, id: string, dados: object): Promise<boolean> {
+  try { const r = await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) }); return r.ok } catch { return false }
 }
 async function remover(tabela: string, id: string) {
   try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }) } catch {}
@@ -103,6 +103,9 @@ export default function LevantamentoMobile() {
   const [itens, setItens] = useState<any[]>([])
   const [obras, setObras] = useState<any[]>([])
   const [bancoItens, setBancoItens] = useState<any[]>([])
+  const [orcamentos, setOrcamentos] = useState<any[]>([])
+  const [orcamentoParaVincular, setOrcamentoParaVincular] = useState('')
+  const [mostrarVincularOrcamento, setMostrarVincularOrcamento] = useState(false)
   const [meuId, setMeuId] = useState('')
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState('todos')
@@ -132,14 +135,45 @@ export default function LevantamentoMobile() {
   }, [])
 
   async function carregar() {
-    const [l, a, it, o, b] = await Promise.all([
+    const [l, a, it, o, b, orc] = await Promise.all([
       buscar('levantamentos', '?order=created_at.desc'),
       buscar('levantamento_ambientes', '?order=ordem'),
       buscar('levantamento_itens', '?order=created_at'),
       buscar('obras', '?select=id,nome,dias_trabalho&order=nome'),
       buscar('banco_itens', '?order=nome'),
+      buscar('orcamentos', '?select=id,codigo,cliente_nome,levantamento_id,obra_id&order=created_at.desc'),
     ])
-    setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setBancoItens(b)
+    setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setBancoItens(b); setOrcamentos(orc)
+  }
+  // Se já existe orçamento vinculado, abre ele; senão abre o seletor pra vincular um já
+  // existente (feito à parte) — mesmo mecanismo do desktop.
+  function verOrcamentoVinculado() {
+    if (!detalhe) return
+    const existente = orcamentos.find(o => o.levantamento_id === detalhe.id)
+    if (existente) {
+      localStorage.setItem('viga_orcamento_abrir', existente.id)
+      window.location.href = '/orcamento'
+    } else {
+      setOrcamentoParaVincular('')
+      setMostrarVincularOrcamento(true)
+    }
+  }
+  async function vincularOrcamentoExistente() {
+    if (!detalhe || !orcamentoParaVincular) return alert('Selecione um orçamento')
+    const ok = await editar('orcamentos', orcamentoParaVincular, { levantamento_id: detalhe.id })
+    if (!ok) return alert('Não foi possível vincular. Tente novamente.')
+    setMostrarVincularOrcamento(false)
+    localStorage.setItem('viga_orcamento_abrir', orcamentoParaVincular)
+    window.location.href = '/orcamento'
+  }
+  async function desvincularOrcamento() {
+    if (!detalhe) return
+    const existente = orcamentos.find(o => o.levantamento_id === detalhe.id)
+    if (!existente) return
+    if (!confirm(`Desvincular o orçamento ${existente.codigo}? O orçamento em si não será excluído.`)) return
+    const ok = await editar('orcamentos', existente.id, { levantamento_id: null })
+    if (!ok) return alert('Não foi possível desvincular. Tente novamente.')
+    carregar()
   }
 
   const filtrados = levantamentos.filter(l => {
@@ -303,7 +337,13 @@ export default function LevantamentoMobile() {
       const oa = await buscar('orcamento_ambientes', `?levantamento_ambiente_id=eq.${amb.id}`)
       for (const o of oa) await remover('orcamento_ambientes', o.id)
     }
-    for (const orc of orcs) await remover('orcamentos', orc.id)
+    // Se sobrou item no orçamento após remover os deste levantamento, é porque ele tem
+    // conteúdo próprio (vinculado manualmente a um orçamento já existente) — só desvincula.
+    for (const orc of orcs) {
+      const itensRestantes = await buscar('orcamento_itens', `?orcamento_id=eq.${orc.id}&limit=1`)
+      if (itensRestantes.length > 0) await editar('orcamentos', orc.id, { levantamento_id: null })
+      else await remover('orcamentos', orc.id)
+    }
     for (const item of itensLev) await remover('levantamento_itens', item.id)
     for (const amb of ambs) await remover('levantamento_ambientes', amb.id)
     await remover('levantamentos', lev.id)
@@ -778,6 +818,8 @@ export default function LevantamentoMobile() {
 
   const ambsDetalhe = detalhe ? ambientes.filter(a => a.levantamento_id === detalhe.id) : []
   const itensDetalhe = detalhe ? itens.filter(i => i.levantamento_id === detalhe.id) : []
+  const orcamentoVinculadoDetalhe = detalhe ? orcamentos.find(o => o.levantamento_id === detalhe.id) : null
+  const orcamentosDisponiveis = orcamentos.filter(o => !o.levantamento_id)
   const usaMedidas = fItem.unidade === 'm²' || fItem.unidade === 'm³'
 
   // ── Tela: Novo Levantamento ────────────────────────────────────
@@ -1021,9 +1063,38 @@ export default function LevantamentoMobile() {
 
           <button className={btnSecondaryCls} onClick={() => abrirEditarLevantamento(detalhe)}>✏️ Editar Levantamento</button>
           <div className="flex gap-2">
+            <button className={btnSecondaryCls + ' flex-1'} onClick={verOrcamentoVinculado}>
+              {orcamentoVinculadoDetalhe ? `🔗 ${orcamentoVinculadoDetalhe.codigo}` : '🔗 Vincular Orçamento'}
+            </button>
+            {orcamentoVinculadoDetalhe && <button className={btnSecondaryCls} title="Desvincular" onClick={desvincularOrcamento}>🔓</button>}
+          </div>
+          <div className="flex gap-2">
             <button className={btnSecondaryCls} onClick={() => gerarPDFLevantamento(detalhe, ambsDetalhe, itensDetalhe)}>🖨️ Gerar PDF</button>
             <button className={btnSecondaryCls} onClick={() => abrirRegimeProposta(detalhe, ambsDetalhe, itensDetalhe)}>📄 Proposta Completa</button>
           </div>
+          {mostrarVincularOrcamento && (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setMostrarVincularOrcamento(false)}>
+              <div className="bg-surface-container border border-outline-variant rounded-2xl p-6 w-full max-w-[420px]">
+                <div className="text-base font-bold text-on-surface mb-1.5">🔗 Vincular Orçamento Existente</div>
+                <div className="text-body-sm text-on-surface-variant mb-4">Use quando o orçamento já foi feito à parte, não a partir dos itens deste levantamento.</div>
+                {orcamentosDisponiveis.length === 0 ? (
+                  <p className="text-body-sm text-on-surface-variant mb-5">Nenhum orçamento disponível — todos já estão vinculados. Adicione um serviço aqui que um orçamento novo é criado automaticamente.</p>
+                ) : (
+                  <div className="mb-5">
+                    <label className={labelCls}>Orçamento</label>
+                    <select className={inputCls} value={orcamentoParaVincular} onChange={e => setOrcamentoParaVincular(e.target.value)}>
+                      <option value="">Selecione...</option>
+                      {orcamentosDisponiveis.map(o => <option key={o.id} value={o.id}>{o.codigo} — {o.cliente_nome}</option>)}
+                    </select>
+                  </div>
+                )}
+                <div className="flex gap-2">
+                  <button className={btnSecondaryCls + ' flex-1'} onClick={() => setMostrarVincularOrcamento(false)}>Cancelar</button>
+                  {orcamentosDisponiveis.length > 0 && <button className={btnPrimaryCls + ' flex-1'} onClick={vincularOrcamentoExistente}>Vincular</button>}
+                </div>
+              </div>
+            </div>
+          )}
 
           {mostrarRegimeProposta && (
             <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setMostrarRegimeProposta(false)}>

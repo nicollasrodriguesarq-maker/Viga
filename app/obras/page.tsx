@@ -3,6 +3,7 @@ import { useState, useEffect, Fragment } from 'react'
 import Link from 'next/link'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
+import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma, type ModoCronograma } from '../lib/cronograma'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -276,17 +277,29 @@ export default function Obras() {
   const [orcAmbientes, setOrcAmbientes] = useState<any[]>([])
   const [orcItens, setOrcItens] = useState<any[]>([])
   const [etapas, setEtapas] = useState<any[]>([])
+  const [cronHistorico, setCronHistorico] = useState<any[]>([])
+  const [bancoItens, setBancoItens] = useState<any[]>([])
+  const [alteracaoCron, setAlteracaoCron] = useState<{ et: any; nome: string; patch: any; tipo: string; motivo: string } | null>(null)
+  const [fEtapa, setFEtapa] = useState({ nome: '', categoria: '', fornecedor: '', inicio: '', fim: '' })
+  const [etapaHistAberta, setEtapaHistAberta] = useState<string | null>(null)
+  const [acessosCliente, setAcessosCliente] = useState<any[]>([])
+  const [carregandoAcessos, setCarregandoAcessos] = useState(false)
+  const [fAcesso, setFAcesso] = useState({ nome: '', email: '', senha: '' })
+  const [acessoCriado, setAcessoCriado] = useState<{ email: string; senha: string } | null>(null)
+  const [redefinindoAcesso, setRedefinindoAcesso] = useState<{ id: string; senha: string } | null>(null)
+  const [msgAcesso, setMsgAcesso] = useState('')
   const [medicoes, setMedicoes] = useState<any[]>([])
   const [medItens, setMedItens] = useState<any[]>([])
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
+  const [descAdiantPctInput, setDescAdiantPctInput] = useState('')
   const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' })
   const [grupoMedicaoAberto, setGrupoMedicaoAberto] = useState<string | null>(null)
   const [mapaGeralAberto, setMapaGeralAberto] = useState<string | null>(null)
   const [loading,  setLoading]  = useState(true)
   const [detalhe,  setDetalhe]  = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('resumo')
-  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | 'relatorio_pdf' | 'nova_visita' | 'editar_visita' | 'novo_funcionario' | 'editar_funcionario' | 'programar_pagamento' | null>(null)
+  const [janela,   setJanela]   = useState<'nova_obra' | 'editar_obra' | 'novo_servico' | 'editar_servico' | 'nova_medicao' | 'relatorio_pdf' | 'nova_visita' | 'editar_visita' | 'novo_funcionario' | 'editar_funcionario' | 'programar_pagamento' | 'alterar_etapa' | 'nova_etapa' | 'campo_cliente' | null>(null)
   const [medicaoProgramando, setMedicaoProgramando] = useState<any>(null)
   const [dataProgramar, setDataProgramar] = useState('')
   const [totalLiquidoProgramar, setTotalLiquidoProgramar] = useState(0)
@@ -370,7 +383,7 @@ export default function Obras() {
 
   async function carregar() {
     setLoading(true)
-    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt, u, atr, rv, fu, fua] = await Promise.all([
+    const [o, l, g, s, orc, orcAmb, orcIt, et, med, medIt, u, atr, rv, fu, fua, cronHist, bancoIt] = await Promise.all([
       buscar('obras', '?order=created_at.desc'),
       buscar('lancamentos', '?order=data.desc'),
       buscar('gastos_cartao', '?order=data.desc'),
@@ -386,7 +399,11 @@ export default function Obras() {
       buscar('obra_relatorios_visita', '?order=data.desc'),
       buscar('obra_funcionarios', '?order=created_at'),
       buscar('obra_funcionario_arquivos', '?order=created_at'),
+      buscar('cronograma_historico', '?order=created_at.desc'),
+      buscar('banco_itens', '?select=id,tempo_execucao,tempo_execucao_unidade'),
     ])
+    setCronHistorico(cronHist)
+    setBancoItens(bancoIt)
     setObras(o)
     setLancs(l)
     setGastos(g)
@@ -547,12 +564,33 @@ export default function Obras() {
     // medição representa do total do serviço é aplicada sobre o total adiantado, abatendo o
     // valor líquido pago aqui — pedido do usuário, pra que a soma dos descontos de todas as
     // medições feche em 100% do adiantamento quando o serviço atingir 100% de execução.
-    const totalAdiantamento = medicoes
-      .filter(m => m.obra_id === med.obra_id && m.tipo === med.tipo && (med.tipo !== 'fornecedor' || m.fornecedor === med.fornecedor) && m.valor_adiantamento != null)
-      .reduce((a, m) => a + parseFloat(m.valor_adiantamento || 0), 0)
-    const descontoAdiantamento = totalAdiantamento > 0 && totalBaseGrupo > 0 ? (totalPeriodo / totalBaseGrupo) * totalAdiantamento : 0
+    // O % de desconto pode ser digitado em cada medição (desconto_adiantamento_pct, fração 0–1):
+    // vazio = automático (a % que esta medição representa do total do serviço); 100% = abate
+    // todo o adiantamento de uma vez. Nunca desconta mais do que o saldo ainda não abatido.
+    const totalAdiantamento = totalAdiantamentoGrupoMed(med)
+    const pctAuto = totalBaseGrupo > 0 ? Math.max(totalPeriodo / totalBaseGrupo, 0) : 0
+    const pctDesconto = med.desconto_adiantamento_pct != null ? parseFloat(med.desconto_adiantamento_pct) : pctAuto
+    const saldoAdiantamento = Math.max(totalAdiantamento - descontoJaAbatido(med), 0)
+    const descontoAdiantamento = totalAdiantamento > 0 ? Math.min(Math.max(pctDesconto, 0) * totalAdiantamento, saldoAdiantamento) : 0
     const totalLiquido = totalPeriodo - totalPeriodo * retPct - descontoAdiantamento
     return { totalPeriodo, totalLiquido, descontoAdiantamento }
+  }
+
+  // Soma dos adiantamentos do mesmo grupo (cliente, ou o mesmo fornecedor) de uma medição.
+  function totalAdiantamentoGrupoMed(med: any) {
+    return medicoes
+      .filter(m => m.obra_id === med.obra_id && m.tipo === med.tipo && (med.tipo !== 'fornecedor' || m.fornecedor === med.fornecedor) && m.valor_adiantamento != null)
+      .reduce((a, m) => a + parseFloat(m.valor_adiantamento || 0), 0)
+  }
+
+  // Quanto do adiantamento já foi abatido pelas medições reais ANTERIORES do mesmo grupo
+  // (mesma ordem usada por ultimoRegistro: data, desempatando por criação).
+  function descontoJaAbatido(med: any): number {
+    return medicoes
+      .filter(m => m.id !== med.id && m.obra_id === med.obra_id && m.tipo === med.tipo && (med.tipo !== 'fornecedor' || m.fornecedor === med.fornecedor)
+        && m.valor_adiantamento == null
+        && (m.data < med.data || (m.data === med.data && (m.created_at || '') < (med.created_at || ''))))
+      .reduce((a, m) => a + (totalsMedicao(m).descontoAdiantamento || 0), 0)
   }
 
   // Mapa Geral: pivota medicao_itens numa linha por item × uma coluna por medição real do
@@ -599,6 +637,7 @@ export default function Obras() {
       }
     })
     setPreenchimento(preench)
+    setDescAdiantPctInput(medicao.desconto_adiantamento_pct != null ? String(Math.round(parseFloat(medicao.desconto_adiantamento_pct) * 10000) / 100) : '')
     setMedicaoAtiva(medicao)
   }
 
@@ -649,9 +688,14 @@ export default function Obras() {
       if (existente) await editar('medicao_itens', existente.id, dados)
       else await criar('medicao_itens', dados)
     }
-    const medIt = await buscar('medicao_itens', '?order=created_at')
+    const pctDigitado = descAdiantPctInput.trim() === '' ? null : Math.min(Math.max(parseFloat(descAdiantPctInput.replace(',', '.')) || 0, 0), 100) / 100
+    const okPct = await editar('medicoes', medicaoAtiva.id, { desconto_adiantamento_pct: pctDigitado })
+    if (!okPct) alert('Os itens foram salvos, mas não foi possível salvar o % de desconto do adiantamento. Tente novamente.')
+    const [medIt, med] = await Promise.all([buscar('medicao_itens', '?order=created_at'), buscar('medicoes', '?order=data.desc')])
     setMedItens(medIt)
-    alert('Medição salva!')
+    setMedicoes(med)
+    setMedicaoAtiva(med.find((m: any) => m.id === medicaoAtiva.id) || medicaoAtiva)
+    if (okPct) alert('Medição salva!')
   }
 
   function abrirProgramarPagamento(medicao: any, totalLiquido: number) {
@@ -906,6 +950,15 @@ export default function Obras() {
     const mapaLarguraMin = 640 + mapa.medicoesReais.length * 140
     const mapaEscalaPagina = Math.min(1, 1020 / mapaLarguraMin)
 
+    // Cronograma da obra (concluído / em andamento / atrasado) junto das medições, pra o
+    // cliente ver o avanço físico ao lado do financeiro no mesmo arquivo.
+    const etapasDaObraPDF = etapas.filter(e => e.obra_id === obra.id)
+    const linhasCronogramaPDF = ordenarLinhasCronograma(
+      montarLinhasCronograma(etapasDaObraPDF, servicosObra(obra.id), orcItens),
+      modoEfetivoCronograma(obra, etapasDaObraPDF), ordemCategoria,
+    ).linhas
+    const secaoCronogramaHtml = htmlSecaoCronogramaPDF(obra, linhasCronogramaPDF, cronHistorico)
+
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
     <title>Relatório Completo — ${nomeGrupo} — ${nomeEmpresa}</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
@@ -1015,6 +1068,8 @@ export default function Obras() {
         </div>
       </div>` : `<div style="text-align:center;color:#869391;padding:20px 0;margin-bottom:20px">Dados insuficientes para montar a Curva S — mínimo de 2 medições reais.</div>`}
 
+      ${secaoCronogramaHtml}
+
       <div style="display:flex;justify-content:space-between;font-size:10px;color:#869391;padding-top:16px;border-top:1px solid #3d4948">
         <span>Documento Confidencial - ${nomeEmpresa}</span>
         <span>${obra?.codigo || ''}</span>
@@ -1027,22 +1082,26 @@ export default function Obras() {
     if (win) { win.document.write(html); win.document.close() }
   }
 
-  async function gerarPDFCronograma(obra: any, linhas: { servico: any; etapa: any }[]) {
+  async function gerarPDFCronograma(obra: any, linhas: LinhaCronograma[]) {
     const cfg = (await buscar('empresa_config', '?limit=1'))[0] || {}
     const nomeEmpresa = cfg.nome_empresa || 'VIGA'
+    const hojeStr = hojeISO()
+    const agrupar = linhas.some(l => !!l.categoria) && modoEfetivoCronograma(obra, etapas.filter(e => e.obra_id === obra.id)) !== 'zero'
 
-    const linhasHtml = linhas.map(({ servico, etapa }, idx) => {
-      const categoriaAtual = servico.categoria || 'Outros'
-      const categoriaAnterior = idx > 0 ? (linhas[idx - 1].servico.categoria || 'Outros') : null
-      const headerCategoria = categoriaAtual !== categoriaAnterior
+    const linhasHtml = linhas.map((l, idx) => {
+      const etapa = l.et
+      const categoriaAtual = l.categoria || 'Outros'
+      const categoriaAnterior = idx > 0 ? (linhas[idx - 1].categoria || 'Outros') : null
+      const headerCategoria = agrupar && categoriaAtual !== categoriaAnterior
         ? `<tr><td colspan="5" style="padding:6px 10px;background:#1b2027;color:#6ee9e0;font-weight:700;font-size:11px;text-transform:uppercase">${categoriaAtual}</td></tr>`
         : ''
+      const statusV = statusVisualEtapa(etapa, hojeStr)
       return `${headerCategoria}<tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${servico.nome}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7">${servico.fornecedor || '—'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${etapa?.data_inicio_prevista ? new Date(etapa.data_inicio_prevista).toLocaleDateString('pt-BR') : '—'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${etapa?.data_fim_prevista ? new Date(etapa.data_fim_prevista).toLocaleDateString('pt-BR') : '—'}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${ETAPA_STATUS[etapa?.status] || '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${l.nome}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7">${l.fornecedor || '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${etapa?.data_inicio_prevista ? dataBR(etapa.data_inicio_prevista) : '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${etapa?.data_fim_prevista ? dataBR(etapa.data_fim_prevista) : '—'}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${ETAPA_STATUS[statusV] || '—'}</td>
       </tr>`
     }).join('')
 
@@ -1079,7 +1138,7 @@ export default function Obras() {
           <p style="font-size:15px;font-weight:700;margin-top:4px">${obra.data_inicio ? new Date(obra.data_inicio).toLocaleDateString('pt-BR') : '—'} — ${obra.data_previsao ? new Date(obra.data_previsao).toLocaleDateString('pt-BR') : '—'}</p>
         </div>
       </div>
-      ${obra.data_inicio && obra.data_previsao ? htmlGantt(new Date(obra.data_inicio + 'T00:00:00'), new Date(obra.data_previsao + 'T00:00:00'), linhas.map(({ servico, etapa }) => ({ nome: servico.nome, fornecedor: servico.fornecedor, inicioPrevisto: etapa?.data_inicio_prevista, fimPrevisto: etapa?.data_fim_prevista, status: etapa?.status || 'pendente' }))) : ''}
+      ${obra.data_inicio && obra.data_previsao ? htmlGantt(new Date(obra.data_inicio + 'T00:00:00'), new Date(obra.data_previsao + 'T00:00:00'), linhas.map(l => ({ nome: l.nome, fornecedor: l.fornecedor, inicioPrevisto: l.et.data_inicio_prevista, fimPrevisto: l.et.data_fim_prevista, status: statusVisualEtapa(l.et, hojeStr) }))) : ''}
       <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
         <thead>
           <tr style="background:#252a32">
@@ -1316,10 +1375,9 @@ export default function Obras() {
     }).join('')
 
     const ganttObraHtml = obra.data_inicio && obra.data_previsao
-      ? htmlGantt(inicio, fim, svsObra.map(s => {
-          const et = etapasObra.find(e => e.servico_id === s.id)
-          return { nome: s.nome, fornecedor: s.fornecedor, inicioPrevisto: et?.data_inicio_prevista, fimPrevisto: et?.data_fim_prevista, status: et?.status || 'pendente' }
-        }))
+      ? htmlGantt(inicio, fim, ordenarLinhasCronograma(montarLinhasCronograma(etapasObra, svsObra, orcItens), modoEfetivoCronograma(obra, etapasObra), ordemCategoria).linhas.map(l => (
+          { nome: l.nome, fornecedor: l.fornecedor, inicioPrevisto: l.et.data_inicio_prevista, fimPrevisto: l.et.data_fim_prevista, status: statusVisualEtapa(l.et) }
+        )))
       : '<div class="card" style="text-align:center;color:#869391;padding:30px 0">Informe as datas de início e fim da obra para gerar o Gantt.</div>'
 
     const movimentosHtml = movimentos.map(m => `
@@ -1656,6 +1714,9 @@ export default function Obras() {
       .sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
     if (svsObra.length === 0) return
     const etapasAtuais = await buscar('cronograma_etapas', '?obra_id=eq.' + obraId)
+    // Só distribui automaticamente no modo "a partir dos serviços" (explícito, ou deduzido de
+    // obras antigas que já tinham etapas por serviço). Nos demais modos o cronograma é montado à mão.
+    if (modoEfetivoCronograma(obra, etapasAtuais) !== 'servicos') return
     const inicio = new Date(obra.data_inicio + 'T00:00:00')
     const fim = new Date(obra.data_previsao + 'T00:00:00')
     const totalDias = Math.max(Math.round((fim.getTime() - inicio.getTime()) / 86400000), svsObra.length)
@@ -1677,6 +1738,227 @@ export default function Obras() {
     }
     const et = await buscar('cronograma_etapas', '?order=created_at')
     setEtapas(et)
+  }
+
+  // ── Campo Cliente: login do cliente no portal (rotas de servidor /api/cliente/acessos) ──
+  async function apiAcessosCliente(metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE', opts: { query?: string; body?: any } = {}) {
+    try {
+      const r = await fetch('/api/cliente/acessos' + (opts.query || ''), {
+        method: metodo,
+        headers: { Authorization: 'Bearer ' + (localStorage.getItem('viga_token') || ''), ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) return { ok: false as const, erro: j.error || `Erro ${r.status}` }
+      return { ok: true as const, dados: j }
+    } catch { return { ok: false as const, erro: 'Falha de conexão com o servidor' } }
+  }
+
+  async function carregarAcessosCliente(obraId: string) {
+    setCarregandoAcessos(true)
+    const r = await apiAcessosCliente('GET', { query: '?obra_id=' + obraId })
+    if (r.ok) { setAcessosCliente(r.dados.acessos || []); setMsgAcesso('') }
+    else { setAcessosCliente([]); setMsgAcesso(r.erro) }
+    setCarregandoAcessos(false)
+  }
+
+  function abrirCampoCliente() {
+    if (!detalhe) return
+    setFAcesso({ nome: detalhe.cliente || '', email: '', senha: '' })
+    setAcessoCriado(null); setRedefinindoAcesso(null); setMsgAcesso('')
+    setJanela('campo_cliente')
+    carregarAcessosCliente(detalhe.id)
+  }
+
+  function gerarSenhaAleatoria() {
+    const letras = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789'
+    const arr = new Uint32Array(10)
+    crypto.getRandomValues(arr)
+    return Array.from(arr, n => letras[n % letras.length]).join('')
+  }
+
+  async function criarAcessoCliente() {
+    if (!detalhe) return
+    const email = fAcesso.email.trim().toLowerCase()
+    if (!email || !fAcesso.senha) return setMsgAcesso('Preencha e-mail e senha do cliente')
+    const r = await apiAcessosCliente('POST', { body: { obra_id: detalhe.id, nome: fAcesso.nome, email, senha: fAcesso.senha } })
+    if (!r.ok) return setMsgAcesso(r.erro)
+    setAcessoCriado({ email, senha: fAcesso.senha })
+    setFAcesso({ nome: detalhe.cliente || '', email: '', senha: '' })
+    setMsgAcesso('')
+    carregarAcessosCliente(detalhe.id)
+  }
+
+  async function alternarAcessoCliente(a: any) {
+    const r = await apiAcessosCliente('PATCH', { body: { id: a.id, ativo: !a.ativo } })
+    if (!r.ok) return setMsgAcesso(r.erro)
+    carregarAcessosCliente(detalhe.id)
+  }
+
+  async function confirmarNovaSenhaCliente() {
+    if (!redefinindoAcesso) return
+    const r = await apiAcessosCliente('PATCH', { body: { id: redefinindoAcesso.id, senha: redefinindoAcesso.senha } })
+    if (!r.ok) return setMsgAcesso(r.erro)
+    const a = acessosCliente.find(x => x.id === redefinindoAcesso.id)
+    setAcessoCriado({ email: a?.email || '', senha: redefinindoAcesso.senha })
+    setRedefinindoAcesso(null); setMsgAcesso('')
+  }
+
+  async function removerAcessoCliente(a: any) {
+    if (!confirm(`Remover o acesso de ${a.email}? O cliente não conseguirá mais entrar no portal.`)) return
+    const r = await apiAcessosCliente('DELETE', { query: '?id=' + a.id })
+    if (!r.ok) return setMsgAcesso(r.erro)
+    carregarAcessosCliente(detalhe.id)
+  }
+
+  // ── Cronograma: modos de montagem, etapas manuais e histórico de alterações ──────────
+  async function atualizarObraLocal(obraId: string, dados: any) {
+    setObras(prev => prev.map(o => o.id === obraId ? { ...o, ...dados } : o))
+    setDetalhe((d: any) => d && d.id === obraId ? { ...d, ...dados } : d)
+  }
+
+  async function recarregarEtapas() {
+    setEtapas(await buscar('cronograma_etapas', '?order=created_at'))
+  }
+
+  async function escolherModoCronograma(obra: any, modo: ModoCronograma) {
+    if (modo === 'orcamento') {
+      const orc = orcamentos.find(o => o.obra_id === obra.id)
+      if (!orc) return alert('Esta obra não tem orçamento vinculado. Vincule um orçamento a esta obra (módulo Orçamento) para montar o cronograma a partir dele.')
+      if (orcItens.filter(i => i.orcamento_id === orc.id).length === 0) return alert('O orçamento vinculado ainda não tem itens.')
+    }
+    if (modo === 'servicos' && servicosObra(obra.id).length === 0) return alert('Cadastre ao menos um serviço na aba "Serviços" antes de montar o cronograma a partir deles.')
+    const ok = await editar('obras', obra.id, { cronograma_modo: modo })
+    if (!ok) return alert('Não foi possível salvar o modo do cronograma. Tente novamente.')
+    atualizarObraLocal(obra.id, { cronograma_modo: modo })
+    if (modo === 'servicos') {
+      if (!obra.data_inicio || !obra.data_previsao) alert('Informe as datas de início e fim da obra (✏️ Editar) para o sistema distribuir os serviços automaticamente.')
+      else await distribuirCronograma(obra.id)
+    }
+    if (modo === 'orcamento') await importarItensOrcamentoCronograma({ ...obra, cronograma_modo: modo })
+  }
+
+  // Cria uma etapa por item do orçamento vinculado que ainda não está no cronograma, com datas
+  // sequenciais calculadas pelo tempo de execução de cada item (dias de trabalho da obra).
+  async function importarItensOrcamentoCronograma(obra: any) {
+    const orc = orcamentos.find(o => o.obra_id === obra.id)
+    if (!orc) return alert('Esta obra não tem orçamento vinculado.')
+    const itens = orcItens
+      .filter(i => i.orcamento_id === orc.id)
+      .sort((a, b) => ordemCategoria(a.categoria) - ordemCategoria(b.categoria) || String(a.created_at).localeCompare(String(b.created_at)))
+    const atuais = await buscar('cronograma_etapas', '?obra_id=eq.' + obra.id)
+    const jaTem = new Set(atuais.map((e: any) => e.orcamento_item_id).filter(Boolean))
+    const novos = itens.filter(i => !jaTem.has(i.id))
+    if (novos.length === 0) return alert('Todos os itens do orçamento já estão no cronograma.')
+    const ultimoFim = atuais.map((e: any) => e.data_fim_prevista).filter(Boolean).sort().pop()
+    let inicioISO = obra.data_inicio || hojeISO()
+    if (ultimoFim && atuais.length > 0) { const d = new Date(ultimoFim + 'T00:00:00'); d.setDate(d.getDate() + 1); inicioISO = dataParaISO(d) }
+    const calculado = calcularDatasOrcamento(novos, inicioISO, obra.dias_trabalho || 'seg_sex', bancoItens)
+    let ordem = Math.max(0, ...atuais.map((e: any) => e.ordem || 0))
+    for (const { item, inicio, fim } of calculado) {
+      await criar('cronograma_etapas', {
+        obra_id: obra.id, orcamento_item_id: item.id, nome: item.servico, categoria: item.categoria || null,
+        data_inicio_prevista: inicio, data_fim_prevista: fim, status: 'pendente', ordem: ++ordem,
+      })
+    }
+    const ultimaData = calculado[calculado.length - 1].fim
+    const dadosObra: any = {}
+    if (!obra.data_inicio) dadosObra.data_inicio = inicioISO
+    if (!obra.data_previsao) dadosObra.data_previsao = ultimaData
+    if (Object.keys(dadosObra).length) { await editar('obras', obra.id, dadosObra); atualizarObraLocal(obra.id, dadosObra) }
+    await recarregarEtapas()
+  }
+
+  async function trocarModoCronograma(obra: any) {
+    const qtd = etapas.filter(e => e.obra_id === obra.id).length
+    if (!confirm(`Trocar o modo de montagem apaga as ${qtd} etapa(s) atual(is) do cronograma e o histórico de alterações de datas (os serviços e o orçamento não são afetados). Continuar?`)) return
+    await fetch(BASE + '/cronograma_etapas?obra_id=eq.' + obra.id, { method: 'DELETE', headers: HDR })
+    const ok = await editar('obras', obra.id, { cronograma_modo: null })
+    if (!ok) return alert('Não foi possível trocar o modo. Tente novamente.')
+    atualizarObraLocal(obra.id, { cronograma_modo: null })
+    await recarregarEtapas()
+    setCronHistorico(await buscar('cronograma_historico', '?order=created_at.desc'))
+  }
+
+  function abrirNovaEtapa() {
+    setFEtapa({ nome: '', categoria: '', fornecedor: '', inicio: '', fim: '' })
+    setJanela('nova_etapa')
+  }
+
+  async function salvarNovaEtapa() {
+    if (!detalhe) return
+    if (!fEtapa.nome.trim()) return alert('Informe o nome da etapa')
+    if (fEtapa.inicio && fEtapa.fim && fEtapa.fim < fEtapa.inicio) return alert('A data final não pode ser anterior à data inicial')
+    const maxOrdem = Math.max(0, ...etapas.filter(e => e.obra_id === detalhe.id).map(e => e.ordem || 0))
+    const nova = await criar('cronograma_etapas', {
+      obra_id: detalhe.id, nome: fEtapa.nome.trim(), categoria: fEtapa.categoria || null, fornecedor: fEtapa.fornecedor.trim() || null,
+      data_inicio_prevista: fEtapa.inicio || null, data_fim_prevista: fEtapa.fim || null, status: 'pendente', ordem: maxOrdem + 1,
+    })
+    if (!nova?.id) return alert('Não foi possível criar a etapa. Tente novamente.')
+    // Etapa criada com a obra ainda sem modo definido: assume "do zero".
+    if (!detalhe.cronograma_modo) {
+      await editar('obras', detalhe.id, { cronograma_modo: 'zero' })
+      atualizarObraLocal(detalhe.id, { cronograma_modo: 'zero' })
+    }
+    setJanela(null)
+    await recarregarEtapas()
+  }
+
+  async function excluirEtapaCronograma(linha: LinhaCronograma) {
+    if (linha.origem === 'servico') return
+    if (!confirm(`Remover a etapa "${linha.nome}" do cronograma?${linha.origem === 'orcamento' ? ' (o item continua no orçamento)' : ''}`)) return
+    await remover('cronograma_etapas', linha.et.id)
+    await recarregarEtapas()
+  }
+
+  async function renomearEtapaCronograma(et: any, nome: string) {
+    const novo = nome.trim()
+    if (!novo || novo === et.nome) return
+    const ok = await editar('cronograma_etapas', et.id, { nome: novo })
+    if (!ok) return alert('Não foi possível renomear a etapa.')
+    setEtapas(prev => prev.map(x => x.id === et.id ? { ...x, nome: novo } : x))
+  }
+
+  async function aplicarAlteracaoEtapa(et: any, patch: any, registro?: { tipo: string; motivo: string }): Promise<boolean> {
+    const ok = await editar('cronograma_etapas', et.id, patch)
+    if (!ok) { alert('Não foi possível salvar a alteração da etapa. Tente novamente.'); return false }
+    if (registro) {
+      const novo = await criar('cronograma_historico', {
+        etapa_id: et.id, obra_id: et.obra_id, tipo: registro.tipo, motivo: registro.motivo || null,
+        inicio_anterior: et.data_inicio_prevista || null, fim_anterior: et.data_fim_prevista || null,
+        inicio_novo: ('data_inicio_prevista' in patch ? patch.data_inicio_prevista : et.data_inicio_prevista) || null,
+        fim_novo: ('data_fim_prevista' in patch ? patch.data_fim_prevista : et.data_fim_prevista) || null,
+        status_anterior: et.status || null, status_novo: ('status' in patch ? patch.status : et.status) || null,
+        usuario_email: userEmail || localStorage.getItem('viga_email') || null,
+      })
+      if (novo?.id) setCronHistorico(prev => [novo, ...prev])
+      else alert('A etapa foi alterada, mas o registro no histórico falhou.')
+    }
+    setEtapas(prev => prev.map(x => x.id === et.id ? { ...x, ...patch } : x))
+    return true
+  }
+
+  // Alterar data já definida ou marcar como atrasada exige justificativa (vai pro histórico);
+  // definir a data pela primeira vez ou avançar o status é direto.
+  function solicitarAlteracaoEtapa(linha: LinhaCronograma, patch: any) {
+    const et = linha.et
+    const mudaDataExistente = (['data_inicio_prevista', 'data_fim_prevista'] as const).some(k => k in patch && et[k] && (patch[k] || null) !== et[k])
+    const viraAtrasada = patch.status === 'atrasada' && et.status !== 'atrasada'
+    if (!mudaDataExistente && !viraAtrasada) { aplicarAlteracaoEtapa(et, patch); return }
+    const jaAtrasada = statusVisualEtapa(et) === 'atrasada'
+    const obraIniciada = !!detalhe?.data_inicio && detalhe.data_inicio <= hojeISO()
+    const tipo = viraAtrasada || jaAtrasada ? 'atraso' : obraIniciada ? 'reprogramacao' : 'ajuste'
+    setAlteracaoCron({ et, nome: linha.nome, patch, tipo, motivo: '' })
+    setJanela('alterar_etapa')
+  }
+
+  async function confirmarAlteracaoEtapa() {
+    if (!alteracaoCron) return
+    if (alteracaoCron.tipo !== 'ajuste' && !alteracaoCron.motivo.trim()) return alert('Informe o motivo da alteração — ele fica registrado no histórico da etapa.')
+    const ok = await aplicarAlteracaoEtapa(alteracaoCron.et, alteracaoCron.patch, { tipo: alteracaoCron.tipo, motivo: alteracaoCron.motivo.trim() })
+    if (!ok) return
+    setJanela(null)
+    setAlteracaoCron(null)
   }
 
   async function reordenarServico(servico: any, direcao: -1 | 1) {
@@ -1889,6 +2171,7 @@ export default function Obras() {
           </div>
           <div className="flex gap-2 flex-wrap items-start">
             <button onClick={() => abrirEditarObra(detalhe)} className={btnEditSmCls}>✏️ Editar</button>
+            <button onClick={abrirCampoCliente} className={btnEditSmCls} data-testid="btn-campo-cliente" title="Criar e gerenciar o login do cliente para acompanhar esta obra">👤 Campo Cliente</button>
             <select value={detalhe.status}
               onChange={async e => {
                 const novoStatus = e.target.value
@@ -2289,38 +2572,78 @@ export default function Obras() {
         )}
 
         {/* aba cronograma */}
-        {abaDetalhe === 'cronograma' && svs.length === 0 && (
-          <div className={sectionCls + ' text-center py-12'}>
-            <div className="text-4xl mb-3">📅</div>
-            <div className="text-sm font-bold text-on-surface mb-2">Nenhum serviço cadastrado nesta obra</div>
-            <div className="text-body-sm text-on-surface-variant mb-5 max-w-[28rem] mx-auto">O cronograma nasce automaticamente dos serviços da obra. Cadastre ao menos um na aba "🔧 Serviços" (manualmente ou vinculando um orçamento) e informe o início/fim da obra.</div>
-          </div>
-        )}
-        {abaDetalhe === 'cronograma' && svs.length > 0 && (() => {
-          const svsOrdenados = ordenarServicosObra(svs)
+        {abaDetalhe === 'cronograma' && (() => {
+          const modoCron = modoEfetivoCronograma(detalhe, etapasObra)
+          const orcVinculadoCron = orcamentos.find(o => o.obra_id === detalhe.id)
+          const qtdItensOrcCron = orcVinculadoCron ? orcItens.filter(i => i.orcamento_id === orcVinculadoCron.id).length : 0
+
+          if (!modoCron) {
+            return (
+              <div className={sectionCls}>
+                <div className="text-center mb-5">
+                  <div className="text-4xl mb-2">📅</div>
+                  <div className="text-sm font-bold text-on-surface mb-1">Como você quer montar o cronograma desta obra?</div>
+                  <div className="text-body-sm text-on-surface-variant max-w-[36rem] mx-auto">Escolha uma das opções abaixo. Em todas elas dá para ajustar datas e acrescentar etapas depois, e cada atraso ou mudança de data fica registrado com o motivo.</div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {MODOS_CRONOGRAMA.map(m => {
+                    const indisponivel = m.id === 'servicos' ? svs.length === 0 : m.id === 'orcamento' ? qtdItensOrcCron === 0 : false
+                    const aviso = m.id === 'servicos' && svs.length === 0 ? 'Cadastre serviços na aba Serviços para usar esta opção.'
+                      : m.id === 'orcamento' && !orcVinculadoCron ? 'Esta obra não tem orçamento vinculado.'
+                      : m.id === 'orcamento' && qtdItensOrcCron === 0 ? 'O orçamento vinculado ainda não tem itens.' : ''
+                    return (
+                      <div key={m.id} className={`bg-surface-container-low border rounded-xl p-4 flex flex-col ${indisponivel ? 'border-outline-variant opacity-60' : 'border-primary/30'}`} data-testid={`modo-cronograma-${m.id}`}>
+                        <div className="text-2xl mb-1">{m.icone}</div>
+                        <div className="text-sm font-bold text-on-surface mb-1">{m.titulo}</div>
+                        <div className="text-[12px] text-on-surface-variant leading-relaxed flex-1 mb-3">{m.descricao}</div>
+                        {aviso && <div className="text-[11px] text-error mb-2">{aviso}</div>}
+                        <button className={btnPrimaryCls + (indisponivel ? ' opacity-50 cursor-not-allowed' : '')} disabled={indisponivel} onClick={() => escolherModoCronograma(detalhe, m.id)}>Usar esta opção</button>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          }
+
+          const modoInfo = MODOS_CRONOGRAMA.find(m => m.id === modoCron)!
+          const { linhas: linhasCron, agruparPorCategoria } = ordenarLinhasCronograma(montarLinhasCronograma(etapasObra, svs, orcItens), modoCron, ordemCategoria)
+          const todasDatasCron = linhasCron.flatMap(l => [l.et.data_inicio_prevista, l.et.data_fim_prevista]).filter(Boolean) as string[]
+          const iniGanttStr = detalhe.data_inicio || (todasDatasCron.length ? [...todasDatasCron].sort()[0] : null)
+          const fimGanttStr = detalhe.data_previsao || (todasDatasCron.length ? [...todasDatasCron].sort().slice(-1)[0] : null)
+          const inicioObra = iniGanttStr ? new Date(iniGanttStr + 'T00:00:00') : null
+          const fimObra = fimGanttStr ? new Date(fimGanttStr + 'T00:00:00') : null
+          const totalMsObra = inicioObra && fimObra ? Math.max(fimObra.getTime() - inicioObra.getTime(), 86400000) : 1
+          const hojeGantt = inicioObra ? Math.max(0, Math.min(100, ((new Date().getTime() - inicioObra.getTime()) / totalMsObra) * 100)) : 0
+          const hojeDentro = !!(inicioObra && fimObra && new Date() >= inicioObra && new Date() <= fimObra)
+          const hojeStr = hojeISO()
+          const itensOrcFaltando = modoCron === 'orcamento' && orcVinculadoCron
+            ? orcItens.filter(i => i.orcamento_id === orcVinculadoCron.id && !etapasObra.some(e => e.orcamento_item_id === i.id)).length : 0
           return (
           <div className={sectionCls}>
-            <div className="flex justify-between items-center mb-5 flex-wrap gap-2">
+            <div className="flex justify-between items-start mb-5 flex-wrap gap-2">
               <div>
                 <div className="text-sm font-bold text-on-surface">📅 Cronograma da Obra</div>
-                <div className="text-body-sm text-on-surface-variant mt-0.5">Uma etapa por serviço da obra — datas distribuídas automaticamente a partir do início/fim, editáveis a qualquer momento</div>
+                <div className="text-body-sm text-on-surface-variant mt-0.5">Modo: <b className="text-on-surface">{modoInfo.icone} {modoInfo.titulo}</b> — datas editáveis; mudar uma data já definida ou marcar atraso registra o motivo no histórico</div>
               </div>
-              {etapasObra.length > 0 && (
-                <button className={btnPrimaryCls} onClick={() => gerarPDFCronograma(detalhe, svsOrdenados.map(servico => ({ servico, etapa: etapasObra.find(e => e.servico_id === servico.id) })).filter(l => l.etapa))}>🖨️ Gerar Cronograma PDF</button>
-              )}
+              <div className="flex gap-2 flex-wrap">
+                <button className={btnSecondaryCls} onClick={abrirNovaEtapa} data-testid="btn-nova-etapa">+ Etapa</button>
+                {modoCron === 'orcamento' && itensOrcFaltando > 0 && (
+                  <button className={btnSecondaryCls} onClick={() => importarItensOrcamentoCronograma(detalhe)}>🔄 Trazer {itensOrcFaltando} item(ns) novo(s) do orçamento</button>
+                )}
+                {linhasCron.length > 0 && (
+                  <button className={btnPrimaryCls} onClick={() => gerarPDFCronograma(detalhe, linhasCron)}>🖨️ Gerar Cronograma PDF</button>
+                )}
+                <button className={btnSecondaryCls} onClick={() => trocarModoCronograma(detalhe)} title="Apaga as etapas atuais e volta para a escolha do modo">↩ Trocar modo</button>
+              </div>
             </div>
-            {!detalhe.data_inicio || !detalhe.data_previsao ? (
+            {modoCron === 'servicos' && (!detalhe.data_inicio || !detalhe.data_previsao) && linhasCron.length === 0 ? (
               <div className="text-center py-8 text-on-surface-variant">Informe as datas de início e fim previstas da obra (✏️ Editar) para o sistema distribuir os serviços automaticamente.</div>
-            ) : etapasObra.length === 0 ? (
-              <div className="text-center py-8 text-on-surface-variant">Gerando cronograma...</div>
-            ) : (() => {
-              const inicioObra = new Date(detalhe.data_inicio + 'T00:00:00')
-              const fimObra = new Date(detalhe.data_previsao + 'T00:00:00')
-              const totalMsObra = Math.max(fimObra.getTime() - inicioObra.getTime(), 86400000)
-              const hojeGantt = Math.max(0, Math.min(100, ((new Date().getTime() - inicioObra.getTime()) / totalMsObra) * 100))
-              const hojeDentro = new Date() >= inicioObra && new Date() <= fimObra
-              return (
+            ) : linhasCron.length === 0 ? (
+              <div className="text-center py-8 text-on-surface-variant">Nenhuma etapa ainda. Use <b>+ Etapa</b> para cadastrar a primeira.</div>
+            ) : (
               <>
+              {inicioObra && fimObra && (
               <div className="mb-5 bg-surface-container-low border border-outline-variant rounded-lg p-4">
                 <div className="flex justify-between items-center mb-3">
                   <div className="text-[11px] font-bold text-on-surface-variant uppercase">📊 Gantt</div>
@@ -2332,20 +2655,17 @@ export default function Obras() {
                   </div>
                 </div>
                 <div className="flex justify-between text-[10px] text-on-surface-variant mb-2">
-                  <span>{dataBR(detalhe.data_inicio)}</span>
-                  <span>{dataBR(detalhe.data_previsao)}</span>
+                  <span>{dataBR(iniGanttStr!)}</span>
+                  <span>{dataBR(fimGanttStr!)}</span>
                 </div>
                 <div className="flex flex-col gap-2">
-                  {svsOrdenados.map(servico => {
-                    const et = etapasObra.find(e => e.servico_id === servico.id)
-                    if (!et) return null
-                    const { xPct, larguraPct } = calcularBarraGantt(inicioObra, fimObra, et.data_inicio_prevista, et.data_fim_prevista)
-                    const statusVisual = (et.status !== 'concluida' && et.data_fim_prevista && new Date(et.data_fim_prevista) < new Date()) ? 'atrasada' : et.status
+                  {linhasCron.map(l => {
+                    const { xPct, larguraPct } = calcularBarraGantt(inicioObra, fimObra, l.et.data_inicio_prevista, l.et.data_fim_prevista)
                     return (
-                      <div key={servico.id} className="flex items-center gap-3">
-                        <div className="w-32 shrink-0 text-[11px] text-on-surface truncate" title={servico.nome}>{servico.nome}</div>
+                      <div key={l.et.id} className="flex items-center gap-3">
+                        <div className="w-32 shrink-0 text-[11px] text-on-surface truncate" title={l.nome}>{l.nome}</div>
                         <div className="relative flex-1 h-5 bg-surface-container rounded overflow-hidden">
-                          <div className={`absolute top-0 h-full rounded ${corBarraEtapa(statusVisual)}`} style={{ left: xPct + '%', width: larguraPct + '%' }} title={`${dataBR(et.data_inicio_prevista)} — ${dataBR(et.data_fim_prevista)}`} />
+                          <div className={`absolute top-0 h-full rounded ${corBarraEtapa(statusVisualEtapa(l.et, hojeStr))}`} style={{ left: xPct + '%', width: larguraPct + '%' }} title={`${dataBR(l.et.data_inicio_prevista)} — ${dataBR(l.et.data_fim_prevista)}`} />
                           {hojeDentro && <div className="absolute top-0 h-full w-px bg-primary" style={{ left: hojeGantt + '%' }} />}
                         </div>
                       </div>
@@ -2353,66 +2673,104 @@ export default function Obras() {
                   })}
                 </div>
               </div>
+              )}
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-outline-variant">
-                      {['', 'Serviço', 'Fornecedor', 'Início Previsto', 'Fim Previsto', 'Status'].map(h => (
-                        <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
+                      {['', 'Etapa', 'Fornecedor', 'Início Previsto', 'Fim Previsto', 'Status', ''].map((h, i) => (
+                        <th key={i} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {svsOrdenados.map((servico, idx) => {
-                      const et = etapasObra.find(e => e.servico_id === servico.id)
-                      if (!et) return null
-                      const atrasadaEtapa = !!(et.data_fim_prevista && new Date(et.data_fim_prevista) < hoje && et.status !== 'concluida')
-                      const categoriaAtual = servico.categoria || 'Outros'
-                      const categoriaAnterior = idx > 0 ? (svsOrdenados[idx - 1].categoria || 'Outros') : null
+                    {linhasCron.map((linha, idx) => {
+                      const et = linha.et
+                      const statusV = statusVisualEtapa(et, hojeStr)
+                      const categoriaAtual = linha.categoria || 'Outros'
+                      const categoriaAnterior = idx > 0 ? (linhasCron[idx - 1].categoria || 'Outros') : null
+                      const histEtapa = cronHistorico.filter(h => h.etapa_id === et.id)
+                      const ultimoMot = ultimoMotivoEtapa(et.id, cronHistorico)
+                      const anterior = linhasCron[idx - 1], proxima = linhasCron[idx + 1]
+                      const podeSubir = modoCron === 'servicos' && !!linha.servico && !!anterior?.servico && (anterior.servico.categoria || null) === (linha.servico.categoria || null)
+                      const podeDescer = modoCron === 'servicos' && !!linha.servico && !!proxima?.servico && (proxima.servico.categoria || null) === (linha.servico.categoria || null)
                       return (
                       <Fragment key={et.id}>
-                        {categoriaAtual !== categoriaAnterior && (
+                        {agruparPorCategoria && categoriaAtual !== categoriaAnterior && (
                           <tr className="bg-surface-container-high">
-                            <td colSpan={6} className="px-3 py-1.5 text-[10px] font-bold text-primary uppercase tracking-wide">{categoriaAtual}</td>
+                            <td colSpan={7} className="px-3 py-1.5 text-[10px] font-bold text-primary uppercase tracking-wide">{categoriaAtual}</td>
                           </tr>
                         )}
-                        <tr className="border-b border-outline-variant hover:bg-surface-variant/20">
+                        <tr className="border-b border-outline-variant hover:bg-surface-variant/20" data-testid="linha-etapa">
                           <td className="px-3 py-2.5">
-                            <div className="flex flex-col gap-0.5">
-                              <button disabled={idx === 0 || (svsOrdenados[idx - 1].categoria || null) !== (servico.categoria || null)} className="text-xs text-on-surface-variant hover:text-primary disabled:opacity-20 disabled:cursor-not-allowed" onClick={() => reordenarServico(servico, -1)}>▲</button>
-                              <button disabled={idx === svsOrdenados.length - 1 || (svsOrdenados[idx + 1].categoria || null) !== (servico.categoria || null)} className="text-xs text-on-surface-variant hover:text-primary disabled:opacity-20 disabled:cursor-not-allowed" onClick={() => reordenarServico(servico, 1)}>▼</button>
-                            </div>
+                            {modoCron === 'servicos' && linha.servico && (
+                              <div className="flex flex-col gap-0.5">
+                                <button disabled={!podeSubir} className="text-xs text-on-surface-variant hover:text-primary disabled:opacity-20 disabled:cursor-not-allowed" onClick={() => reordenarServico(linha.servico, -1)}>▲</button>
+                                <button disabled={!podeDescer} className="text-xs text-on-surface-variant hover:text-primary disabled:opacity-20 disabled:cursor-not-allowed" onClick={() => reordenarServico(linha.servico, 1)}>▼</button>
+                              </div>
+                            )}
                           </td>
-                          <td className="px-3 py-2.5 font-semibold text-on-surface">{servico.nome}</td>
-                          <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{servico.fornecedor || '—'}</td>
+                          <td className="px-3 py-2.5">
+                            {linha.origem === 'servico' ? (
+                              <span className="font-semibold text-on-surface">{linha.nome}</span>
+                            ) : (
+                              <input key={et.id + (et.nome || '')} className={inputCls + ' text-sm py-1.5 font-semibold'} defaultValue={linha.nome} onBlur={e => renomearEtapaCronograma(et, e.target.value)} />
+                            )}
+                            {ultimoMot && (
+                              <div className="text-[10px] text-tertiary mt-1" title={`${new Date(ultimoMot.created_at).toLocaleString('pt-BR')} — ${ultimoMot.usuario_email || ''}`}>↳ {TIPOS_ALTERACAO_CRONOGRAMA[ultimoMot.tipo] || ultimoMot.tipo}: {ultimoMot.motivo}</div>
+                            )}
+                          </td>
+                          <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{linha.fornecedor || '—'}</td>
                           <td className="px-3 py-2.5">
                             <input type="date" className={inputCls + ' text-xs py-1.5'} value={et.data_inicio_prevista || ''}
                               onChange={e => {
                                 const v = e.target.value
-                                setEtapas(etapas.map(x => x.id === et.id ? { ...x, data_inicio_prevista: v } : x))
-                                editar('cronograma_etapas', et.id, { data_inicio_prevista: v || null })
+                                if (v && et.data_fim_prevista && v > et.data_fim_prevista) return alert('O início não pode ser depois do fim previsto. Ajuste primeiro a data final.')
+                                solicitarAlteracaoEtapa(linha, { data_inicio_prevista: v || null })
                               }} />
                           </td>
                           <td className="px-3 py-2.5">
                             <input type="date" className={inputCls + ' text-xs py-1.5'} value={et.data_fim_prevista || ''}
                               onChange={e => {
                                 const v = e.target.value
-                                setEtapas(etapas.map(x => x.id === et.id ? { ...x, data_fim_prevista: v } : x))
-                                editar('cronograma_etapas', et.id, { data_fim_prevista: v || null })
+                                if (v && et.data_inicio_prevista && v < et.data_inicio_prevista) return alert('O fim não pode ser antes do início previsto. Ajuste primeiro a data inicial.')
+                                solicitarAlteracaoEtapa(linha, { data_fim_prevista: v || null })
                               }} />
                           </td>
                           <td className="px-3 py-2.5">
                             <select className={inputCls + ' text-xs py-1.5 w-auto'} value={et.status}
-                              onChange={e => {
-                                const v = e.target.value
-                                setEtapas(etapas.map(x => x.id === et.id ? { ...x, status: v } : x))
-                                editar('cronograma_etapas', et.id, { status: v })
-                              }}>
+                              onChange={e => solicitarAlteracaoEtapa(linha, { status: e.target.value })}>
                               {Object.entries(ETAPA_STATUS).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
                             </select>
-                            {atrasadaEtapa && <div className="text-[10px] text-error mt-1">⚠️ prazo vencido</div>}
+                            {statusV === 'atrasada' && et.status !== 'atrasada' && <div className="text-[10px] text-error mt-1">⚠️ prazo vencido</div>}
+                          </td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">
+                            <button className="text-[11px] text-primary underline mr-2" onClick={() => setEtapaHistAberta(etapaHistAberta === et.id ? null : et.id)} title="Histórico de atrasos e mudanças de data">📝 {histEtapa.length}</button>
+                            {linha.origem !== 'servico' && <button className="text-[11px] text-error" onClick={() => excluirEtapaCronograma(linha)} title="Remover etapa">🗑️</button>}
                           </td>
                         </tr>
+                        {etapaHistAberta === et.id && (
+                          <tr className="bg-surface-container-low">
+                            <td colSpan={7} className="px-4 py-3">
+                              <div className="text-[10px] font-bold text-on-surface-variant uppercase mb-2">Histórico — {linha.nome}</div>
+                              {histEtapa.length === 0 ? (
+                                <div className="text-[12px] text-on-surface-variant">Nenhuma alteração registrada.</div>
+                              ) : (
+                                <div className="flex flex-col gap-1.5">
+                                  {histEtapa.map(h => (
+                                    <div key={h.id} className="text-[12px] text-on-surface">
+                                      <span className="text-on-surface-variant">{new Date(h.created_at).toLocaleString('pt-BR')} · {h.usuario_email || '—'}</span>{' '}
+                                      <b>{TIPOS_ALTERACAO_CRONOGRAMA[h.tipo] || h.tipo}</b>
+                                      {(h.inicio_anterior !== h.inicio_novo || h.fim_anterior !== h.fim_novo) && <span className="text-on-surface-variant"> · {dataBR(h.inicio_anterior)}–{dataBR(h.fim_anterior)} → {dataBR(h.inicio_novo)}–{dataBR(h.fim_novo)}</span>}
+                                      {h.status_anterior !== h.status_novo && <span className="text-on-surface-variant"> · {ETAPA_STATUS[h.status_anterior] || '—'} → {ETAPA_STATUS[h.status_novo] || '—'}</span>}
+                                      {h.motivo && <div className="text-tertiary">“{h.motivo}”</div>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                        )}
                       </Fragment>
                       )
                     })}
@@ -2420,8 +2778,7 @@ export default function Obras() {
                 </table>
               </div>
               </>
-              )
-            })()}
+            )}
           </div>
           )
         })()}
@@ -2661,7 +3018,14 @@ export default function Obras() {
           // de totalsMedicao, mas com os valores AO VIVO desta tela, antes de salvar).
           const totalBaseGrupoAtual = itensComValores.reduce((a, l) => a + l.valorBase, 0)
           const totalAdiantamentoGrupo = (grupoAtual?.medicoes || []).filter(m => m.valor_adiantamento != null).reduce((a, m) => a + parseFloat(m.valor_adiantamento || 0), 0)
-          const descontoAdiantamentoTotal = totalAdiantamentoGrupo > 0 && totalBaseGrupoAtual > 0 ? (totalPeriodo / totalBaseGrupoAtual) * totalAdiantamentoGrupo : 0
+          // % do desconto: o que foi digitado (0–100) ou, se vazio, a % que esta medição
+          // representa do total do serviço. Limitado ao saldo ainda não abatido por medições anteriores.
+          const pctAutoDesconto = totalBaseGrupoAtual > 0 ? Math.max(totalPeriodo / totalBaseGrupoAtual, 0) : 0
+          const pctDigitadoDesc = descAdiantPctInput.trim() === '' ? null : Math.min(Math.max(parseFloat(descAdiantPctInput.replace(',', '.')) || 0, 0), 100) / 100
+          const pctDescontoAplicado = pctDigitadoDesc ?? pctAutoDesconto
+          const jaAbatidoAdiantamento = descontoJaAbatido(medicaoAtiva)
+          const saldoAdiantamentoGrupo = Math.max(totalAdiantamentoGrupo - jaAbatidoAdiantamento, 0)
+          const descontoAdiantamentoTotal = totalAdiantamentoGrupo > 0 ? Math.min(pctDescontoAplicado * totalAdiantamentoGrupo, saldoAdiantamentoGrupo) : 0
           let totalRetencao = 0, totalLiquido = 0
           const linhas = itensComValores.map(l => {
             const retencao = l.valorPeriodo * retPct
@@ -2810,7 +3174,31 @@ export default function Obras() {
                 </div>
                 )
               })()}
-              <div className={`grid grid-cols-1 gap-3 mt-4 ${descontoAdiantamentoTotal > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
+              {totalAdiantamentoGrupo > 0 && (
+                <div className="mt-4 bg-tertiary/5 border border-tertiary/30 rounded-lg p-3.5" data-testid="painel-desconto-adiantamento">
+                  <div className="flex flex-wrap items-end gap-4">
+                    <div>
+                      <div className="text-[10px] text-tertiary font-bold uppercase mb-1">💰 Desconto sobre o adiantamento</div>
+                      <div className="flex items-center gap-1.5">
+                        <input type="number" step="0.01" min="0" max="100" inputMode="decimal"
+                          className="w-24 bg-surface-container-low border border-outline-variant rounded px-2 py-1.5 text-on-surface text-sm"
+                          placeholder={(pctAutoDesconto * 100).toFixed(2)} value={descAdiantPctInput}
+                          onChange={e => setDescAdiantPctInput(e.target.value)} data-testid="input-desconto-adiantamento-pct" />
+                        <span className="text-sm text-on-surface-variant">%</span>
+                        {descAdiantPctInput.trim() !== '' && (
+                          <button type="button" className="text-[11px] text-primary underline ml-1" onClick={() => setDescAdiantPctInput('')}>usar automático</button>
+                        )}
+                        <button type="button" className="text-[11px] text-primary underline ml-1" onClick={() => setDescAdiantPctInput('100')}>descontar tudo (100%)</button>
+                      </div>
+                    </div>
+                    <div className="text-[11px] text-on-surface-variant leading-relaxed">
+                      <div>Adiantado no total: <b className="text-on-surface">{moeda(totalAdiantamentoGrupo)}</b> · já abatido em medições anteriores: <b className="text-on-surface">{moeda(jaAbatidoAdiantamento)}</b> · saldo: <b className="text-on-surface">{moeda(saldoAdiantamentoGrupo)}</b></div>
+                      <div>{descAdiantPctInput.trim() === '' ? <>Automático: {(pctAutoDesconto * 100).toFixed(2)}% (a % que esta medição representa do serviço)</> : <>Digitado: {(pctDescontoAplicado * 100).toFixed(2)}%</>} → desconto de <b className="text-tertiary">{moeda(descontoAdiantamentoTotal)}</b>{pctDescontoAplicado * totalAdiantamentoGrupo > saldoAdiantamentoGrupo + 0.005 ? ' (limitado ao saldo do adiantamento)' : ''}</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div className={`grid grid-cols-1 gap-3 mt-4 ${totalAdiantamentoGrupo > 0 ? 'md:grid-cols-4' : 'md:grid-cols-3'}`}>
                 <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
                   <div className="text-[10px] text-on-surface-variant uppercase">Bruto desta medição</div>
                   <div className="text-sm font-bold text-on-surface">{moeda(totalPeriodo)}</div>
@@ -2819,8 +3207,8 @@ export default function Obras() {
                   <div className="text-[10px] text-on-surface-variant uppercase">Retenção</div>
                   <div className="text-sm font-bold text-error">{moeda(totalRetencao)}</div>
                 </div>
-                {descontoAdiantamentoTotal > 0 && (
-                  <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3" title="Desconto proporcional do adiantamento pago ao fornecedor, descontado automaticamente conforme a obra avança">
+                {totalAdiantamentoGrupo > 0 && (
+                  <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3" title="Desconto do adiantamento já pago (percentual editável acima)">
                     <div className="text-[10px] text-on-surface-variant uppercase">Desconto Adiantamento</div>
                     <div className="text-sm font-bold text-tertiary">{moeda(descontoAdiantamentoTotal)}</div>
                   </div>
@@ -3048,6 +3436,150 @@ export default function Obras() {
               <div className="flex gap-2 justify-end">
                 <button className={btnSecondaryCls} onClick={() => { setJanela(null); setMedicaoProgramando(null) }}>Cancelar</button>
                 <button className={btnPrimaryCls} onClick={confirmarProgramarPagamento}>Confirmar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* modal Campo Cliente — login do cliente para acompanhar a obra */}
+        {janela === 'campo_cliente' && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[640px] max-h-[92vh] overflow-y-auto" data-testid="modal-campo-cliente">
+              <div className="text-base font-bold text-on-surface mb-1.5">👤 Campo Cliente</div>
+              <div className="text-body-sm text-on-surface-variant mb-4">Crie o login do cliente para ele acompanhar <b className="text-on-surface">apenas esta obra</b> pelo VIGA: serviços contratados, cronograma, equipe, medições, relatórios de visita e financeiro (o que foi contratado e já pago). Nada de custos internos, compras, cartão ou lucro.</div>
+
+              <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3 mb-4 flex items-center justify-between gap-2 flex-wrap">
+                <div className="text-[12px] text-on-surface-variant">Endereço do portal: <b className="text-primary">{typeof window !== 'undefined' ? window.location.origin : ''}/cliente</b></div>
+                <button className="text-[11px] text-primary underline" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/cliente'); setMsgAcesso('Link copiado!') }}>copiar link</button>
+              </div>
+
+              {acessoCriado && (
+                <div className="bg-primary/10 border border-primary/30 rounded-lg p-3 mb-4 text-[13px]" data-testid="acesso-criado">
+                  <div className="font-bold text-primary mb-1">Acesso pronto — anote agora, a senha não fica visível depois:</div>
+                  <div>E-mail: <b>{acessoCriado.email}</b></div>
+                  <div>Senha: <b className="font-mono">{acessoCriado.senha}</b></div>
+                  <button className="text-[11px] text-primary underline mt-1" onClick={() => navigator.clipboard?.writeText(`Portal: ${window.location.origin}/cliente\nE-mail: ${acessoCriado.email}\nSenha: ${acessoCriado.senha}`)}>copiar dados de acesso</button>
+                </div>
+              )}
+
+              <div className="text-[11px] font-bold text-on-surface-variant uppercase mb-2">Acessos desta obra</div>
+              {carregandoAcessos ? <div className="text-sm text-on-surface-variant py-3">Carregando...</div> : acessosCliente.length === 0 ? (
+                <div className="text-sm text-on-surface-variant py-3">Nenhum acesso criado ainda.</div>
+              ) : (
+                <div className="flex flex-col gap-2 mb-4">
+                  {acessosCliente.map(a => (
+                    <div key={a.id} className="bg-surface-container-low border border-outline-variant rounded-lg p-3" data-testid="linha-acesso-cliente">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <div className="text-sm font-semibold text-on-surface">{a.nome || '—'} <span className="text-on-surface-variant font-normal">· {a.email}</span></div>
+                          <div className="text-[11px] text-on-surface-variant">{a.ativo ? '🟢 Ativo' : '🔴 Desativado'} · último acesso: {a.ultimo_login ? new Date(a.ultimo_login).toLocaleString('pt-BR') : 'nunca'}</div>
+                        </div>
+                        <div className="flex gap-2 text-[11px]">
+                          <button className="text-primary underline" onClick={() => setRedefinindoAcesso({ id: a.id, senha: gerarSenhaAleatoria() })}>Redefinir senha</button>
+                          <button className="text-tertiary underline" onClick={() => alternarAcessoCliente(a)}>{a.ativo ? 'Desativar' : 'Reativar'}</button>
+                          <button className="text-error underline" onClick={() => removerAcessoCliente(a)}>Remover</button>
+                        </div>
+                      </div>
+                      {redefinindoAcesso && redefinindoAcesso.id === a.id && (
+                        <div className="flex gap-2 mt-2 items-center">
+                          <input className={inputCls + ' text-sm py-1.5'} value={redefinindoAcesso.senha} onChange={e => { const v = e.target.value; setRedefinindoAcesso(r => r ? { ...r, senha: v } : r) }} />
+                          <button className={btnPrimaryCls + ' py-1.5'} onClick={confirmarNovaSenhaCliente}>Salvar</button>
+                          <button className={btnSecondaryCls + ' py-1.5'} onClick={() => setRedefinindoAcesso(null)}>Cancelar</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="text-[11px] font-bold text-on-surface-variant uppercase mb-2 mt-2">Novo acesso</div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div><label className={labelCls}>Nome</label><input className={inputCls} value={fAcesso.nome} onChange={e => setFAcesso({ ...fAcesso, nome: e.target.value })} data-testid="input-nome-acesso" /></div>
+                <div><label className={labelCls}>E-mail *</label><input className={inputCls} type="email" value={fAcesso.email} onChange={e => setFAcesso({ ...fAcesso, email: e.target.value })} data-testid="input-email-acesso" /></div>
+              </div>
+              <div className="mb-3">
+                <label className={labelCls}>Senha * (mín. 6 caracteres)</label>
+                <div className="flex gap-2">
+                  <input className={inputCls} value={fAcesso.senha} onChange={e => setFAcesso({ ...fAcesso, senha: e.target.value })} data-testid="input-senha-acesso" />
+                  <button className={btnSecondaryCls + ' whitespace-nowrap'} onClick={() => setFAcesso({ ...fAcesso, senha: gerarSenhaAleatoria() })}>Gerar</button>
+                </div>
+              </div>
+              {msgAcesso && <div className="text-sm text-tertiary mb-3" data-testid="msg-acesso">{msgAcesso}</div>}
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Fechar</button>
+                <button className={btnPrimaryCls} onClick={criarAcessoCliente} data-testid="btn-criar-acesso">Criar acesso</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* modal justificativa de atraso / mudança de data do cronograma */}
+        {janela === 'alterar_etapa' && alteracaoCron && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && (setJanela(null), setAlteracaoCron(null))}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]" data-testid="modal-alterar-etapa">
+              <div className="text-base font-bold text-on-surface mb-1.5">📝 Registrar alteração no cronograma</div>
+              <div className="text-body-sm text-on-surface-variant mb-4">
+                Etapa <b className="text-on-surface">{alteracaoCron.nome}</b>
+                <div className="mt-1 text-[12px]">
+                  {'data_inicio_prevista' in alteracaoCron.patch && <div>Início: {dataBR(alteracaoCron.et.data_inicio_prevista)} → <b className="text-on-surface">{dataBR(alteracaoCron.patch.data_inicio_prevista)}</b></div>}
+                  {'data_fim_prevista' in alteracaoCron.patch && <div>Fim: {dataBR(alteracaoCron.et.data_fim_prevista)} → <b className="text-on-surface">{dataBR(alteracaoCron.patch.data_fim_prevista)}</b></div>}
+                  {'status' in alteracaoCron.patch && <div>Status: {ETAPA_STATUS[alteracaoCron.et.status] || '—'} → <b className="text-on-surface">{ETAPA_STATUS[alteracaoCron.patch.status]}</b></div>}
+                </div>
+              </div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Tipo da alteração</label>
+                <select className={inputCls} value={alteracaoCron.tipo} onChange={e => setAlteracaoCron({ ...alteracaoCron, tipo: e.target.value })}>
+                  {Object.entries(TIPOS_ALTERACAO_CRONOGRAMA).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
+                </select>
+              </div>
+              <div className="mb-5">
+                <label className={labelCls}>Motivo {alteracaoCron.tipo !== 'ajuste' ? '*' : '(opcional)'}</label>
+                <textarea className={inputCls} rows={3} autoFocus placeholder="Ex.: chuva forte atrasou a concretagem; material entregue com 5 dias de atraso..." value={alteracaoCron.motivo} onChange={e => setAlteracaoCron({ ...alteracaoCron, motivo: e.target.value })} data-testid="input-motivo-etapa" />
+                <div className="text-[11px] text-on-surface-variant mt-1">Fica registrado no histórico da etapa, com data e usuário.</div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => { setJanela(null); setAlteracaoCron(null) }}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={confirmarAlteracaoEtapa} data-testid="btn-confirmar-alteracao-etapa">Confirmar alteração</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* modal nova etapa do cronograma */}
+        {janela === 'nova_etapa' && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
+              <div className="text-base font-bold text-on-surface mb-5">+ Nova Etapa do Cronograma</div>
+              <div className="mb-3.5">
+                <label className={labelCls}>Nome da etapa *</label>
+                <input className={inputCls} autoFocus placeholder="Ex.: Instalação de tubulação do banheiro" value={fEtapa.nome} onChange={e => setFEtapa({ ...fEtapa, nome: e.target.value })} data-testid="input-nome-etapa" />
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-3.5">
+                <div>
+                  <label className={labelCls}>Categoria</label>
+                  <select className={inputCls} value={fEtapa.categoria} onChange={e => setFEtapa({ ...fEtapa, categoria: e.target.value })}>
+                    <option value="">— sem categoria —</option>
+                    {CATEGORIAS.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className={labelCls}>Fornecedor</label>
+                  <input className={inputCls} placeholder="Opcional" value={fEtapa.fornecedor} onChange={e => setFEtapa({ ...fEtapa, fornecedor: e.target.value })} />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 mb-5">
+                <div>
+                  <label className={labelCls}>Início previsto</label>
+                  <input type="date" className={inputCls} value={fEtapa.inicio} onChange={e => setFEtapa({ ...fEtapa, inicio: e.target.value })} data-testid="input-inicio-etapa" />
+                </div>
+                <div>
+                  <label className={labelCls}>Fim previsto</label>
+                  <input type="date" className={inputCls} value={fEtapa.fim} onChange={e => setFEtapa({ ...fEtapa, fim: e.target.value })} data-testid="input-fim-etapa" />
+                </div>
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={salvarNovaEtapa} data-testid="btn-salvar-etapa">Adicionar etapa</button>
               </div>
             </div>
           </div>

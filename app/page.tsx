@@ -606,7 +606,8 @@ export default function Home() {
           </>
         )}
 
-        <div className="text-center mt-lg text-on-surface-variant/60 text-body-sm">v1.0 · Inverso Construção</div>
+        <div className="text-center mt-lg text-body-sm"><Link href="/cliente" className="text-primary hover:underline">É cliente? Acesse a Área do Cliente →</Link></div>
+        <div className="text-center mt-md text-on-surface-variant/60 text-body-sm">v1.0 · Inverso Construção</div>
       </div>
     </div>
   )

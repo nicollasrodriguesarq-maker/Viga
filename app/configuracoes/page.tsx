@@ -367,7 +367,7 @@ function UsuariosTab({ meuId }: { meuId: string }) {
   useEffect(() => { carregar() }, [])
 
   async function carregar() {
-    const rows = await get('usuarios', '?order=created_at')
+    const rows = await get('usuarios', '?select=id,email,nome,role,setor,modulos_permitidos,modulos_app,time_id,aprovado,created_at&order=created_at')
     setUsuarios(rows)
   }
 
@@ -414,7 +414,7 @@ function UsuariosTab({ meuId }: { meuId: string }) {
   async function salvarUsuario() {
     if (!editandoId && (!novo.nome || !novo.email || !novo.senha)) { setErro('Preencha nome, e-mail e senha'); return }
     if (editandoId && !novo.nome) { setErro('Preencha o nome'); return }
-    if (novo.senha && novo.senha.length < 6) { setErro('A senha deve ter pelo menos 6 caracteres'); return }
+    if (novo.senha && novo.senha.length < 8) { setErro('A senha deve ter pelo menos 8 caracteres'); return }
     setSalvando(true); setErro('')
     try {
       const token = await obterTokenValido()
@@ -505,7 +505,7 @@ function UsuariosTab({ meuId }: { meuId: string }) {
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>{editandoId ? 'Nova Senha (deixe em branco para manter)' : 'Senha Provisória *'}</label>
-              <input className={inputCls} type="password" value={novo.senha} onChange={e => setNovo({ ...novo, senha: e.target.value })} placeholder="mínimo 6 caracteres" />
+              <input className={inputCls} type="password" value={novo.senha} onChange={e => setNovo({ ...novo, senha: e.target.value })} placeholder="mínimo 8 caracteres" />
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Setor</label>
@@ -594,7 +594,7 @@ function MeusDados({ userEmail, onEmailAtualizado }: { userEmail: string; onEmai
 
   async function salvar() {
     if (!nome || !email) { setErro('Preencha nome e e-mail'); return }
-    if (senha && senha.length < 6) { setErro('A senha deve ter pelo menos 6 caracteres'); return }
+    if (senha && senha.length < 8) { setErro('A senha deve ter pelo menos 8 caracteres'); return }
     if (!meuId) { setErro('Não foi possível identificar seu usuário. Saia e entre novamente.'); return }
     setSalvando(true); setErro(''); setSalvo(false)
     try {
@@ -635,7 +635,7 @@ function MeusDados({ userEmail, onEmailAtualizado }: { userEmail: string; onEmai
       </div>
       <div className="mb-5">
         <label className={labelCls}>Nova Senha (deixe em branco para manter)</label>
-        <input className={inputCls} type="password" value={senha} onChange={e => setSenha(e.target.value)} placeholder="mínimo 6 caracteres" />
+        <input className={inputCls} type="password" value={senha} onChange={e => setSenha(e.target.value)} placeholder="mínimo 8 caracteres" />
       </div>
       {erro && <div className="bg-error/10 border border-error/30 rounded-lg px-4 py-2 text-error text-body-sm mb-4">{erro}</div>}
       <div className="flex items-center gap-3">

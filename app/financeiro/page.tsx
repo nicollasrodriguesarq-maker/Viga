@@ -130,7 +130,7 @@ async function gerarPDFRelatorioMensal(lancamentosTodos: any[], obras: any[], me
       </td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;color:${l.tipo==='entrada'?'#6ee9e0':'#ffb4ab'};font-weight:600;white-space:nowrap">${l.tipo==='entrada'?'+':'-'}${fmt(parseFloat(l.valor||0))}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">
-        ${l.nf_url ? `<a href="${l.nf_url}" target="_blank" style="color:#6ee9e0;text-decoration:none;font-size:11px;font-weight:600">📎 Ver NF</a>` : '<span style="color:#3d4948">—</span>'}
+        ${l.nf_url ? '<span style="color:#6ee9e0;font-size:11px;font-weight:600">📎 NF anexa</span>' : '<span style="color:#3d4948">—</span>'}
       </td>
     </tr>`
   }).join('')

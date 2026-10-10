@@ -3498,7 +3498,7 @@ export default function Obras() {
                 <div><label className={labelCls}>E-mail *</label><input className={inputCls} type="email" value={fAcesso.email} onChange={e => setFAcesso({ ...fAcesso, email: e.target.value })} data-testid="input-email-acesso" /></div>
               </div>
               <div className="mb-3">
-                <label className={labelCls}>Senha * (mín. 6 caracteres)</label>
+                <label className={labelCls}>Senha * (mín. 8 caracteres)</label>
                 <div className="flex gap-2">
                   <input className={inputCls} value={fAcesso.senha} onChange={e => setFAcesso({ ...fAcesso, senha: e.target.value })} data-testid="input-senha-acesso" />
                   <button className={btnSecondaryCls + ' whitespace-nowrap'} onClick={() => setFAcesso({ ...fAcesso, senha: gerarSenhaAleatoria() })}>Gerar</button>

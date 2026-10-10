@@ -33,7 +33,7 @@ export async function POST(req: Request) {
   const nome = String(body?.nome || '').trim() || null
   if (!UUID.test(obraId)) return Response.json({ error: 'obra_id inválido' }, { status: 400 })
   if (!EMAIL.test(email)) return Response.json({ error: 'Informe um e-mail válido' }, { status: 400 })
-  if (senha.length < 6) return Response.json({ error: 'A senha deve ter pelo menos 6 caracteres' }, { status: 400 })
+  if (senha.length < 8) return Response.json({ error: 'A senha deve ter pelo menos 8 caracteres' }, { status: 400 })
 
   const obra = await sbJson<any[]>(`obras?id=eq.${obraId}&select=id`)
   if (!obra[0]) return Response.json({ error: 'Obra não encontrada' }, { status: 404 })
@@ -60,7 +60,7 @@ export async function PATCH(req: Request) {
   if (typeof body.ativo === 'boolean') dados.ativo = body.ativo
   if (body.nome !== undefined) dados.nome = String(body.nome).trim() || null
   if (body.senha !== undefined) {
-    if (String(body.senha).length < 6) return Response.json({ error: 'A senha deve ter pelo menos 6 caracteres' }, { status: 400 })
+    if (String(body.senha).length < 8) return Response.json({ error: 'A senha deve ter pelo menos 8 caracteres' }, { status: 400 })
     dados.senha_hash = await hashSenha(String(body.senha))
   }
   if (Object.keys(dados).length === 0) return Response.json({ error: 'Nada para atualizar' }, { status: 400 })

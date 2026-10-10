@@ -133,8 +133,12 @@ export default function Agenda() {
         const usuarioIdNaUrl = new URLSearchParams(window.location.search).get('usuario_id')
         if (usuarioIdNaUrl) setAlvoAgenda(usuarioIdNaUrl)
       }
-      const meu = await buscar('usuarios', '?id=eq.' + perm.id + '&select=feed_token')
-      setFeedToken(meu[0]?.feed_token || '')
+      // o token do feed é segredo de cada usuário: só sai pela função meu_feed_token() (a coluna não é legível pela API)
+      try {
+        const rt = await fetch(BASE + '/rpc/meu_feed_token', { method: 'POST', headers: H, body: '{}' })
+        const tk = await rt.json()
+        setFeedToken(typeof tk === 'string' ? tk : '')
+      } catch { setFeedToken('') }
     })
   }, [])
 

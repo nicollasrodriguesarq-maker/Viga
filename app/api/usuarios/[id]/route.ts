@@ -33,8 +33,8 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if ((role !== undefined || modulos_permitidos !== undefined || modulos_app !== undefined) && !souAdmin) {
     return Response.json({ error: 'Apenas administradores podem alterar papel ou módulos de acesso' }, { status: 403 })
   }
-  if (senha !== undefined && String(senha).length > 0 && String(senha).length < 6) {
-    return Response.json({ error: 'A senha deve ter pelo menos 6 caracteres' }, { status: 400 })
+  if (senha !== undefined && String(senha).length > 0 && String(senha).length < 8) {
+    return Response.json({ error: 'A senha deve ter pelo menos 8 caracteres' }, { status: 400 })
   }
 
   // Atualiza e-mail/senha no Auth via Admin API (bypassa confirmação por e-mail)

@@ -34,8 +34,8 @@ export async function POST(req: Request) {
   if (!email || !senha || !nome) {
     return Response.json({ error: 'Preencha e-mail, senha e nome' }, { status: 400 })
   }
-  if (String(senha).length < 6) {
-    return Response.json({ error: 'A senha deve ter pelo menos 6 caracteres' }, { status: 400 })
+  if (String(senha).length < 8) {
+    return Response.json({ error: 'A senha deve ter pelo menos 8 caracteres' }, { status: 400 })
   }
   const roleFinal = role === 'admin' ? 'admin' : role === 'gerente_time' ? 'gerente_time' : 'usuario'
   const modulosFinal = Array.isArray(modulos_permitidos)
@@ -80,6 +80,7 @@ export async function POST(req: Request) {
       setor: setor || null,
       modulos_permitidos: modulosFinal,
       modulos_app: modulosAppFinal,
+      aprovado: true,
     }),
   })
 

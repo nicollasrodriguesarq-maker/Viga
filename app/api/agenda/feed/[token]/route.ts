@@ -1,10 +1,14 @@
-import { SUPABASE_URL, ANON_KEY } from '../../../usuarios/_shared'
+import { SUPABASE_URL } from '../../../usuarios/_shared'
 
-const H = { apikey: ANON_KEY, Authorization: `Bearer ${ANON_KEY}` }
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+// O feed é público por link secreto (token), então lê com a service key no servidor — o banco não
+// aceita mais a chave pública anônima.
 async function buscar(tabela: string, q: string) {
+  const key = process.env.SUPABASE_SECRET_KEY
+  if (!key) return []
   try {
-    const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}${q}`, { headers: H })
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}${q}`, { headers: { apikey: key, Authorization: `Bearer ${key}` } })
     const d = await r.json()
     return Array.isArray(d) ? d : []
   } catch { return [] }
@@ -23,6 +27,8 @@ function formatarDataHora(data: string, hora: string | null) {
 
 export async function GET(req: Request, { params }: { params: Promise<{ token: string }> }) {
   const { token } = await params
+  // valida o formato antes de montar a consulta (evita injeção de filtros no PostgREST)
+  if (!UUID.test(token)) return new Response('Feed não encontrado.', { status: 404 })
 
   const usuarios = await buscar('usuarios', `?feed_token=eq.${token}&select=id,role,time_id`)
   const dono = usuarios[0]

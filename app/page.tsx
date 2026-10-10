@@ -24,14 +24,6 @@ async function loginAPI(email: string, senha: string) {
   return r.json()
 }
 
-async function signupAPI(email: string, senha: string) {
-  const r = await fetch(`${SUPABASE_URL}/auth/v1/signup`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY },
-    body: JSON.stringify({ email, password: senha })
-  })
-  return r.json()
-}
-
 const MODULOS = [
   { icon: '🏗️', nome: 'Obras & Projetos', desc: 'Hub central de obras', href: '/obras', ativo: true },
   { icon: '💰', nome: 'Financeiro', desc: 'Empresa e obras', href: '/financeiro', ativo: true },
@@ -63,9 +55,6 @@ export default function Home() {
   const [logado, setLogado] = useState(false)
   const [userEmail, setUserEmail] = useState('')
   const [checando, setChecando] = useState(true)
-  const [modoAuth, setModoAuth] = useState<'login' | 'cadastro'>('login')
-  const [confirmarSenha, setConfirmarSenha] = useState('')
-  const [cadastroSucesso, setCadastroSucesso] = useState(false)
 
   // Dashboard data
   const [souAdmin, setSouAdmin] = useState(false)
@@ -180,6 +169,14 @@ export default function Home() {
       localStorage.setItem('viga_token', data.access_token)
       localStorage.setItem('viga_refresh_token', data.refresh_token || '')
       localStorage.setItem('viga_email', email.trim())
+      // Só entra quem foi aprovado por um administrador (o banco recusa o resto).
+      const aprovado = await get('usuarios', '?id=eq.' + (data.user?.id || '') + '&aprovado=eq.true&select=id')
+      if (aprovado.length === 0) {
+        localStorage.removeItem('viga_token'); localStorage.removeItem('viga_refresh_token'); localStorage.removeItem('viga_email')
+        setErro('Seu acesso ainda não foi liberado. Peça a um administrador do VIGA para aprovar seu usuário.')
+        setLoading(false)
+        return
+      }
       if (ehAppInstalado()) { window.location.href = '/m'; setLoading(false); return }
       setUserEmail(email.trim())
       setLogado(true)
@@ -187,33 +184,6 @@ export default function Home() {
       setErro('E-mail ou senha incorretos')
     }
     setLoading(false)
-  }
-
-  async function cadastrar() {
-    if (!email || !senha) { setErro('Preencha e-mail e senha'); return }
-    if (senha.length < 6) { setErro('A senha deve ter pelo menos 6 caracteres'); return }
-    if (senha !== confirmarSenha) { setErro('As senhas não coincidem'); return }
-    setLoading(true); setErro('')
-    const data = await signupAPI(email.trim(), senha)
-    if (data.id || data.user) {
-      if (data.access_token) {
-        localStorage.setItem('viga_token', data.access_token)
-        localStorage.setItem('viga_refresh_token', data.refresh_token || '')
-        localStorage.setItem('viga_email', email.trim())
-        if (ehAppInstalado()) { window.location.href = '/m'; setLoading(false); return }
-        setUserEmail(email.trim())
-        setLogado(true)
-      } else {
-        setCadastroSucesso(true)
-      }
-    } else {
-      setErro(data.msg || data.error_description || data.message || 'Não foi possível criar a conta')
-    }
-    setLoading(false)
-  }
-
-  function trocarModo(novo: 'login' | 'cadastro') {
-    setModoAuth(novo); setErro(''); setCadastroSucesso(false); setSenha(''); setConfirmarSenha('')
   }
 
   function sair() {
@@ -527,8 +497,8 @@ export default function Home() {
     )
   }
 
-  // LOGIN / CADASTRO
-  const acaoPrincipal = modoAuth === 'login' ? entrar : cadastrar
+  // LOGIN (não existe mais cadastro público: usuários são criados por um administrador)
+  const acaoPrincipal = entrar
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center p-md">
@@ -539,34 +509,6 @@ export default function Home() {
           <div className="text-on-surface-variant/60 text-body-sm mt-1">Inverso Construção</div>
         </div>
 
-        <div className="flex gap-1 p-1 bg-surface-container-low rounded-xl mb-lg">
-          <button
-            onClick={() => trocarModo('login')}
-            className={`flex-1 rounded-lg py-2 text-body-sm font-bold transition-all ${modoAuth === 'login' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
-          >
-            Entrar
-          </button>
-          <button
-            onClick={() => trocarModo('cadastro')}
-            className={`flex-1 rounded-lg py-2 text-body-sm font-bold transition-all ${modoAuth === 'cadastro' ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:text-on-surface'}`}
-          >
-            Criar Conta
-          </button>
-        </div>
-
-        {cadastroSucesso ? (
-          <div className="text-center py-lg">
-            <div className="text-4xl mb-3">📧</div>
-            <div className="text-on-surface font-semibold mb-2">Conta criada!</div>
-            <div className="text-on-surface-variant text-body-sm mb-lg">Verifique seu e-mail para confirmar o cadastro antes de entrar.</div>
-            <button
-              onClick={() => trocarModo('login')}
-              className="w-full rounded-lg py-3 font-bold text-body-lg bg-primary text-on-primary hover:opacity-90 transition-all"
-            >
-              Voltar para Entrar
-            </button>
-          </div>
-        ) : (
           <>
             <div className="mb-md">
               <label className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-widest block mb-2">E-mail</label>
@@ -576,7 +518,7 @@ export default function Home() {
                 className="w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-4 py-3 text-body-md outline-none focus:border-primary transition-all"
               />
             </div>
-            <div className={modoAuth === 'cadastro' ? 'mb-md' : 'mb-lg'}>
+            <div className="mb-lg">
               <label className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-widest block mb-2">Senha</label>
               <input
                 type="password" value={senha} onChange={e => setSenha(e.target.value)} placeholder="••••••••"
@@ -584,16 +526,6 @@ export default function Home() {
                 className="w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-4 py-3 text-body-md outline-none focus:border-primary transition-all"
               />
             </div>
-            {modoAuth === 'cadastro' && (
-              <div className="mb-lg">
-                <label className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-widest block mb-2">Confirmar Senha</label>
-                <input
-                  type="password" value={confirmarSenha} onChange={e => setConfirmarSenha(e.target.value)} placeholder="••••••••"
-                  onKeyDown={e => e.key === 'Enter' && acaoPrincipal()}
-                  className="w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-4 py-3 text-body-md outline-none focus:border-primary transition-all"
-                />
-              </div>
-            )}
             {erro && (
               <div className="bg-error/10 border border-error/30 rounded-lg px-4 py-2 text-error text-body-sm mb-md">{erro}</div>
             )}
@@ -601,10 +533,9 @@ export default function Home() {
               onClick={acaoPrincipal} disabled={loading}
               className={`w-full rounded-lg py-3 font-bold text-body-lg transition-all ${loading ? 'bg-surface-variant text-on-surface-variant cursor-not-allowed' : 'bg-primary text-on-primary hover:opacity-90 cursor-pointer'}`}
             >
-              {loading ? (modoAuth === 'login' ? 'Entrando...' : 'Criando conta...') : (modoAuth === 'login' ? 'Entrar no VIGA' : 'Criar Conta')}
+              {loading ? 'Entrando...' : 'Entrar no VIGA'}
             </button>
           </>
-        )}
 
         <div className="text-center mt-lg text-body-sm"><Link href="/cliente" className="text-primary hover:underline">É cliente? Acesse a Área do Cliente →</Link></div>
         <div className="text-center mt-md text-on-surface-variant/60 text-body-sm">v1.0 · Inverso Construção</div>

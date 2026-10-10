@@ -18,7 +18,7 @@ export async function getUsuarioRole(
   serviceKey: string,
   id: string
 ): Promise<{ ok: true; role: string } | { ok: false; error: string; status: number }> {
-  const roleRes = await fetch(`${SUPABASE_URL}/rest/v1/usuarios?id=eq.${id}&select=role`, {
+  const roleRes = await fetch(`${SUPABASE_URL}/rest/v1/usuarios?id=eq.${id}&select=role,aprovado`, {
     headers: { apikey: serviceKey, Authorization: `Bearer ${serviceKey}` },
   })
   if (!roleRes.ok) {
@@ -32,6 +32,9 @@ export async function getUsuarioRole(
       error: `Seu usuário (id ${id}) não tem perfil na tabela "usuarios". Rode o SQL de bootstrap novamente.`,
       status: 403,
     }
+  }
+  if (!rows[0]?.aprovado) {
+    return { ok: false, error: 'Seu usuário ainda não foi aprovado por um administrador.', status: 403 }
   }
   return { ok: true, role: rows[0]?.role }
 }

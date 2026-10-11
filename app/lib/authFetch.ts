@@ -11,7 +11,7 @@
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const BUCKETS_PRIVADOS = ['notas-fiscais', 'obra-funcionarios-arquivos', 'levantamento-arquivos']
 
-declare global { interface Window { __vigaAuthFetch?: boolean } }
+declare global { interface Window { __vigaAuthFetch?: boolean; __vigaTokenValido?: () => Promise<string | null> } }
 
 function lerExp(token: string): number | null {
   const partes = token.split('.')
@@ -64,6 +64,8 @@ export function instalarAuthFetch() {
     if (!novo) limparSessaoELogin()
     return novo
   }
+
+  window.__vigaTokenValido = tokenValido
 
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
@@ -120,3 +122,11 @@ export async function urlAssinada(bucket: string, caminho: string, segundos = 30
 
 // Chave pública (anon) — por desenho ela é pública; o que protege os dados é o RLS do banco.
 const ANON_PUBLICA = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
+
+// Token do usuário garantidamente válido (renova se estiver perto de vencer). Use nas chamadas às
+// rotas /api/* do próprio app que exigem login — sessões longas abertas expiram o token em 1h.
+export async function obterTokenValido(): Promise<string> {
+  if (typeof window === "undefined") return ""
+  const t = window.__vigaTokenValido ? await window.__vigaTokenValido() : localStorage.getItem("viga_token")
+  return t || ""
+}

@@ -3,6 +3,7 @@ import { useState, useEffect, Fragment } from 'react'
 import Link from 'next/link'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
+import { obterTokenValido } from '../lib/authFetch'
 import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma, type ModoCronograma } from '../lib/cronograma'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -284,8 +285,9 @@ export default function Obras() {
   const [etapaHistAberta, setEtapaHistAberta] = useState<string | null>(null)
   const [acessosCliente, setAcessosCliente] = useState<any[]>([])
   const [carregandoAcessos, setCarregandoAcessos] = useState(false)
-  const [fAcesso, setFAcesso] = useState({ nome: '', email: '', senha: '' })
-  const [acessoCriado, setAcessoCriado] = useState<{ email: string; senha: string } | null>(null)
+  const [fAcessos, setFAcessos] = useState<{ nome: string; email: string; senha: string }[]>([{ nome: '', email: '', senha: '' }])
+  const [acessosCriados, setAcessosCriados] = useState<{ email: string; senha: string }[]>([])
+  const [salvandoAcessos, setSalvandoAcessos] = useState(false)
   const [redefinindoAcesso, setRedefinindoAcesso] = useState<{ id: string; senha: string } | null>(null)
   const [msgAcesso, setMsgAcesso] = useState('')
   const [medicoes, setMedicoes] = useState<any[]>([])
@@ -1743,13 +1745,15 @@ export default function Obras() {
   // ── Campo Cliente: login do cliente no portal (rotas de servidor /api/cliente/acessos) ──
   async function apiAcessosCliente(metodo: 'GET' | 'POST' | 'PATCH' | 'DELETE', opts: { query?: string; body?: any } = {}) {
     try {
+      const token = await obterTokenValido()
+      if (!token) return { ok: false as const, erro: 'Sua sessão expirou. Saia e entre novamente no VIGA.' }
       const r = await fetch('/api/cliente/acessos' + (opts.query || ''), {
         method: metodo,
-        headers: { Authorization: 'Bearer ' + (localStorage.getItem('viga_token') || ''), ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
+        headers: { Authorization: 'Bearer ' + token, ...(opts.body ? { 'Content-Type': 'application/json' } : {}) },
         body: opts.body ? JSON.stringify(opts.body) : undefined,
       })
       const j = await r.json().catch(() => ({}))
-      if (!r.ok) return { ok: false as const, erro: j.error || `Erro ${r.status}` }
+      if (!r.ok) return { ok: false as const, erro: j.error || `Não foi possível concluir (erro ${r.status}). Tente novamente.` }
       return { ok: true as const, dados: j }
     } catch { return { ok: false as const, erro: 'Falha de conexão com o servidor' } }
   }
@@ -1764,8 +1768,8 @@ export default function Obras() {
 
   function abrirCampoCliente() {
     if (!detalhe) return
-    setFAcesso({ nome: detalhe.cliente || '', email: '', senha: '' })
-    setAcessoCriado(null); setRedefinindoAcesso(null); setMsgAcesso('')
+    setFAcessos([{ nome: detalhe.cliente || '', email: '', senha: '' }])
+    setAcessosCriados([]); setRedefinindoAcesso(null); setMsgAcesso('')
     setJanela('campo_cliente')
     carregarAcessosCliente(detalhe.id)
   }
@@ -1777,16 +1781,47 @@ export default function Obras() {
     return Array.from(arr, n => letras[n % letras.length]).join('')
   }
 
-  async function criarAcessoCliente() {
-    if (!detalhe) return
-    const email = fAcesso.email.trim().toLowerCase()
-    if (!email || !fAcesso.senha) return setMsgAcesso('Preencha e-mail e senha do cliente')
-    const r = await apiAcessosCliente('POST', { body: { obra_id: detalhe.id, nome: fAcesso.nome, email, senha: fAcesso.senha } })
-    if (!r.ok) return setMsgAcesso(r.erro)
-    setAcessoCriado({ email, senha: fAcesso.senha })
-    setFAcesso({ nome: detalhe.cliente || '', email: '', senha: '' })
-    setMsgAcesso('')
-    carregarAcessosCliente(detalhe.id)
+  function atualizarLinhaAcesso(i: number, campos: Partial<{ nome: string; email: string; senha: string }>) {
+    setFAcessos(linhas => linhas.map((l, idx) => idx === i ? { ...l, ...campos } : l))
+  }
+  function adicionarLinhaAcesso() {
+    setFAcessos(linhas => [...linhas, { nome: '', email: '', senha: '' }])
+  }
+  function removerLinhaAcesso(i: number) {
+    setFAcessos(linhas => linhas.length > 1 ? linhas.filter((_, idx) => idx !== i) : linhas)
+  }
+
+  // Cria todos os acessos preenchidos de uma vez; os que falham ficam no formulário com o motivo.
+  async function criarAcessosCliente() {
+    if (!detalhe || salvandoAcessos) return
+    const linhas = fAcessos.map(l => ({ nome: l.nome.trim(), email: l.email.trim().toLowerCase(), senha: l.senha }))
+    const validas = linhas.filter(l => l.email || l.senha)
+    if (validas.length === 0) return setMsgAcesso('Preencha e-mail e senha do cliente.')
+    const emails = new Set<string>()
+    for (const l of validas) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(l.email)) return setMsgAcesso('E-mail inválido: "' + (l.email || '(vazio)') + '". Confira o endereço.')
+      if (l.senha.length < 8) return setMsgAcesso('A senha de ' + l.email + ' precisa ter pelo menos 8 caracteres (use o botão Gerar para criar uma segura).')
+      if (emails.has(l.email)) return setMsgAcesso('O e-mail ' + l.email + ' aparece mais de uma vez na lista.')
+      emails.add(l.email)
+    }
+    setSalvandoAcessos(true); setMsgAcesso('')
+    const criados: { email: string; senha: string }[] = []
+    const falhas: { linha: { nome: string; email: string; senha: string }; erro: string }[] = []
+    for (const l of validas) {
+      const r = await apiAcessosCliente('POST', { body: { obra_id: detalhe.id, nome: l.nome, email: l.email, senha: l.senha } })
+      if (r.ok) criados.push({ email: l.email, senha: l.senha })
+      else falhas.push({ linha: l, erro: r.erro })
+    }
+    setSalvandoAcessos(false)
+    if (criados.length) setAcessosCriados(anteriores => [...anteriores, ...criados])
+    // recarrega a lista ANTES de mostrar o erro (a recarga limpa a mensagem)
+    if (criados.length) await carregarAcessosCliente(detalhe.id)
+    if (falhas.length) {
+      setFAcessos(falhas.map(f => f.linha))
+      setMsgAcesso(falhas.map(f => f.linha.email + ': ' + f.erro).join(' | '))
+    } else {
+      setFAcessos([{ nome: detalhe.cliente || '', email: '', senha: '' }])
+    }
   }
 
   async function alternarAcessoCliente(a: any) {
@@ -1800,7 +1835,7 @@ export default function Obras() {
     const r = await apiAcessosCliente('PATCH', { body: { id: redefinindoAcesso.id, senha: redefinindoAcesso.senha } })
     if (!r.ok) return setMsgAcesso(r.erro)
     const a = acessosCliente.find(x => x.id === redefinindoAcesso.id)
-    setAcessoCriado({ email: a?.email || '', senha: redefinindoAcesso.senha })
+    setAcessosCriados([{ email: a?.email || '', senha: redefinindoAcesso.senha }])
     setRedefinindoAcesso(null); setMsgAcesso('')
   }
 
@@ -3453,12 +3488,13 @@ export default function Obras() {
                 <button className="text-[11px] text-primary underline" onClick={() => { navigator.clipboard?.writeText(window.location.origin + '/cliente'); setMsgAcesso('Link copiado!') }}>copiar link</button>
               </div>
 
-              {acessoCriado && (
+              {acessosCriados.length > 0 && (
                 <div className="bg-primary/10 border border-primary/30 rounded-lg p-3 mb-4 text-[13px]" data-testid="acesso-criado">
-                  <div className="font-bold text-primary mb-1">Acesso pronto — anote agora, a senha não fica visível depois:</div>
-                  <div>E-mail: <b>{acessoCriado.email}</b></div>
-                  <div>Senha: <b className="font-mono">{acessoCriado.senha}</b></div>
-                  <button className="text-[11px] text-primary underline mt-1" onClick={() => navigator.clipboard?.writeText(`Portal: ${window.location.origin}/cliente\nE-mail: ${acessoCriado.email}\nSenha: ${acessoCriado.senha}`)}>copiar dados de acesso</button>
+                  <div className="font-bold text-primary mb-1">{acessosCriados.length > 1 ? acessosCriados.length + ' acessos prontos' : 'Acesso pronto'} — anote agora, a senha não fica visível depois:</div>
+                  {acessosCriados.map((a, i) => (
+                    <div key={i} className="mb-1.5">E-mail: <b>{a.email}</b> · Senha: <b className="font-mono">{a.senha}</b></div>
+                  ))}
+                  <button className="text-[11px] text-primary underline mt-1" onClick={() => navigator.clipboard?.writeText(acessosCriados.map(a => `Portal: ${window.location.origin}/cliente\nE-mail: ${a.email}\nSenha: ${a.senha}`).join('\n\n'))}>copiar dados de acesso</button>
                 </div>
               )}
 
@@ -3492,22 +3528,31 @@ export default function Obras() {
                 </div>
               )}
 
-              <div className="text-[11px] font-bold text-on-surface-variant uppercase mb-2 mt-2">Novo acesso</div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
-                <div><label className={labelCls}>Nome</label><input className={inputCls} value={fAcesso.nome} onChange={e => setFAcesso({ ...fAcesso, nome: e.target.value })} data-testid="input-nome-acesso" /></div>
-                <div><label className={labelCls}>E-mail *</label><input className={inputCls} type="email" value={fAcesso.email} onChange={e => setFAcesso({ ...fAcesso, email: e.target.value })} data-testid="input-email-acesso" /></div>
+              <div className="text-[11px] font-bold text-on-surface-variant uppercase mb-2 mt-2">Novos acessos</div>
+              <div className="flex flex-col gap-3 mb-3">
+                {fAcessos.map((l, i) => (
+                  <div key={i} className="bg-surface-container-low border border-outline-variant rounded-lg p-3" data-testid="linha-novo-acesso">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="text-[11px] text-on-surface-variant font-semibold">Acesso {i + 1}</div>
+                      {fAcessos.length > 1 && <button className="text-[11px] text-error underline" onClick={() => removerLinhaAcesso(i)}>remover</button>}
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                      <div><label className={labelCls}>Nome</label><input className={inputCls} value={l.nome} onChange={e => atualizarLinhaAcesso(i, { nome: e.target.value })} data-testid="input-nome-acesso" /></div>
+                      <div><label className={labelCls}>E-mail *</label><input className={inputCls} type="email" value={l.email} onChange={e => atualizarLinhaAcesso(i, { email: e.target.value })} data-testid="input-email-acesso" /></div>
+                    </div>
+                    <label className={labelCls}>Senha * (mín. 8 caracteres)</label>
+                    <div className="flex gap-2">
+                      <input className={inputCls} value={l.senha} onChange={e => atualizarLinhaAcesso(i, { senha: e.target.value })} data-testid="input-senha-acesso" />
+                      <button className={btnSecondaryCls + ' whitespace-nowrap'} onClick={() => atualizarLinhaAcesso(i, { senha: gerarSenhaAleatoria() })}>Gerar</button>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div className="mb-3">
-                <label className={labelCls}>Senha * (mín. 8 caracteres)</label>
-                <div className="flex gap-2">
-                  <input className={inputCls} value={fAcesso.senha} onChange={e => setFAcesso({ ...fAcesso, senha: e.target.value })} data-testid="input-senha-acesso" />
-                  <button className={btnSecondaryCls + ' whitespace-nowrap'} onClick={() => setFAcesso({ ...fAcesso, senha: gerarSenhaAleatoria() })}>Gerar</button>
-                </div>
-              </div>
-              {msgAcesso && <div className="text-sm text-tertiary mb-3" data-testid="msg-acesso">{msgAcesso}</div>}
+              <button className="text-sm text-primary font-semibold mb-3" onClick={adicionarLinhaAcesso} data-testid="btn-adicionar-acesso">＋ Adicionar outro acesso</button>
+              {msgAcesso && <div className={'text-sm mb-3 rounded-lg px-3 py-2 ' + (/copiado/i.test(msgAcesso) ? 'text-primary bg-primary/10' : 'text-error bg-error/10 border border-error/30 font-semibold')} data-testid="msg-acesso">{msgAcesso}</div>}
               <div className="flex gap-2 justify-end">
                 <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Fechar</button>
-                <button className={btnPrimaryCls} onClick={criarAcessoCliente} data-testid="btn-criar-acesso">Criar acesso</button>
+                <button className={btnPrimaryCls + (salvandoAcessos ? ' opacity-60' : '')} disabled={salvandoAcessos} onClick={criarAcessosCliente} data-testid="btn-criar-acesso">{salvandoAcessos ? 'Criando...' : fAcessos.length > 1 ? 'Criar ' + fAcessos.length + ' acessos' : 'Criar acesso'}</button>
               </div>
             </div>
           </div>

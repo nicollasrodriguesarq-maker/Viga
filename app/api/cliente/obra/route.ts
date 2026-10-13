@@ -110,12 +110,11 @@ export async function GET(req: Request) {
     const itens = meds.map(m => {
       const r = calc.get(m.id)!
       const lanc = m.lancamento_id ? lancPorId.get(m.lancamento_id) : null
-      const pagamento = !lanc ? 'a_programar' : lanc.status === 'pago' ? 'pago' : 'programado'
-      // Medição já lançada no financeiro: vale o valor realmente lançado (pago/programado), não o
-      // recálculo de hoje — assim o cliente vê exatamente o dinheiro que saiu.
-      const valorLancado = lanc ? num(lanc.valor) : null
-      const liquidoExibido = valorLancado ?? r.liquido
-      const abatimentoExibido = r.adiantamento ? 0 : (lanc ? Math.max(r.bruto - r.retencao - (valorLancado as number), 0) : r.desconto)
+      // Medição totalmente abatida do adiantamento: não há nada a pagar ao fornecedor.
+      const abatidaTotal = !r.adiantamento && r.bruto > 0 && r.liquido <= 0.005
+      const pagamento = abatidaTotal ? 'abatido' : !lanc ? 'a_programar' : lanc.status === 'pago' ? 'pago' : 'programado'
+      const liquidoExibido = r.liquido
+      const abatimentoExibido = r.desconto
       return {
         id: m.id, numero: m.numero, data: m.data,
         rotulo: r.adiantamento ? 'Adiantamento' : `Medição ${++contador}`,

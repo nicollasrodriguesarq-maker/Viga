@@ -332,7 +332,7 @@ export default function PortalCliente() {
                           <td className="px-3 py-2.5 text-on-surface-variant whitespace-nowrap">{m.adiantamento ? '—' : moeda(m.retencao)}</td>
                           <td className="px-3 py-2.5 text-on-surface-variant whitespace-nowrap">{m.adiantamento ? '—' : moeda(m.desconto)}</td>
                           <td className="px-3 py-2.5 font-bold whitespace-nowrap">{moeda(m.liquido)}</td>
-                          <td className="px-3 py-2.5 text-xs whitespace-nowrap">{m.pagamento === 'pago' ? <span className="text-primary-container font-bold">✅ Pago {m.data_pagamento ? dataBR(m.data_pagamento) : ''}</span> : m.pagamento === 'programado' ? <span className="text-tertiary">📅 Programado {m.data_pagamento ? dataBR(m.data_pagamento) : ''}</span> : <span className="text-on-surface-variant">A programar</span>}</td>
+                          <td className="px-3 py-2.5 text-xs whitespace-nowrap">{m.pagamento === 'abatido' ? <span className="text-primary-container font-bold">✅ Abatido do adiantamento</span> : m.pagamento === 'pago' ? <span className="text-primary-container font-bold">✅ Pago {m.data_pagamento ? dataBR(m.data_pagamento) : ''}</span> : m.pagamento === 'programado' ? <span className="text-tertiary">📅 Programado {m.data_pagamento ? dataBR(m.data_pagamento) : ''}</span> : <span className="text-on-surface-variant">A programar</span>}</td>
                         </tr>))}</tbody></table></div>
                   </div>))}
               </div>
@@ -363,7 +363,7 @@ export default function PortalCliente() {
                 <div className="overflow-x-auto"><table className="w-full text-sm border-collapse">
                   <thead><tr className="border-b border-outline-variant">{['Data', 'Descrição', 'Valor', 'Situação'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high">{h}</th>)}</tr></thead>
                   <tbody>{lista.map((p: any) => (
-                    <tr key={p.id} className="border-b border-outline-variant"><td className="px-3 py-2.5 text-xs whitespace-nowrap">{p.data ? dataBR(p.data) : '—'}</td><td className="px-3 py-2.5">{p.descricao || '—'}</td><td className="px-3 py-2.5 font-semibold whitespace-nowrap">{moeda(p.valor)}</td><td className={`px-3 py-2.5 text-xs font-bold ${p.status === 'pago' ? 'text-primary-container' : 'text-tertiary'}`}>{p.status === 'pago' ? '✅ Pago' : p.status === 'programado' ? '📅 Programado' : p.status === 'a_programar' ? 'A programar' : '⏳ Pendente'}</td></tr>))}</tbody></table></div>
+                    <tr key={p.id} className="border-b border-outline-variant"><td className="px-3 py-2.5 text-xs whitespace-nowrap">{p.data ? dataBR(p.data) : '—'}</td><td className="px-3 py-2.5">{p.descricao || '—'}</td><td className="px-3 py-2.5 font-semibold whitespace-nowrap">{moeda(p.valor)}</td><td className={`px-3 py-2.5 text-xs font-bold ${p.status === 'pago' || p.status === 'abatido' ? 'text-primary-container' : 'text-tertiary'}`}>{p.status === 'pago' ? '✅ Pago' : p.status === 'abatido' ? '✅ Abatido do adiantamento' : p.status === 'programado' ? '📅 Programado' : p.status === 'a_programar' ? 'A programar' : '⏳ Pendente'}</td></tr>))}</tbody></table></div>
               )
               return (
               <div className="flex flex-col gap-4">

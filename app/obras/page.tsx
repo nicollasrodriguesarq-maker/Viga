@@ -4,6 +4,7 @@ import Link from 'next/link'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import { obterTokenValido } from '../lib/authFetch'
+import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../lib/medicoesCalc'
 import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma, type ModoCronograma } from '../lib/cronograma'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -295,6 +296,7 @@ export default function Obras() {
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
   const [descAdiantPctInput, setDescAdiantPctInput] = useState('')
+  const [modoAbatInput, setModoAbatInput] = useState<ModoAbatimento>('compensacao')
   const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' })
   const [grupoMedicaoAberto, setGrupoMedicaoAberto] = useState<string | null>(null)
   const [mapaGeralAberto, setMapaGeralAberto] = useState<string | null>(null)
@@ -562,18 +564,16 @@ export default function Obras() {
       const acumAtual = mi.valor_base * mi.percentual_acumulado
       totalPeriodo += acumAtual - acumAnterior
     })
-    // Desconto proporcional do(s) adiantamento(s) do mesmo grupo (fornecedor): a % que esta
-    // medição representa do total do serviço é aplicada sobre o total adiantado, abatendo o
-    // valor líquido pago aqui — pedido do usuário, pra que a soma dos descontos de todas as
-    // medições feche em 100% do adiantamento quando o serviço atingir 100% de execução.
-    // O % de desconto pode ser digitado em cada medição (desconto_adiantamento_pct, fração 0–1):
-    // vazio = automático (a % que esta medição representa do total do serviço); 100% = abate
-    // todo o adiantamento de uma vez. Nunca desconta mais do que o saldo ainda não abatido.
-    const totalAdiantamento = totalAdiantamentoGrupoMed(med)
-    const pctAuto = totalBaseGrupo > 0 ? Math.max(totalPeriodo / totalBaseGrupo, 0) : 0
-    const pctDesconto = med.desconto_adiantamento_pct != null ? parseFloat(med.desconto_adiantamento_pct) : pctAuto
-    const saldoAdiantamento = Math.max(totalAdiantamento - descontoJaAbatido(med), 0)
-    const descontoAdiantamento = totalAdiantamento > 0 ? Math.min(Math.max(pctDesconto, 0) * totalAdiantamento, saldoAdiantamento) : 0
+    // Abatimento do adiantamento: por padrão a medição COMPENSA o saldo de adiantamento disponível até a
+    // data dela (o fornecedor só recebe o que sobrar); o modo proporcional abate o % de avanço sobre o
+    // total adiantado. O % digitado (desconto_adiantamento_pct) ajusta ambos — ver app/lib/medicoesCalc.ts.
+    const abat = calcularAbatimento({
+      modo: modoAbatimentoDe(med),
+      pctDigitado: med.desconto_adiantamento_pct != null ? parseFloat(med.desconto_adiantamento_pct) : null,
+      bruto: totalPeriodo, retencaoPct: retPct, totalBaseGrupo,
+      adiantadoTotal: totalAdiantamentoGrupoMed(med), adiantadoAteData: adiantadoAteDataGrupo(med), jaAbatido: descontoJaAbatido(med),
+    })
+    const descontoAdiantamento = abat.desconto
     const totalLiquido = totalPeriodo - totalPeriodo * retPct - descontoAdiantamento
     return { totalPeriodo, totalLiquido, descontoAdiantamento }
   }
@@ -582,6 +582,14 @@ export default function Obras() {
   function totalAdiantamentoGrupoMed(med: any) {
     return medicoes
       .filter(m => m.obra_id === med.obra_id && m.tipo === med.tipo && (med.tipo !== 'fornecedor' || m.fornecedor === med.fornecedor) && m.valor_adiantamento != null)
+      .reduce((a, m) => a + parseFloat(m.valor_adiantamento || 0), 0)
+  }
+
+  // Soma dos adiantamentos do mesmo grupo feitos até a data da medição (o adiantamento de uma data
+  // posterior não pode ser abatido por uma medição anterior a ele).
+  function adiantadoAteDataGrupo(med: any) {
+    return medicoes
+      .filter(m => m.obra_id === med.obra_id && m.tipo === med.tipo && (med.tipo !== 'fornecedor' || m.fornecedor === med.fornecedor) && m.valor_adiantamento != null && m.data <= med.data)
       .reduce((a, m) => a + parseFloat(m.valor_adiantamento || 0), 0)
   }
 
@@ -640,6 +648,7 @@ export default function Obras() {
     })
     setPreenchimento(preench)
     setDescAdiantPctInput(medicao.desconto_adiantamento_pct != null ? String(Math.round(parseFloat(medicao.desconto_adiantamento_pct) * 10000) / 100) : '')
+    setModoAbatInput(modoAbatimentoDe(medicao))
     setMedicaoAtiva(medicao)
   }
 
@@ -691,7 +700,7 @@ export default function Obras() {
       else await criar('medicao_itens', dados)
     }
     const pctDigitado = descAdiantPctInput.trim() === '' ? null : Math.min(Math.max(parseFloat(descAdiantPctInput.replace(',', '.')) || 0, 0), 100) / 100
-    const okPct = await editar('medicoes', medicaoAtiva.id, { desconto_adiantamento_pct: pctDigitado })
+    const okPct = await editar('medicoes', medicaoAtiva.id, { desconto_adiantamento_pct: pctDigitado, modo_abatimento: modoAbatInput })
     if (!okPct) alert('Os itens foram salvos, mas não foi possível salvar o % de desconto do adiantamento. Tente novamente.')
     const [medIt, med] = await Promise.all([buscar('medicao_itens', '?order=created_at'), buscar('medicoes', '?order=data.desc')])
     setMedItens(medIt)
@@ -734,6 +743,29 @@ export default function Obras() {
   // necessário porque, numa obra de Gerenciamento, esse lançamento fica de fora das telas do
   // Financeiro (não é dinheiro da Inverso), então o único lugar pra confirmar o pagamento e
   // disparar o abatimento no painel de pago × falta pagar é aqui mesmo.
+  // Alinha o lançamento financeiro de uma medição ao valor a pagar calculado hoje (ex.: medição que
+  // foi lançada antes do abatimento do adiantamento). Valor zero remove o lançamento.
+  async function ajustarLancamentoMedicao(medicao: any, valor: number) {
+    const lanc = lancs.find(l => l.id === medicao.lancamento_id)
+    if (!lanc) return
+    const zerado = valor <= 0.005
+    const msg = zerado
+      ? `O valor a pagar desta medição é R$ 0,00 (tudo abatido do adiantamento), mas existe um lançamento de ${moeda(parseFloat(lanc.valor || 0))} (${lanc.status === 'pago' ? 'pago' : 'pendente'}). Remover esse lançamento?`
+      : `Alterar o lançamento de ${moeda(parseFloat(lanc.valor || 0))} para ${moeda(valor)}?`
+    if (!confirm(msg)) return
+    if (zerado) {
+      const okLink = await editar('medicoes', medicao.id, { lancamento_id: null, data_pagamento_programada: null })
+      if (!okLink) return alert('Não foi possível desvincular o lançamento. Tente novamente.')
+      await remover('lancamentos', lanc.id)
+    } else {
+      const ok = await editar('lancamentos', lanc.id, { valor })
+      if (!ok) return alert('Não foi possível ajustar o lançamento. Tente novamente.')
+    }
+    const [med, lc] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('lancamentos', '?order=data.desc')])
+    setMedicoes(med); setLancs(lc)
+    setMedicaoAtiva(med.find((m: any) => m.id === medicao.id) || null)
+  }
+
   async function marcarMedicaoPaga(lancamentoId: string) {
     const ok = await editar('lancamentos', lancamentoId, { status: 'pago' })
     if (!ok) return alert('Não foi possível marcar como pago. Tente novamente.')
@@ -2873,13 +2905,13 @@ export default function Obras() {
                   const previstoGrupo = grupo.tipo === 'cliente' ? contrato : itensGrupo.reduce((a, s) => a + parseFloat(s.valor_previsto || 0), 0)
                   let pagoGrupo = 0, contadorMedicao = 0
                   const medsComTotais = grupo.medicoes.map(med => {
-                    const { totalLiquido } = totalsMedicao(med)
+                    const { totalPeriodo, totalLiquido, descontoAdiantamento } = totalsMedicao(med)
                     const lanc = med.lancamento_id ? lancs.find(l => l.id === med.lancamento_id) : null
                     const statusPag: 'rascunho' | 'programado' | 'pago' = !lanc ? 'rascunho' : lanc.status === 'pago' ? 'pago' : 'programado'
                     if (statusPag === 'pago') pagoGrupo += totalLiquido
                     const isAdiantamento = med.valor_adiantamento != null
                     const indice = isAdiantamento ? null : ++contadorMedicao
-                    return { med, indice, totalLiquido, statusPag, isAdiantamento }
+                    return { med, indice, totalLiquido, totalPeriodo, descontoAdiantamento: descontoAdiantamento || 0, statusPag, isAdiantamento }
                   })
                   const faltaGrupo = previstoGrupo - pagoGrupo
                   const aberto = grupoMedicaoAberto === grupo.chave
@@ -2991,15 +3023,15 @@ export default function Obras() {
                       })()}
                       {aberto && (
                         <div className="border-t border-outline-variant divide-y divide-outline-variant">
-                          {medsComTotais.map(({ med, indice, totalLiquido, statusPag, isAdiantamento }) => (
+                          {medsComTotais.map(({ med, indice, totalLiquido, totalPeriodo, descontoAdiantamento, statusPag, isAdiantamento }) => (
                             <div key={med.id} className="flex justify-between items-center px-4 py-3 flex-wrap gap-2">
                               <div>
                                 <div className="font-semibold text-sm text-on-surface">{isAdiantamento ? '💰 Adiantamento' : `Medição ${indice}`} <span className="text-on-surface-variant font-normal">· {med.numero}</span>{isAdiantamento && med.observacao && <span className="text-on-surface-variant font-normal"> — {med.observacao}</span>}</div>
-                                <div className="text-[11px] text-on-surface-variant">{dataBR(med.data)} · {moeda(totalLiquido)}{isAdiantamento ? '' : ' no período'}</div>
+                                <div className="text-[11px] text-on-surface-variant" data-testid="resumo-medicao-lista">{dataBR(med.data)} · {isAdiantamento ? moeda(totalLiquido) : <>medido {moeda(totalPeriodo)}{descontoAdiantamento > 0.005 ? <> · abatido do adiantamento {moeda(descontoAdiantamento)}</> : null} · <b className={totalLiquido > 0.005 ? 'text-on-surface' : 'text-primary-container'}>a pagar {moeda(totalLiquido)}</b></>}</div>
                               </div>
                               <div className="flex items-center gap-2">
                                 <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusPag === 'pago' ? 'bg-primary-container/10 text-primary-container border-primary-container/20' : statusPag === 'programado' ? 'bg-tertiary/10 text-tertiary border-tertiary/20' : 'bg-surface-variant text-on-surface-variant border-outline-variant'}`}>
-                                  {statusPag === 'pago' ? '✅ Pago' : statusPag === 'programado' ? '📅 Programado' : '📝 Rascunho'}
+                                  {statusPag === 'pago' ? '✅ Pago' : statusPag === 'programado' ? '📅 Programado' : (!isAdiantamento && totalLiquido <= 0.005 && totalPeriodo > 0) ? '✅ Abatido do adiantamento' : '📝 Rascunho'}
                                 </span>
                                 {statusPag === 'programado' && (
                                   <button className={btnEditSmCls} onClick={() => marcarMedicaoPaga(med.lancamento_id)} title="Confirmar que o pagamento já foi feito">✓ Pago</button>
@@ -3053,14 +3085,18 @@ export default function Obras() {
           // de totalsMedicao, mas com os valores AO VIVO desta tela, antes de salvar).
           const totalBaseGrupoAtual = itensComValores.reduce((a, l) => a + l.valorBase, 0)
           const totalAdiantamentoGrupo = (grupoAtual?.medicoes || []).filter(m => m.valor_adiantamento != null).reduce((a, m) => a + parseFloat(m.valor_adiantamento || 0), 0)
-          // % do desconto: o que foi digitado (0–100) ou, se vazio, a % que esta medição
-          // representa do total do serviço. Limitado ao saldo ainda não abatido por medições anteriores.
-          const pctAutoDesconto = totalBaseGrupoAtual > 0 ? Math.max(totalPeriodo / totalBaseGrupoAtual, 0) : 0
+          // Abatimento ao vivo (mesma regra de totalsMedicao): % digitado (0–100) ou o automático do modo escolhido.
           const pctDigitadoDesc = descAdiantPctInput.trim() === '' ? null : Math.min(Math.max(parseFloat(descAdiantPctInput.replace(',', '.')) || 0, 0), 100) / 100
-          const pctDescontoAplicado = pctDigitadoDesc ?? pctAutoDesconto
           const jaAbatidoAdiantamento = descontoJaAbatido(medicaoAtiva)
-          const saldoAdiantamentoGrupo = Math.max(totalAdiantamentoGrupo - jaAbatidoAdiantamento, 0)
-          const descontoAdiantamentoTotal = totalAdiantamentoGrupo > 0 ? Math.min(pctDescontoAplicado * totalAdiantamentoGrupo, saldoAdiantamentoGrupo) : 0
+          const adiantadoAteDataAtual = adiantadoAteDataGrupo(medicaoAtiva)
+          const abatLive = calcularAbatimento({
+            modo: modoAbatInput, pctDigitado: pctDigitadoDesc, bruto: totalPeriodo, retencaoPct: retPct,
+            totalBaseGrupo: totalBaseGrupoAtual, adiantadoTotal: totalAdiantamentoGrupo, adiantadoAteData: adiantadoAteDataAtual, jaAbatido: jaAbatidoAdiantamento,
+          })
+          const pctAutoDesconto = abatLive.pctAuto
+          const pctDescontoAplicado = abatLive.pct
+          const saldoAdiantamentoGrupo = abatLive.saldo
+          const descontoAdiantamentoTotal = abatLive.desconto
           let totalRetencao = 0, totalLiquido = 0
           const linhas = itensComValores.map(l => {
             const retencao = l.valorPeriodo * retPct
@@ -3101,13 +3137,27 @@ export default function Obras() {
                       ✅ Programado para {dataBR(medicaoAtiva.data_pagamento_programada)}{' '}
                       <button className="text-primary underline font-semibold" onClick={() => abrirProgramarPagamento(medicaoAtiva, totalLiquido)}>Alterar data</button>
                     </div>
+                  ) : totalLiquido <= 0.005 ? (
+                    <div className="text-[11px] text-primary-container font-semibold" data-testid="sem-valor-a-pagar">✅ Sem valor a pagar — abatido do adiantamento</div>
                   ) : (
-                    <button className="bg-tertiary/10 border border-tertiary/30 text-tertiary rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-tertiary/20 transition-all cursor-pointer" onClick={() => abrirProgramarPagamento(medicaoAtiva, totalLiquido)}>📅 Programar Pagamento</button>
+                    <button className="bg-tertiary/10 border border-tertiary/30 text-tertiary rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-tertiary/20 transition-all cursor-pointer" onClick={() => abrirProgramarPagamento(medicaoAtiva, totalLiquido)} data-testid="btn-programar-pagamento">📅 Programar Pagamento ({moeda(totalLiquido)})</button>
                   )}
                   <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={() => gerarPDFMedicao(medicaoAtiva, linhas, detalhe)}>🖨️ Gerar Boletim PDF</button>
                   <button className={btnSecondaryCls} onClick={() => grupoAtual && gerarPDFMedicaoCompleta(grupoAtual, detalhe, previstoGrupoAtual)} title="Histórico completo de todas as medições já lançadas para este fornecedor/cliente">🖨️ Relatório Completo</button>
                 </div>
               </div>
+              {medicaoAtiva.lancamento_id && (() => {
+                const lanc = lancs.find(l => l.id === medicaoAtiva.lancamento_id)
+                if (!lanc) return null
+                const calculado = totalsMedicao(medicaoAtiva).totalLiquido
+                if (Math.abs(parseFloat(lanc.valor || 0) - calculado) < 0.01) return null
+                return (
+                  <div className="mb-4 bg-error/10 border border-error/30 rounded-lg p-3 text-[12px] text-on-surface" data-testid="aviso-lancamento-divergente">
+                    ⚠️ O lançamento financeiro desta medição está em <b>{moeda(parseFloat(lanc.valor || 0))}</b> ({lanc.status === 'pago' ? 'pago' : 'pendente'}), mas o valor a pagar calculado é <b>{moeda(calculado)}</b>.{' '}
+                    <button className="text-primary underline font-semibold" onClick={() => ajustarLancamentoMedicao(medicaoAtiva, calculado)} data-testid="btn-ajustar-lancamento">{calculado <= 0.005 ? 'Remover lançamento' : 'Ajustar lançamento para ' + moeda(calculado)}</button>
+                  </div>
+                )
+              })()}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                 <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
                   <div className="text-[10px] text-on-surface-variant uppercase">{medicaoAtiva.tipo === 'cliente' ? 'Contrato' : 'Previsto'} (grupo)</div>
@@ -3211,9 +3261,20 @@ export default function Obras() {
               })()}
               {totalAdiantamentoGrupo > 0 && (
                 <div className="mt-4 bg-tertiary/5 border border-tertiary/30 rounded-lg p-3.5" data-testid="painel-desconto-adiantamento">
+                  <div className="text-[10px] text-tertiary font-bold uppercase mb-2">💰 Abatimento do adiantamento</div>
+                  <div className="flex flex-wrap gap-4 mb-3">
+                    <label className="flex items-start gap-2 text-[12px] cursor-pointer max-w-[340px]">
+                      <input type="radio" name="modo-abatimento" className="mt-0.5" checked={modoAbatInput === 'compensacao'} onChange={() => setModoAbatInput('compensacao')} data-testid="modo-compensacao" />
+                      <span><b className="text-on-surface">Compensar o valor da medição</b><br /><span className="text-on-surface-variant">abate do saldo de adiantamento disponível; o fornecedor recebe só o que sobrar</span></span>
+                    </label>
+                    <label className="flex items-start gap-2 text-[12px] cursor-pointer max-w-[340px]">
+                      <input type="radio" name="modo-abatimento" className="mt-0.5" checked={modoAbatInput === 'proporcional'} onChange={() => setModoAbatInput('proporcional')} data-testid="modo-proporcional" />
+                      <span><b className="text-on-surface">Proporcional ao avanço</b><br /><span className="text-on-surface-variant">abate o % de avanço da medição sobre o total adiantado</span></span>
+                    </label>
+                  </div>
                   <div className="flex flex-wrap items-end gap-4">
                     <div>
-                      <div className="text-[10px] text-tertiary font-bold uppercase mb-1">💰 Desconto sobre o adiantamento</div>
+                      <div className="text-[10px] text-on-surface-variant uppercase mb-1">{modoAbatInput === 'compensacao' ? '% do valor da medição a abater' : '% do adiantamento a abater'}</div>
                       <div className="flex items-center gap-1.5">
                         <input type="number" step="0.01" min="0" max="100" inputMode="decimal"
                           className="w-24 bg-surface-container-low border border-outline-variant rounded px-2 py-1.5 text-on-surface text-sm"
@@ -3223,12 +3284,12 @@ export default function Obras() {
                         {descAdiantPctInput.trim() !== '' && (
                           <button type="button" className="text-[11px] text-primary underline ml-1" onClick={() => setDescAdiantPctInput('')}>usar automático</button>
                         )}
-                        <button type="button" className="text-[11px] text-primary underline ml-1" onClick={() => setDescAdiantPctInput('100')}>descontar tudo (100%)</button>
+                        {modoAbatInput === 'proporcional' && <button type="button" className="text-[11px] text-primary underline ml-1" onClick={() => setDescAdiantPctInput('100')}>descontar tudo (100%)</button>}
                       </div>
                     </div>
-                    <div className="text-[11px] text-on-surface-variant leading-relaxed">
-                      <div>Adiantado no total: <b className="text-on-surface">{moeda(totalAdiantamentoGrupo)}</b> · já abatido em medições anteriores: <b className="text-on-surface">{moeda(jaAbatidoAdiantamento)}</b> · saldo: <b className="text-on-surface">{moeda(saldoAdiantamentoGrupo)}</b></div>
-                      <div>{descAdiantPctInput.trim() === '' ? <>Automático: {(pctAutoDesconto * 100).toFixed(2)}% (a % que esta medição representa do serviço)</> : <>Digitado: {(pctDescontoAplicado * 100).toFixed(2)}%</>} → desconto de <b className="text-tertiary">{moeda(descontoAdiantamentoTotal)}</b>{pctDescontoAplicado * totalAdiantamentoGrupo > saldoAdiantamentoGrupo + 0.005 ? ' (limitado ao saldo do adiantamento)' : ''}</div>
+                    <div className="text-[11px] text-on-surface-variant leading-relaxed" data-testid="resumo-abatimento">
+                      <div>Adiantado {modoAbatInput === 'compensacao' ? 'até a data desta medição' : 'no total'}: <b className="text-on-surface">{moeda(modoAbatInput === 'compensacao' ? adiantadoAteDataAtual : totalAdiantamentoGrupo)}</b> · já abatido em medições anteriores: <b className="text-on-surface">{moeda(jaAbatidoAdiantamento)}</b> · saldo disponível: <b className="text-on-surface">{moeda(saldoAdiantamentoGrupo)}</b></div>
+                      <div>{descAdiantPctInput.trim() === '' ? <>Automático: {(pctAutoDesconto * 100).toFixed(2)}%</> : <>Digitado: {(pctDescontoAplicado * 100).toFixed(2)}%</>} → abatimento de <b className="text-tertiary">{moeda(descontoAdiantamentoTotal)}</b>{abatLive.limitado ? ' (limitado ao saldo do adiantamento)' : ''} · <b className="text-primary-container" data-testid="valor-a-pagar-fornecedor">{totalLiquido > 0.005 ? 'a pagar ao fornecedor: ' + moeda(totalLiquido) : 'nada a pagar: tudo abatido do adiantamento'}</b></div>
                     </div>
                   </div>
                 </div>

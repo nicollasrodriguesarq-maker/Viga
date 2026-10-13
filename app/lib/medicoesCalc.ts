@@ -63,14 +63,48 @@ export function calcularMedicoes(medicoes: any[], itens: any[], servicos: any[],
         const acumAnterior = ultimo ? parseFloat(ultimo.valor_base) * parseFloat(ultimo.percentual_acumulado) : 0
         totalPeriodo += parseFloat(mi.valor_base) * parseFloat(mi.percentual_acumulado) - acumAnterior
       }
-      const pctAuto = totalBaseGrupo > 0 ? Math.max(totalPeriodo / totalBaseGrupo, 0) : 0
-      const pct = med.desconto_adiantamento_pct != null ? parseFloat(med.desconto_adiantamento_pct) : pctAuto
-      const saldo = Math.max(totalAdiantamento - descontoAcumulado, 0)
-      const desconto = totalAdiantamento > 0 ? Math.min(Math.max(pct, 0) * totalAdiantamento, saldo) : 0
+      const adiantadoAteData = ordenadas.filter(m => m.valor_adiantamento != null && m.data <= med.data).reduce((x, m) => x + parseFloat(m.valor_adiantamento || 0), 0)
+      const { desconto } = calcularAbatimento({
+        modo: modoAbatimentoDe(med),
+        pctDigitado: med.desconto_adiantamento_pct != null ? parseFloat(med.desconto_adiantamento_pct) : null,
+        bruto: totalPeriodo, retencaoPct, totalBaseGrupo, adiantadoTotal: totalAdiantamento, adiantadoAteData, jaAbatido: descontoAcumulado,
+      })
       descontoAcumulado += desconto
       const retencao = totalPeriodo * retencaoPct
       resultado.set(med.id, { adiantamento: false, bruto: totalPeriodo, retencao, desconto, liquido: totalPeriodo - retencao - desconto })
     }
   }
   return resultado
+}
+
+// ── Abatimento do adiantamento ─────────────────────────────────────────────────────────
+// Dois jeitos de abater o que já foi adiantado ao fornecedor:
+//  • compensação (padrão): o valor da medição é abatido do SALDO de adiantamento disponível até
+//    a data dela (adiantamentos já pagos − o que medições anteriores já abateram). O fornecedor só
+//    recebe o que sobrar. Ex.: adiantou 60.000, medição de 32.332,94 → recebe 0, sobra 27.667,06.
+//    O % (padrão 100%) permite abater só uma parte do valor da medição.
+//  • proporcional: abate o % de avanço da medição sobre o TOTAL adiantado (ou o % digitado).
+export type ModoAbatimento = 'compensacao' | 'proporcional'
+
+export function modoAbatimentoDe(med: { modo_abatimento?: string | null }): ModoAbatimento {
+  return med.modo_abatimento === 'proporcional' ? 'proporcional' : 'compensacao'
+}
+
+export function calcularAbatimento(p: {
+  modo: ModoAbatimento
+  pctDigitado: number | null // fração 0–1; null = automático
+  bruto: number
+  retencaoPct: number
+  totalBaseGrupo: number
+  adiantadoTotal: number // soma de todos os adiantamentos do grupo
+  adiantadoAteData: number // soma dos adiantamentos com data <= data da medição
+  jaAbatido: number // abatido por medições anteriores do grupo
+}) {
+  const pctAuto = p.modo === 'compensacao' ? 1 : (p.totalBaseGrupo > 0 ? Math.max(p.bruto / p.totalBaseGrupo, 0) : 0)
+  const pct = Math.max(p.pctDigitado ?? pctAuto, 0)
+  const disponivel = p.modo === 'compensacao' ? p.adiantadoAteData : p.adiantadoTotal
+  const saldo = Math.max(disponivel - p.jaAbatido, 0)
+  const alvo = p.modo === 'compensacao' ? Math.max(p.bruto * (1 - p.retencaoPct), 0) * pct : pct * p.adiantadoTotal
+  const desconto = disponivel > 0 ? Math.min(alvo, saldo) : 0
+  return { desconto, pct, pctAuto, saldo, limitado: alvo > saldo + 0.005 }
 }

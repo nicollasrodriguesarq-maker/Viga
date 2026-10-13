@@ -982,7 +982,13 @@ export default function Obras() {
     // impressão sai em paisagem, e se mesmo assim não couber (muitas medições), a tabela
     // encolhe proporcionalmente (zoom) até caber na largura útil da página.
     const mapaLarguraMin = 640 + mapa.medicoesReais.length * 140
-    const mapaEscalaPagina = Math.min(1, 1020 / mapaLarguraMin)
+    // A tabela do Mapa Geral usa largura em % (table-layout fixo): sempre cabe na folha, qualquer que seja o
+    // número de medições; só a fonte diminui conforme as colunas aumentam.
+    const nMedMapa = mapa.medicoesReais.length
+    const mapaFonte = nMedMapa <= 3 ? 10 : nMedMapa <= 5 ? 9 : nMedMapa <= 7 ? 8.5 : nMedMapa <= 9 ? 8 : 7.5
+    const mapaColNome = nMedMapa > 6 ? 16 : 20
+    const mapaUnidadeCol = (100 - (mapaColNome + 3.5 + 3.5 + 8.5)) / ((nMedMapa + 2) * 3.4)
+    const mapaColgroup = `<colgroup><col style="width:${mapaColNome}%"><col style="width:3.5%"><col style="width:3.5%"><col style="width:8.5%">${('<col style="width:' + mapaUnidadeCol.toFixed(2) + '%"><col style="width:' + (mapaUnidadeCol * 2.4).toFixed(2) + '%">').repeat(nMedMapa + 2)}</colgroup>`
 
     // Cronograma da obra (concluído / em andamento / atrasado) junto das medições, pra o
     // cliente ver o avanço físico ao lado do financeiro no mesmo arquivo.
@@ -1000,10 +1006,22 @@ export default function Obras() {
       * { margin:0; padding:0; box-sizing:border-box; }
       body { background:#0f141b; color:#dee2ec; font-family:'Inter',sans-serif; font-size:13px; }
       h1,h2 { font-family:'Manrope',sans-serif; }
-      @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } @page { size: landscape; margin: 10mm; } }
+      .mapa-wrap { overflow-x:auto; margin-bottom:24px }
+      .mapa-geral { width:100%; border-collapse:collapse; table-layout:fixed }
+      .mapa-geral th, .mapa-geral td { padding:5px 4px !important; overflow-wrap:anywhere; word-break:break-word }
+      .mapa-geral td:not(:first-child) { white-space:nowrap }
+      .mapa-geral tr { break-inside:avoid }
+      .mapa-geral thead { display:table-header-group }
+      @media print {
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        @page { size: landscape; margin: 10mm; }
+        .doc { max-width:none !important; padding:0 !important }
+        .mapa-wrap { overflow:visible }
+        .mapa-geral { min-width:0 !important; width:100% !important }
+      }
       ${PRINT_SAFE_CSS}
     </style></head><body>
-    <div style="max-width:1200px;margin:0 auto;padding:40px 36px">
+    <div class="doc" style="max-width:1200px;margin:0 auto;padding:40px 36px">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;padding-bottom:20px;border-bottom:1px solid #3d4948">
         <div>
           <h1 style="font-size:24px;font-weight:700;color:#6ee9e0;text-transform:uppercase">Relatório Completo de Medições</h1>
@@ -1051,8 +1069,9 @@ export default function Obras() {
 
       <h2 style="font-size:16px;font-weight:700;color:#6ee9e0;text-transform:uppercase;margin-bottom:4px">Mapa Geral de Medição</h2>
       <p style="color:#bcc9c7;font-size:11px;margin-bottom:12px">Escopo completo × cada medição × acumulado × saldo, item a item</p>
-      <div style="overflow-x:auto;margin-bottom:24px">
-        <table style="width:${mapaLarguraMin}px;border-collapse:collapse;font-size:11px;zoom:${mapaEscalaPagina.toFixed(3)}">
+      <div class="mapa-wrap">
+        <table class="mapa-geral" style="min-width:${mapaLarguraMin}px;font-size:${mapaFonte}px">
+          ${mapaColgroup}
           <thead>
             <tr style="background:#252a32">
               <th rowspan="2" style="padding:6px 8px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Serviço</th>

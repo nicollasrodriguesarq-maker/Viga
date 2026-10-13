@@ -169,30 +169,56 @@ export default function PortalCliente() {
                   <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Atrasadas</div><div className="text-xl font-bold text-error">{contagem('atrasada')}</div></div>
                   <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Pendentes</div><div className="text-xl font-bold text-on-surface-variant">{contagem('pendente')}</div></div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Valor contratado</div><div className="text-lg font-bold">{moeda(dados.financeiro.contrato)}</div></div>
-                  <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Já pago</div><div className="text-lg font-bold text-primary-container">{moeda(dados.financeiro.pago)}</div></div>
-                  <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Saldo a pagar</div><div className="text-lg font-bold text-tertiary">{moeda(dados.financeiro.a_pagar)}</div></div>
-                </div>
+                {dados.financeiro.macro ? (
+                  <div className={cardCls} data-testid="macro-obra">
+                    <div className="text-[11px] font-bold text-on-surface-variant uppercase mb-3">💼 Visão geral da obra (gerenciamento)</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                      <div><div className="text-[10px] text-on-surface-variant uppercase">Valor total da obra</div><div className="text-lg font-bold" data-testid="macro-total">{moeda(dados.financeiro.macro.total_obra)}</div></div>
+                      <div><div className="text-[10px] text-on-surface-variant uppercase">Já pago (total)</div><div className="text-lg font-bold text-primary-container" data-testid="macro-pago">{moeda(dados.financeiro.macro.total_pago)}</div></div>
+                      <div><div className="text-[10px] text-on-surface-variant uppercase">Falta pagar (total)</div><div className="text-lg font-bold text-tertiary">{moeda(dados.financeiro.macro.total_a_pagar)}</div></div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                        <div className="font-semibold mb-1">Contratos com terceiros</div>
+                        <div className="text-on-surface-variant text-[12px]">Contratado {moeda(dados.financeiro.macro.terceiros_contratado)} · pago <b className="text-primary-container">{moeda(dados.financeiro.macro.terceiros_pago)}</b> · falta {moeda(dados.financeiro.macro.terceiros_a_pagar)}</div>
+                      </div>
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3">
+                        <div className="font-semibold mb-1">Gerenciamento ({dados.empresa?.nome_empresa || 'Inverso'})</div>
+                        <div className="text-on-surface-variant text-[12px]">Contratado {moeda(dados.financeiro.macro.gerenciamento_contrato)} · pago <b className="text-primary-container">{moeda(dados.financeiro.macro.gerenciamento_pago)}</b> · falta {moeda(dados.financeiro.macro.gerenciamento_a_pagar)}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Valor contratado</div><div className="text-lg font-bold">{moeda(dados.financeiro.contrato)}</div></div>
+                    <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Já pago</div><div className="text-lg font-bold text-primary-container">{moeda(dados.financeiro.pago)}</div></div>
+                    <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Saldo a pagar</div><div className="text-lg font-bold text-tertiary">{moeda(dados.financeiro.a_pagar)}</div></div>
+                  </div>
+                )}
               </div>
             )}
 
             {aba === 'servicos' && (
               <div className={cardCls}>
                 <div className="text-sm font-bold mb-3">Serviços contratados</div>
-                {dados.servicos.length === 0 ? <div className="text-on-surface-variant text-sm py-6 text-center">Nenhum serviço cadastrado ainda.</div> : (
+                {dados.servicos.length === 0 ? <div className="text-on-surface-variant text-sm py-6 text-center">Nenhum serviço cadastrado ainda.</div> : (() => {
+                  const ger = !!obra.gerenciamento
+                  return (
                   <div className="overflow-x-auto"><table className="w-full text-sm border-collapse">
-                    <thead><tr className="border-b border-outline-variant">{['Serviço', 'Categoria', 'Qtd.', 'Situação', 'Executado'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>)}</tr></thead>
+                    <thead><tr className="border-b border-outline-variant">{['Serviço', 'Categoria', ...(ger ? ['Executor', 'Valor contratado'] : []), 'Qtd.', 'Situação', 'Executado'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>)}</tr></thead>
                     <tbody>{dados.servicos.map((s: any) => (
                       <tr key={s.id} className="border-b border-outline-variant">
                         <td className="px-3 py-2.5 font-semibold">{s.nome}</td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{s.categoria || '—'}</td>
+                        {ger && <td className="px-3 py-2.5 text-xs whitespace-nowrap">{s.fornecedor || '—'}</td>}
+                        {ger && <td className="px-3 py-2.5 text-xs whitespace-nowrap">{moeda(s.valor_contratado)}</td>}
                         <td className="px-3 py-2.5 text-xs whitespace-nowrap">{s.quantidade != null ? `${Number(s.quantidade).toLocaleString('pt-BR')} ${s.unidade || ''}` : '—'}</td>
                         <td className="px-3 py-2.5 text-xs">{STATUS_SERV[s.status] || s.status || '—'}</td>
                         <td className="px-3 py-2.5 text-xs whitespace-nowrap">{s.executado_pct != null ? `${s.executado_pct.toFixed(0)}%` : '—'}</td>
                       </tr>))}
                     </tbody></table></div>
-                )}
+                  )
+                })()}
               </div>
             )}
 
@@ -283,21 +309,32 @@ export default function PortalCliente() {
             )}
 
             {aba === 'medicoes' && (
-              <div className={cardCls}>
-                <div className="text-sm font-bold mb-3">Medições realizadas</div>
-                {dados.medicoes.length === 0 ? <div className="text-on-surface-variant text-sm py-6 text-center">Nenhuma medição realizada ainda.</div> : (
-                  <div className="overflow-x-auto"><table className="w-full text-sm border-collapse">
-                    <thead><tr className="border-b border-outline-variant">{['Medição', 'Data', 'Valor medido', 'Retenção', 'Valor a pagar', 'Pagamento'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>)}</tr></thead>
-                    <tbody>{dados.medicoes.map((m: any, i: number) => (
-                      <tr key={m.id} className="border-b border-outline-variant" data-testid="linha-medicao-cliente">
-                        <td className="px-3 py-2.5 font-semibold whitespace-nowrap">Medição {i + 1} <span className="text-on-surface-variant font-normal text-xs">· {m.numero}</span></td>
-                        <td className="px-3 py-2.5 text-xs whitespace-nowrap">{dataBR(m.data)}</td>
-                        <td className="px-3 py-2.5 whitespace-nowrap">{moeda(m.bruto)}</td>
-                        <td className="px-3 py-2.5 text-on-surface-variant whitespace-nowrap">{moeda(m.retencao)}</td>
-                        <td className="px-3 py-2.5 font-bold whitespace-nowrap">{moeda(m.liquido)}</td>
-                        <td className="px-3 py-2.5 text-xs whitespace-nowrap">{m.pagamento === 'pago' ? <span className="text-primary-container font-bold">✅ Pago {m.data_pagamento ? dataBR(m.data_pagamento) : ''}</span> : m.pagamento === 'programado' ? <span className="text-tertiary">📅 Programado {m.data_pagamento ? dataBR(m.data_pagamento) : ''}</span> : <span className="text-on-surface-variant">A programar</span>}</td>
-                      </tr>))}</tbody></table></div>
-                )}
+              <div className="flex flex-col gap-4">
+                {dados.medicoes.length === 0 ? <div className={cardCls + ' text-center text-on-surface-variant text-sm py-8'}>Nenhuma medição realizada ainda.</div> : dados.medicoes.map((g: any) => (
+                  <div key={g.chave} className={cardCls} data-testid="grupo-medicao-cliente">
+                    <div className="flex justify-between items-start flex-wrap gap-2 mb-1">
+                      <div className="text-sm font-bold">{g.tipo === 'fornecedor' ? `🧱 ${g.rotulo}` : `📐 Medições — ${g.rotulo}`}</div>
+                      <div className="text-[11px] text-on-surface-variant">{g.pct_executado.toFixed(0)}% executado</div>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 my-3">
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-2.5"><div className="text-[10px] text-on-surface-variant uppercase">{g.tipo === 'cliente' ? 'Contrato' : 'Contratado'}</div><div className="text-sm font-bold">{moeda(g.previsto)}</div></div>
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-2.5"><div className="text-[10px] text-on-surface-variant uppercase">Medido até agora</div><div className="text-sm font-bold">{moeda(g.medido)}</div></div>
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-2.5"><div className="text-[10px] text-on-surface-variant uppercase">Pago</div><div className="text-sm font-bold text-primary-container">{moeda(g.pago)}</div></div>
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-2.5"><div className="text-[10px] text-on-surface-variant uppercase">Falta pagar</div><div className="text-sm font-bold text-tertiary">{moeda(g.a_pagar)}</div></div>
+                    </div>
+                    <div className="overflow-x-auto"><table className="w-full text-sm border-collapse">
+                      <thead><tr className="border-b border-outline-variant">{['Medição', 'Data', 'Valor medido', 'Retenção', 'Abatimentos', 'Valor a pagar', 'Pagamento'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>)}</tr></thead>
+                      <tbody>{g.itens.map((m: any) => (
+                        <tr key={m.id} className="border-b border-outline-variant" data-testid="linha-medicao-cliente">
+                          <td className="px-3 py-2.5 font-semibold">{m.adiantamento ? '💰 Adiantamento' : m.rotulo} <span className="text-on-surface-variant font-normal text-xs">· {m.numero}</span>{m.observacao && <div className="text-[11px] text-on-surface-variant font-normal">{m.observacao}</div>}</td>
+                          <td className="px-3 py-2.5 text-xs whitespace-nowrap">{dataBR(m.data)}</td>
+                          <td className="px-3 py-2.5 whitespace-nowrap">{m.adiantamento ? '—' : moeda(m.bruto)}</td>
+                          <td className="px-3 py-2.5 text-on-surface-variant whitespace-nowrap">{m.adiantamento ? '—' : moeda(m.retencao)}</td>
+                          <td className="px-3 py-2.5 text-on-surface-variant whitespace-nowrap">{m.adiantamento ? '—' : moeda(m.desconto)}</td>
+                          <td className="px-3 py-2.5 font-bold whitespace-nowrap">{moeda(m.liquido)}</td>
+                          <td className="px-3 py-2.5 text-xs whitespace-nowrap">{m.pagamento === 'pago' ? <span className="text-primary-container font-bold">✅ Pago {m.data_pagamento ? dataBR(m.data_pagamento) : ''}</span> : m.pagamento === 'programado' ? <span className="text-tertiary">📅 Programado {m.data_pagamento ? dataBR(m.data_pagamento) : ''}</span> : <span className="text-on-surface-variant">A programar</span>}</td>
+                        </tr>))}</tbody></table></div>
+                  </div>))}
               </div>
             )}
 
@@ -320,24 +357,51 @@ export default function PortalCliente() {
               </div>
             )}
 
-            {aba === 'financeiro' && (
+            {aba === 'financeiro' && (() => {
+              const fin = dados.financeiro
+              const tabelaPagamentos = (lista: any[], vazio: string) => lista.length === 0 ? <div className="text-on-surface-variant text-sm py-4 text-center">{vazio}</div> : (
+                <div className="overflow-x-auto"><table className="w-full text-sm border-collapse">
+                  <thead><tr className="border-b border-outline-variant">{['Data', 'Descrição', 'Valor', 'Situação'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high">{h}</th>)}</tr></thead>
+                  <tbody>{lista.map((p: any) => (
+                    <tr key={p.id} className="border-b border-outline-variant"><td className="px-3 py-2.5 text-xs whitespace-nowrap">{p.data ? dataBR(p.data) : '—'}</td><td className="px-3 py-2.5">{p.descricao || '—'}</td><td className="px-3 py-2.5 font-semibold whitespace-nowrap">{moeda(p.valor)}</td><td className={`px-3 py-2.5 text-xs font-bold ${p.status === 'pago' ? 'text-primary-container' : 'text-tertiary'}`}>{p.status === 'pago' ? '✅ Pago' : p.status === 'programado' ? '📅 Programado' : p.status === 'a_programar' ? 'A programar' : '⏳ Pendente'}</td></tr>))}</tbody></table></div>
+              )
+              return (
               <div className="flex flex-col gap-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Valor contratado</div><div className="text-xl font-bold" data-testid="fin-contrato">{moeda(dados.financeiro.contrato)}</div></div>
-                  <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Já pago</div><div className="text-xl font-bold text-primary-container" data-testid="fin-pago">{moeda(dados.financeiro.pago)}</div></div>
-                  <div className={cardCls}><div className="text-[10px] text-on-surface-variant uppercase">Saldo a pagar</div><div className="text-xl font-bold text-tertiary" data-testid="fin-saldo">{moeda(dados.financeiro.a_pagar)}</div></div>
-                </div>
+                {fin.macro && (
+                  <div className={cardCls} data-testid="fin-macro">
+                    <div className="text-[11px] font-bold text-on-surface-variant uppercase mb-3">💼 Visão geral da obra</div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div><div className="text-[10px] text-on-surface-variant uppercase">Valor total da obra</div><div className="text-xl font-bold" data-testid="fin-macro-total">{moeda(fin.macro.total_obra)}</div></div>
+                      <div><div className="text-[10px] text-on-surface-variant uppercase">Já pago (total)</div><div className="text-xl font-bold text-primary-container" data-testid="fin-macro-pago">{moeda(fin.macro.total_pago)}</div></div>
+                      <div><div className="text-[10px] text-on-surface-variant uppercase">Falta pagar (total)</div><div className="text-xl font-bold text-tertiary">{moeda(fin.macro.total_a_pagar)}</div></div>
+                    </div>
+                  </div>
+                )}
                 <div className={cardCls}>
-                  <div className="text-sm font-bold mb-3">Seus pagamentos</div>
-                  {dados.financeiro.pagamentos.length === 0 ? <div className="text-on-surface-variant text-sm py-4 text-center">Nenhum pagamento registrado ainda.</div> : (
-                    <div className="overflow-x-auto"><table className="w-full text-sm border-collapse">
-                      <thead><tr className="border-b border-outline-variant">{['Data', 'Descrição', 'Valor', 'Situação'].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high">{h}</th>)}</tr></thead>
-                      <tbody>{dados.financeiro.pagamentos.map((p: any) => (
-                        <tr key={p.id} className="border-b border-outline-variant"><td className="px-3 py-2.5 text-xs whitespace-nowrap">{dataBR(p.data)}</td><td className="px-3 py-2.5">{p.descricao || '—'}</td><td className="px-3 py-2.5 font-semibold whitespace-nowrap">{moeda(p.valor)}</td><td className={`px-3 py-2.5 text-xs font-bold ${p.status === 'pago' ? 'text-primary-container' : 'text-tertiary'}`}>{p.status === 'pago' ? '✅ Pago' : '⏳ Pendente'}</td></tr>))}</tbody></table></div>
-                  )}
+                  <div className="text-sm font-bold mb-3">{fin.gerenciamento ? `🤝 Gerenciamento — ${dados.empresa?.nome_empresa || 'Inverso'}` : 'Seu contrato'}</div>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+                    <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">Valor contratado</div><div className="text-xl font-bold" data-testid="fin-contrato">{moeda(fin.contrato)}</div></div>
+                    <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">Já pago</div><div className="text-xl font-bold text-primary-container" data-testid="fin-pago">{moeda(fin.pago)}</div></div>
+                    <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">Saldo a pagar</div><div className="text-xl font-bold text-tertiary" data-testid="fin-saldo">{moeda(fin.a_pagar)}</div></div>
+                  </div>
+                  <div className="text-[11px] font-bold text-on-surface-variant uppercase mb-1">{fin.gerenciamento ? `Pagamentos feitos à ${dados.empresa?.nome_empresa || 'Inverso'}` : 'Seus pagamentos'}</div>
+                  {tabelaPagamentos(fin.pagamentos, 'Nenhum pagamento registrado ainda.')}
                 </div>
+                {fin.terceiros.map((t: any) => (
+                  <div key={t.fornecedor} className={cardCls} data-testid="fin-terceiro">
+                    <div className="text-sm font-bold mb-3">🧱 Pagamentos a {t.fornecedor}</div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">Contratado</div><div className="text-base font-bold">{moeda(t.previsto)}</div></div>
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">Medido até agora</div><div className="text-base font-bold">{moeda(t.medido)}</div></div>
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">Já pago</div><div className="text-base font-bold text-primary-container" data-testid="fin-terceiro-pago">{moeda(t.pago)}</div></div>
+                      <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">Falta pagar</div><div className="text-base font-bold text-tertiary">{moeda(t.a_pagar)}</div></div>
+                    </div>
+                    {tabelaPagamentos(t.pagamentos, 'Nenhum pagamento registrado ainda.')}
+                  </div>
+                ))}
               </div>
-            )}
+              )
+            })()}
           </>
         )}
       </main>

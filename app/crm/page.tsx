@@ -347,6 +347,20 @@ export default function CRM() {
   // caso já marca fidelizado (2º+ negócio fechado com a mesma pessoa).
   async function confirmarCriarCliente(criarCliente: boolean) {
     if (!criarCliente) { await confirmarMudancaEtapa('fechado_ganho'); return }
+    // Fidelizado = 2º negócio FECHADO com a mesma pessoa: só conta quando já existe outro lead ganho dela.
+    const jaFechouAntes = async (clienteId: string) =>
+      (await buscar('crm_leads', '?cliente_id=eq.' + clienteId + '&etapa=eq.fechado_ganho&id=neq.' + detalhe.id + '&select=id')).length > 0
+    // Lead que já nasceu com cliente cadastrado (via Orçamento/Levantamento/Obra novos): reaproveita-o.
+    if (detalhe.cliente_id) {
+      const cli = clientes.find(c => c.id === detalhe.cliente_id)
+      if (cli && cli.fidelizado_manual == null && await jaFechouAntes(cli.id)) {
+        await editar('clientes', cli.id, { fidelizado: true })
+        await registrarAtividade('nota', 'Novo negócio fechado com cliente já cadastrado — marcado como fidelizado.')
+      }
+      await confirmarMudancaEtapa('fechado_ganho', { cliente_id: detalhe.cliente_id })
+      carregar()
+      return
+    }
     const existente = clientes.find(c =>
       (detalhe.email && c.email && c.email.toLowerCase() === detalhe.email.toLowerCase()) ||
       (detalhe.telefone && c.telefone && c.telefone.replace(/\D/g, '') === detalhe.telefone.replace(/\D/g, ''))
@@ -354,8 +368,10 @@ export default function CRM() {
     let clienteId: string
     if (existente) {
       clienteId = existente.id
-      if (existente.fidelizado_manual == null) await editar('clientes', existente.id, { fidelizado: true })
-      await registrarAtividade('nota', 'Novo negócio fechado com cliente já cadastrado — marcado como fidelizado.')
+      if (existente.fidelizado_manual == null && await jaFechouAntes(existente.id)) {
+        await editar('clientes', existente.id, { fidelizado: true })
+        await registrarAtividade('nota', 'Novo negócio fechado com cliente já cadastrado — marcado como fidelizado.')
+      }
     } else {
       const canalFinal = detalhe.canal === 'Outro' ? (detalhe.canal_outro || 'Outro') : detalhe.canal
       const novo = await criar('clientes', {

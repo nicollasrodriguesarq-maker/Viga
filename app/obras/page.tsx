@@ -4,6 +4,8 @@ import Link from 'next/link'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import { obterTokenValido } from '../lib/authFetch'
+import SeletorClienteCrm from '../components/SeletorClienteCrm'
+import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../lib/clienteCrm'
 import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../lib/medicoesCalc'
 import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma, type ModoCronograma } from '../lib/cronograma'
 
@@ -296,6 +298,7 @@ export default function Obras() {
   const [medicaoAtiva, setMedicaoAtiva] = useState<any>(null)
   const [preenchimento, setPreenchimento] = useState<Record<string, { valor_base: string; percentual: string }>>({})
   const [descAdiantPctInput, setDescAdiantPctInput] = useState('')
+  const [clienteCrm, setClienteCrm] = useState<ValorClienteCrm>(CLIENTE_CRM_VAZIO)
   const [modoAbatInput, setModoAbatInput] = useState<ModoAbatimento>('compensacao')
   const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' })
   const [grupoMedicaoAberto, setGrupoMedicaoAberto] = useState<string | null>(null)
@@ -2069,12 +2072,25 @@ export default function Obras() {
       alert('Preencha código, nome e cliente')
       return
     }
+    // Obra NOVA = contrato fechado: registra o cliente na Agenda de Clientes e o lead no Pipeline
+    // (cliente novo ou da carteira) já na etapa "Fechado Ganho".
+    let crm: { leadId: string | null; clienteId: string | null; nomeCliente: string | null } | null = { leadId: null, clienteId: null, nomeCliente: null }
+    if (!obraEditando) {
+      const erroCrm = validarClienteCrm(clienteCrm, fObra.cliente)
+      if (erroCrm) return alert(erroCrm)
+      const meuIdCrm = usuarios.find(u => u.email && userEmail && u.email.toLowerCase() === userEmail.toLowerCase())?.id || null
+      crm = await registrarClienteNoCrmInterativo(clienteCrm, {
+        origem: 'obra', rotulo: 'Obra ' + fObra.codigo.trim().toUpperCase(), nome: fObra.cliente,
+        endereco: fObra.endereco, responsavelId: meuIdCrm,
+      })
+      if (!crm) return
+    }
     const dados: any = {
       codigo: fObra.codigo.trim().toUpperCase(),
       nome: fObra.nome.trim(),
       tipo: fObra.tipo,
       tipo_execucao: fObra.tipo_execucao,
-      cliente: fObra.cliente.trim(),
+      cliente: (crm?.nomeCliente || fObra.cliente).trim(),
       endereco: fObra.endereco.trim(),
       responsavel: fObra.responsavel.trim(),
       status: fObra.status,
@@ -2094,9 +2110,11 @@ export default function Obras() {
     } else {
       const nova = await criar('obras', dados)
       obraId = nova?.id
+      if (obraId) await vincularLeadAoRegistro(crm?.leadId || null, { obra_id: obraId })
     }
     setJanela(null)
     setObraEditando(null)
+    setClienteCrm(CLIENTE_CRM_VAZIO)
     await carregar()
     if (obraId) await distribuirCronograma(obraId)
   }
@@ -2132,6 +2150,7 @@ export default function Obras() {
   }
 
   function abrirNovaObra() {
+    setClienteCrm(CLIENTE_CRM_VAZIO)
     setFObra({ codigo: gerarCodigo(obras), nome: '', tipo: 'Reforma', tipo_execucao: 'obra', cliente: '', endereco: '', responsavel: '', status: 'em_execucao', data_inicio: '', data_previsao: '', valor_contrato: '', dias_trabalho: 'seg_sex', gerenciamento: false })
     setObraEditando(null)
     setJanela('nova_obra')
@@ -3975,7 +3994,7 @@ export default function Obras() {
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
           <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[580px] max-h-[92vh] overflow-y-auto">
             <div className="text-base font-bold text-on-surface mb-5">🏗️ Nova Obra</div>
-            <FormObra f={fObra} setF={setFObra} obras={obras} editando={false} salvar={salvarObra} cancelar={() => { setJanela(null); setObraEditando(null) }} />
+            <FormObra f={fObra} setF={setFObra} obras={obras} editando={false} clienteCrm={clienteCrm} setClienteCrm={setClienteCrm} salvar={salvarObra} cancelar={() => { setJanela(null); setObraEditando(null) }} />
           </div>
         </div>
       )}
@@ -3984,8 +4003,9 @@ export default function Obras() {
 }
 
 // ── componente formulário de obra ─────────────────────────────
-function FormObra({ f, setF, obras, editando, salvar, cancelar }: {
+function FormObra({ f, setF, obras, editando, salvar, cancelar, clienteCrm, setClienteCrm }: {
   f: any; setF: any; obras: any[]; editando: boolean
+  clienteCrm?: ValorClienteCrm; setClienteCrm?: (v: ValorClienteCrm) => void
   salvar: () => void; cancelar: () => void
 }) {
   return (
@@ -4013,6 +4033,11 @@ function FormObra({ f, setF, obras, editando, salvar, cancelar }: {
         <label className={labelCls}>Nome da Obra *</label>
         <input className={inputCls} placeholder="Ex: Residência Família Silva" value={f.nome} onChange={(e: any) => setF({ ...f, nome: e.target.value })} />
       </div>
+
+      {!editando && clienteCrm && setClienteCrm && (
+        <SeletorClienteCrm valor={clienteCrm} onChange={setClienteCrm} origem="obra" mostrarContato
+          onClienteSelecionado={c => setF({ ...f, cliente: c.nome, endereco: f.endereco || c.endereco || '' })} />
+      )}
 
       <div className="grid grid-cols-3 gap-3 mb-3.5">
         <div>

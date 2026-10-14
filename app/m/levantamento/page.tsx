@@ -2,6 +2,8 @@
 import { useEffect, useState } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
+import SeletorClienteCrm from '../../components/SeletorClienteCrm'
+import { CLIENTE_CRM_VAZIO, leadDoLevantamento, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../../lib/clienteCrm'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -114,6 +116,7 @@ export default function LevantamentoMobile() {
   const [orcamentoParaVincular, setOrcamentoParaVincular] = useState('')
   const [mostrarVincularOrcamento, setMostrarVincularOrcamento] = useState(false)
   const [meuId, setMeuId] = useState('')
+  const [clienteCrm, setClienteCrm] = useState<ValorClienteCrm>(CLIENTE_CRM_VAZIO)
   const [busca, setBusca] = useState('')
   const [filtro, setFiltro] = useState('todos')
   const [filtroExecucao, setFiltroExecucao] = useState('todos')
@@ -205,8 +208,17 @@ export default function LevantamentoMobile() {
       if (atualizado) setDetalhe(atualizado)
       return
     }
-    const novo = await criar('levantamentos', { ...fLev, codigo, obra_id: fLev.obra_id || null, criado_por: meuId || null })
-    setTela(null); setFLev(FLEV_VAZIO)
+    // Levantamento NOVO: registra o cliente na Agenda de Clientes e o lead no Pipeline (novo ou da carteira)
+    const erroCrm = validarClienteCrm(clienteCrm, fLev.cliente)
+    if (erroCrm) return alert(erroCrm)
+    const crm = await registrarClienteNoCrmInterativo(clienteCrm, {
+      origem: 'levantamento', rotulo: 'Levantamento ' + codigo, nome: fLev.cliente,
+      telefone: fLev.cliente_telefone, email: fLev.cliente_email, endereco: fLev.endereco, responsavelId: meuId || null,
+    })
+    if (!crm) return
+    const novo = await criar('levantamentos', { ...fLev, ...(crm.nomeCliente ? { cliente: crm.nomeCliente } : {}), codigo, obra_id: fLev.obra_id || null, criado_por: meuId || null, ...(crm.clienteId ? { cliente_id: crm.clienteId } : {}) })
+    if (novo?.id) await vincularLeadAoRegistro(crm.leadId, { levantamento_id: novo.id })
+    setTela(null); setFLev(FLEV_VAZIO); setClienteCrm(CLIENTE_CRM_VAZIO)
     await carregar()
     if (novo?.id) { setDetalhe(novo) }
   }
@@ -250,7 +262,8 @@ export default function LevantamentoMobile() {
     const orcLista = await buscar('orcamentos', '?order=created_at.desc&limit=200')
     const n = orcLista.filter((o: any) => o.codigo?.startsWith('ORC-' + ano)).length + 1
     const codigo = 'ORC-' + ano + '-' + String(n).padStart(3, '0')
-    const novo = await criar('orcamentos', { codigo, levantamento_id: detalhe.id, cliente_nome: detalhe.cliente, endereco: detalhe.endereco, status: 'rascunho', total_material: 0, total_mao_obra: 0, total_geral: 0, desconto: 0 })
+    const leadCrm = await leadDoLevantamento(detalhe.id)
+    const novo = await criar('orcamentos', { codigo, levantamento_id: detalhe.id, cliente_nome: detalhe.cliente, endereco: detalhe.endereco, crm_lead_id: leadCrm, status: 'rascunho', total_material: 0, total_mao_obra: 0, total_geral: 0, desconto: 0 })
     return novo?.id || null
   }
   async function ambienteOrcamentoEspelhado(levAmbiente: any, orcId: string): Promise<string | null> {
@@ -874,6 +887,10 @@ export default function LevantamentoMobile() {
               {TIPOS_EXECUCAO.map(t => <option key={t.v} value={t.v}>{t.l}</option>)}
             </select>
           </div>
+          {!levantamentoEditando && (
+            <SeletorClienteCrm valor={clienteCrm} onChange={setClienteCrm} origem="levantamento"
+              onClienteSelecionado={c => setFLev({ ...fLev, cliente: c.nome, cliente_email: c.email || '', cliente_telefone: c.telefone || '', endereco: fLev.endereco || c.endereco || '' })} />
+          )}
           <div>
             <label className={labelCls}>Cliente *</label>
             <input className={inputCls} placeholder="Nome do cliente" value={fLev.cliente} onChange={e => setFLev({ ...fLev, cliente: e.target.value })} />
@@ -1228,7 +1245,7 @@ export default function LevantamentoMobile() {
             </button>
           ))}
         </div>
-        <button className={btnPrimaryCls} onClick={() => { setFLev(FLEV_VAZIO); setLevantamentoEditando(null); setTela('novoLevantamento') }}>+ Novo Levantamento</button>
+        <button className={btnPrimaryCls} onClick={() => { setFLev(FLEV_VAZIO); setClienteCrm(CLIENTE_CRM_VAZIO); setLevantamentoEditando(null); setTela('novoLevantamento') }}>+ Novo Levantamento</button>
 
         {filtrados.length === 0 ? (
           <div className="text-center py-10 text-on-surface-variant text-body-sm">Nenhum levantamento encontrado</div>

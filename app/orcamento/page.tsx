@@ -2,6 +2,8 @@
 import { useState, useEffect, Fragment } from 'react'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
+import SeletorClienteCrm from '../components/SeletorClienteCrm'
+import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, type ValorClienteCrm } from '../lib/clienteCrm'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -92,6 +94,7 @@ export default function Orcamento() {
   const [bancoItens, setBancoItens] = useState<any[]>([])
   const [obras, setObras] = useState<any[]>([])
   const [crmLeads, setCrmLeads] = useState<any[]>([])
+  const [clienteCrm, setClienteCrm] = useState<ValorClienteCrm>(CLIENTE_CRM_VAZIO)
   const [loading, setLoading] = useState(true)
   const [detalhe, setDetalhe] = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('itens')
@@ -176,17 +179,24 @@ export default function Orcamento() {
   }
 
   async function salvarOrcamento() {
-    if (!fOrc.cliente_nome) return alert('Preencha o nome do cliente')
+    const erroCrm = validarClienteCrm(clienteCrm, fOrc.cliente_nome)
+    if (erroCrm) return alert(erroCrm)
     const codigo = fOrc.codigo || gerarCodigo(orcamentos)
+    // Cadastra o cliente na Agenda de Clientes e o lead no Pipeline (ou vincula o lead escolhido)
+    const crm = await registrarClienteNoCrmInterativo(clienteCrm, {
+      origem: 'orcamento', rotulo: 'Orçamento ' + codigo, nome: fOrc.cliente_nome,
+      telefone: clienteCrm.telefone, email: clienteCrm.email, endereco: fOrc.endereco, responsavelId: meuId || null,
+    })
+    if (!crm) return
     const dados = {
       codigo,
-      cliente_nome: fOrc.cliente_nome,
+      cliente_nome: crm.nomeCliente || fOrc.cliente_nome,
       endereco: fOrc.endereco,
       condicao_pagamento: fOrc.condicao_pagamento,
       validade_dias: parseInt(fOrc.validade_dias || '30'),
       observacao: fOrc.observacao,
       tipo_execucao: fOrc.tipo_execucao,
-      crm_lead_id: fOrc.crm_lead_id || null,
+      crm_lead_id: crm.leadId,
       status: 'rascunho',
       total_material: 0,
       total_mao_obra: 0,
@@ -201,6 +211,8 @@ export default function Orcamento() {
     }
     setJanela(null)
     setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra', crm_lead_id: '' })
+    setClienteCrm(CLIENTE_CRM_VAZIO)
+    buscar('crm_leads', '?select=id,codigo,nome&order=nome').then(setCrmLeads)
     const [o, a, it, b] = await Promise.all([
       buscar('orcamentos', '?order=created_at.desc'),
       buscar('orcamento_ambientes', '?order=ordem'),
@@ -1808,7 +1820,7 @@ export default function Orcamento() {
             Banco de Itens
           </button>
           <button
-            onClick={() => { setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra', crm_lead_id: '' }); setJanela('orcamento') }}
+            onClick={() => { setFOrc({ codigo: '', cliente_nome: '', endereco: '', condicao_pagamento: '', validade_dias: '30', observacao: '', tipo_execucao: 'obra', crm_lead_id: '' }); setClienteCrm(CLIENTE_CRM_VAZIO); setJanela('orcamento') }}
             className="flex items-center gap-2 px-4 py-2 bg-primary-container text-on-primary-container rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary-container/20"
           >
             <span className="material-symbols-outlined text-[20px]">post_add</span>
@@ -1929,16 +1941,12 @@ export default function Orcamento() {
                 <input className={inputCls} type="number" value={fOrc.validade_dias} onChange={e => setFOrc({ ...fOrc, validade_dias: e.target.value })} />
               </div>
             </div>
+            <SeletorClienteCrm valor={clienteCrm} onChange={setClienteCrm} origem="orcamento" leads={crmLeads} mostrarContato
+              onClienteSelecionado={c => setFOrc({ ...fOrc, cliente_nome: c.nome, endereco: fOrc.endereco || c.endereco || '' })}
+              onLeadSelecionado={l => setFOrc({ ...fOrc, cliente_nome: l.nome })} />
             <div className="mb-3.5">
               <label className={labelCls}>Cliente *</label>
-              <input className={inputCls} placeholder="Nome do cliente" value={fOrc.cliente_nome} onChange={e => setFOrc({ ...fOrc, cliente_nome: e.target.value })} />
-            </div>
-            <div className="mb-3.5">
-              <label className={labelCls}>Lead do CRM vinculado</label>
-              <select className={inputCls} value={fOrc.crm_lead_id} onChange={e => setFOrc({ ...fOrc, crm_lead_id: e.target.value })}>
-                <option value="">Nenhum / prospecção direta</option>
-                {crmLeads.map(l => <option key={l.id} value={l.id}>{l.codigo} — {l.nome}</option>)}
-              </select>
+              <input className={inputCls} placeholder="Nome do cliente" value={fOrc.cliente_nome} onChange={e => setFOrc({ ...fOrc, cliente_nome: e.target.value })} data-testid="input-cliente-orcamento" />
             </div>
             <div className="mb-3.5">
               <label className={labelCls}>Execução *</label>

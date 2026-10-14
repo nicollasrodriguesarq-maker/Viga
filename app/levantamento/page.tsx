@@ -2,6 +2,8 @@
 import { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
+import SeletorClienteCrm from '../components/SeletorClienteCrm'
+import { CLIENTE_CRM_VAZIO, leadDoLevantamento, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../lib/clienteCrm'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -172,6 +174,7 @@ export default function Levantamento() {
   const [filtroExecucao, setFiltroExecucao] = useState('todos')
   const [userEmail, setUserEmail] = useState('')
   const [meuId, setMeuId] = useState('')
+  const [clienteCrm, setClienteCrm] = useState<ValorClienteCrm>(CLIENTE_CRM_VAZIO)
   const [souAdmin, setSouAdmin] = useState(false)
   const [regimeProposta, setRegimeProposta] = useState('seg_sex')
   const [observacaoProposta, setObservacaoProposta] = useState('')
@@ -222,10 +225,21 @@ export default function Levantamento() {
   async function salvarLevantamento() {
     if (!fLev.cliente) return alert('Preencha o nome do cliente')
     const codigo = fLev.codigo || gerarCodigo(levantamentos)
+    // Levantamento NOVO: registra o cliente na Agenda de Clientes e o lead no Pipeline (novo ou da carteira)
+    let crm: { leadId: string | null; clienteId: string | null; nomeCliente: string | null } | null = { leadId: null, clienteId: null, nomeCliente: null }
+    if (!levantamentoEditando) {
+      const erroCrm = validarClienteCrm(clienteCrm, fLev.cliente)
+      if (erroCrm) return alert(erroCrm)
+      crm = await registrarClienteNoCrmInterativo(clienteCrm, {
+        origem: 'levantamento', rotulo: 'Levantamento ' + codigo, nome: fLev.cliente,
+        telefone: fLev.cliente_telefone, email: fLev.cliente_email, endereco: fLev.endereco, responsavelId: meuId || null,
+      })
+      if (!crm) return
+    }
     const dados: any = {
       codigo,
       nome: fLev.nome,
-      cliente: fLev.cliente,
+      cliente: crm?.nomeCliente || fLev.cliente,
       endereco: fLev.endereco,
       responsavel: fLev.responsavel,
       status: fLev.status,
@@ -239,13 +253,16 @@ export default function Levantamento() {
       if (!ok) return alert('Não foi possível salvar as alterações. Tente novamente.')
     } else {
       dados.criado_por = meuId || null
+      if (crm?.clienteId) dados.cliente_id = crm.clienteId
       const novo = await criar('levantamentos', dados)
       if (!novo?.id) return alert('Não foi possível criar o levantamento. Tente novamente.')
+      await vincularLeadAoRegistro(crm?.leadId || null, { levantamento_id: novo.id })
     }
     const editandoId = levantamentoEditando?.id
     setJanela(null)
     setLevantamentoEditando(null)
     setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' })
+    setClienteCrm(CLIENTE_CRM_VAZIO)
     const [l, a, it] = await Promise.all([
       buscar('levantamentos', '?order=created_at.desc'),
       buscar('levantamento_ambientes', '?order=ordem'),
@@ -398,11 +415,13 @@ export default function Levantamento() {
     const orcLista = await buscar('orcamentos', '?order=created_at.desc&limit=200')
     const n = orcLista.filter((o: any) => o.codigo?.startsWith('ORC-' + ano)).length + 1
     const codigo = 'ORC-' + ano + '-' + String(n).padStart(3, '0')
+    const leadCrm = await leadDoLevantamento(detalhe.id)
     const novo = await criar('orcamentos', {
       codigo,
       levantamento_id: detalhe.id,
       cliente_nome: detalhe.cliente,
       endereco: detalhe.endereco,
+      crm_lead_id: leadCrm,
       status: 'rascunho',
       total_material: 0, total_mao_obra: 0, total_geral: 0, desconto: 0,
     })
@@ -1631,6 +1650,10 @@ export default function Levantamento() {
                 <label className={labelCls}>Nome do Levantamento</label>
                 <input className={inputCls} placeholder="Ex: Levantamento Fachada, Vistoria Reforma Cozinha" value={fLev.nome} onChange={e => setFLev({ ...fLev, nome: e.target.value })} />
               </div>
+              {!levantamentoEditando && (
+                <SeletorClienteCrm valor={clienteCrm} onChange={setClienteCrm} origem="levantamento"
+                  onClienteSelecionado={c => setFLev({ ...fLev, cliente: c.nome, cliente_email: c.email || '', cliente_telefone: c.telefone || '', endereco: fLev.endereco || c.endereco || '' })} />
+              )}
               <div className="mb-3.5">
                 <label className={labelCls}>Cliente *</label>
                 <input className={inputCls} placeholder="Nome do cliente" value={fLev.cliente} onChange={e => setFLev({ ...fLev, cliente: e.target.value })} />
@@ -1695,7 +1718,7 @@ export default function Levantamento() {
       topbarSlot={
         <>
           <button
-            onClick={() => { setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }); setLevantamentoEditando(null); setJanela('levantamento') }}
+            onClick={() => { setClienteCrm(CLIENTE_CRM_VAZIO); setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }); setLevantamentoEditando(null); setJanela('levantamento') }}
             className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20"
           >
             <span className="material-symbols-outlined text-[20px]">add_circle</span>
@@ -1744,7 +1767,7 @@ export default function Levantamento() {
         <div className={sectionCls + ' text-center py-16'}>
           <div className="text-5xl mb-4">📐</div>
           <div className="text-base font-bold text-on-surface mb-4">{levantamentos.length === 0 ? 'Nenhum levantamento ainda' : 'Nenhum resultado'}</div>
-          {levantamentos.length === 0 && <button className={btnPrimaryCls} onClick={() => { setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }); setLevantamentoEditando(null); setJanela('levantamento') }}>+ Criar primeiro levantamento</button>}
+          {levantamentos.length === 0 && <button className={btnPrimaryCls} onClick={() => { setClienteCrm(CLIENTE_CRM_VAZIO); setFLev({ codigo: '', nome: '', cliente: '', endereco: '', responsavel: '', status: 'em_andamento', observacao: '', obra_id: '', cliente_email: '', cliente_telefone: '', tipo_execucao: 'obra' }); setLevantamentoEditando(null); setJanela('levantamento') }}>+ Criar primeiro levantamento</button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-lg">
@@ -1837,6 +1860,10 @@ export default function Levantamento() {
               <label className={labelCls}>Nome do Levantamento</label>
               <input className={inputCls} placeholder="Ex: Levantamento Fachada, Vistoria Reforma Cozinha" value={fLev.nome} onChange={e => setFLev({ ...fLev, nome: e.target.value })} />
             </div>
+            {!levantamentoEditando && (
+              <SeletorClienteCrm valor={clienteCrm} onChange={setClienteCrm} origem="levantamento"
+                onClienteSelecionado={c => setFLev({ ...fLev, cliente: c.nome, cliente_email: c.email || '', cliente_telefone: c.telefone || '', endereco: fLev.endereco || c.endereco || '' })} />
+            )}
             <div className="mb-3.5">
               <label className={labelCls}>Cliente *</label>
               <input className={inputCls} placeholder="Nome do cliente" value={fLev.cliente} onChange={e => setFLev({ ...fLev, cliente: e.target.value })} />

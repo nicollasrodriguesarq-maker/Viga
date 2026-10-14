@@ -294,11 +294,12 @@ export default function Home() {
           </Link>
         </div>
 
-        {/* Resumo dos alertas (follow-ups, obras em atraso, propostas e pagamentos vencidos...) */}
-        <PainelAlertas />
+        {/* Meus alertas ao lado dos compromissos de hoje (aproveita a largura da tela) */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-lg mb-xl items-stretch">
+        <PainelAlertas compacto className="h-full" />
 
         {/* Compromissos de hoje */}
-        <section className="bg-surface-container rounded-2xl card-border overflow-hidden flex flex-col mb-xl">
+        <section className="bg-surface-container rounded-2xl card-border overflow-hidden flex flex-col h-full">
           <div className="px-lg py-lg flex items-center justify-between border-b border-outline-variant bg-surface-container-high/50 flex-wrap gap-2">
             <h3 className="font-headline text-headline-sm text-on-surface">📅 Compromissos de Hoje</h3>
             <div className="flex items-center gap-3">
@@ -342,6 +343,7 @@ export default function Home() {
             </div>
           )}
         </section>
+        </div>
 
         {/* Obras recentes */}
         {obrasRecentes.length > 0 && (

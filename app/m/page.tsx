@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import MobileShell from './components/MobileShell'
+import PainelAlertas from '../components/PainelAlertas'
 import { obterMinhasPermissoesApp, obterUsuariosVisiveis } from '../lib/permissoes'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -115,6 +116,8 @@ export default function DashboardMobile() {
             <div className="text-headline-sm font-black text-error mt-1 truncate">{carregando ? '—' : formatarMoeda(aPagar)}</div>
           </div>
         </div>
+
+        <PainelAlertas limite={5} mobile />
 
         <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
           <div className="text-sm font-bold text-on-surface mb-3">📅 Compromissos de Hoje</div>

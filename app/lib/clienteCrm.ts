@@ -193,3 +193,45 @@ export async function leadDoLevantamento(levantamentoId: string): Promise<string
   const l = await get('crm_leads', `?levantamento_id=eq.${levantamentoId}&select=id&limit=1`)
   return l[0]?.id || null
 }
+
+// ── Sincronização Pipeline → Agenda de Clientes ───────────────────────────────────────
+// Todo lead do pipeline precisa ter um cadastro em Clientes. Para os que ainda não têm (criados
+// direto no CRM, antes do cadastro automático etc.): procura o cliente por e-mail, telefone ou nome
+// idêntico; se não achar, cria. Depois grava o vínculo (lead.cliente_id / cliente.lead_id).
+// Idempotente e protegido contra execuções simultâneas (não duplica cadastros).
+const normalizarNome = (s: string) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, ' ').trim()
+let sincronizando: Promise<number> | null = null
+
+export function sincronizarLeadsComClientes(): Promise<number> {
+  if (!sincronizando) sincronizando = executarSincronizacao().finally(() => { sincronizando = null })
+  return sincronizando
+}
+
+async function executarSincronizacao(): Promise<number> {
+  const leads = await get('crm_leads', '?cliente_id=is.null&select=id,nome,email,telefone,canal,canal_outro,responsavel_id&order=created_at')
+  if (leads.length === 0) return 0
+  const clientes = await get('clientes', '?select=id,nome,email,telefone,lead_id')
+  let vinculados = 0
+  for (const lead of leads) {
+    const email = String(lead.email || '').trim().toLowerCase()
+    const tel = soDigitos(lead.telefone)
+    let cliente = (email && clientes.find(c => String(c.email || '').trim().toLowerCase() === email))
+      || (tel.length >= 8 && clientes.find(c => soDigitos(c.telefone).length >= 8 && soDigitos(c.telefone).endsWith(tel.slice(-8))))
+      || clientes.find(c => normalizarNome(c.nome) === normalizarNome(lead.nome))
+      || null
+    if (!cliente) {
+      const canalOrigem = lead.canal === 'Outro' ? (lead.canal_outro || 'Outro') : lead.canal
+      cliente = await post('clientes', {
+        nome: lead.nome, email: lead.email || null, telefone: lead.telefone || null, canal_origem: canalOrigem || null,
+        responsavel_id: lead.responsavel_id || null, tipo: 'pessoa_fisica', lead_id: lead.id,
+      })
+      if (!cliente?.id) continue
+      clientes.push(cliente)
+    } else if (!cliente.lead_id) {
+      await patch('clientes', cliente.id, { lead_id: lead.id })
+      cliente.lead_id = lead.id
+    }
+    if (await patch('crm_leads', lead.id, { cliente_id: cliente.id })) vinculados++
+  }
+  return vinculados
+}

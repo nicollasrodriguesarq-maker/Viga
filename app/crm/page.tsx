@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import Layout from '../components/Layout'
+import { sincronizarLeadsComClientes } from '../lib/clienteCrm'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -143,6 +144,11 @@ export default function CRM() {
     ])
     setLeads(l); setClientes(c); setUsuarios(u); setOrcamentos(o); setLevantamentos(lev)
     setLoading(false)
+    // Todo lead do pipeline precisa existir em Clientes: cadastra/vincula os que ainda não têm.
+    if (l.some((x: any) => !x.cliente_id) && (await sincronizarLeadsComClientes()) > 0) {
+      const [l2, c2] = await Promise.all([buscar('crm_leads', '?order=created_at.desc'), buscar('clientes', '?order=nome.asc')])
+      setLeads(l2); setClientes(c2)
+    }
   }
 
   function sair() {
@@ -252,7 +258,9 @@ export default function CRM() {
       setFExtra(f => ({ ...f, data_visita: new Date().toISOString().slice(0, 10), hora_visita: '09:00' }))
       setJanela('extraEtapa')
     } else if (novaEtapa === 'fechado_ganho') {
-      setJanela('confirmarCliente')
+      // lead que já tem cadastro em Clientes (automático) dispensa a pergunta
+      if (detalhe.cliente_id) confirmarCriarCliente(true)
+      else setJanela('confirmarCliente')
     } else {
       confirmarMudancaEtapa(novaEtapa)
     }

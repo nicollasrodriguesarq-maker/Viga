@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Layout from './components/Layout'
+import PainelAlertas from './components/PainelAlertas'
 import { obterMinhasPermissoes, obterUsuariosVisiveis } from './lib/permissoes'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
@@ -292,6 +293,9 @@ export default function Home() {
             <div className="text-label-md text-on-surface-variant mt-1">pendente</div>
           </Link>
         </div>
+
+        {/* Resumo dos alertas (follow-ups, obras em atraso, propostas e pagamentos vencidos...) */}
+        <PainelAlertas />
 
         {/* Compromissos de hoje */}
         <section className="bg-surface-container rounded-2xl card-border overflow-hidden flex flex-col mb-xl">

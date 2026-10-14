@@ -8,6 +8,8 @@
 // interceptor em window.fetch que troca "Authorization: Bearer <anon>" pelo token do usuário
 // (renovando-o quando está perto de vencer). Também abre arquivos privados (NF, documentos de
 // funcionários, anexos de levantamento) via URL assinada de curta duração.
+import { EVENTO_DADOS_ALTERADOS } from './alertas'
+
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const BUCKETS_PRIVADOS = ['notas-fiscais', 'obra-funcionarios-arquivos', 'levantamento-arquivos']
 
@@ -67,20 +69,31 @@ export function instalarAuthFetch() {
 
   window.__vigaTokenValido = tokenValido
 
+  // Avisa o app (sino/painel de alertas) quando algo foi gravado no banco, pra os alertas se atualizarem
+  // na hora em vez de esperar recarregar a página.
+  function avisarAlteracao(url: string, metodo: string, resposta: Response) {
+    if (resposta.ok && metodo !== 'GET' && metodo !== 'HEAD' && url.includes('/rest/v1/') && !url.includes('/rpc/')) {
+      window.dispatchEvent(new Event(EVENTO_DADOS_ALTERADOS))
+    }
+    return resposta
+  }
+
   window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
+    const metodo = (init?.method || (input instanceof Request ? input.method : 'GET')).toUpperCase()
     if (url.startsWith(`${SUPABASE_URL}/rest/v1/`) || url.startsWith(`${SUPABASE_URL}/storage/v1/`)) {
       const token = await tokenValido()
       if (token) {
         if (input instanceof Request && !init) {
           const req = new Request(input)
           req.headers.set('Authorization', `Bearer ${token}`)
-          return fetchOriginal(req)
+          return avisarAlteracao(url, metodo, await fetchOriginal(req))
         }
         const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
         headers.set('Authorization', `Bearer ${token}`)
-        return fetchOriginal(input, { ...init, headers })
+        return avisarAlteracao(url, metodo, await fetchOriginal(input, { ...init, headers }))
       }
+      return avisarAlteracao(url, metodo, await fetchOriginal(input, init))
     }
     // Rotas internas do próprio app que exigem login (proxy de geocodificação).
     if (url.startsWith('/api/geocode') || url.startsWith(window.location.origin + '/api/geocode')) {

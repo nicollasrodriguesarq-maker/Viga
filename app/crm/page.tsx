@@ -1,7 +1,7 @@
 'use client'
 import { useState, useEffect, useMemo } from 'react'
 import Layout from '../components/Layout'
-import { sincronizarLeadsComClientes } from '../lib/clienteCrm'
+import { sincronizarLeadsComClientes, criarContatoDoCliente, encontrarClienteDuplicado } from '../lib/clienteCrm'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -87,15 +87,20 @@ const sectionCls = 'bg-surface-container border border-outline-variant rounded-x
 const FORM_LEAD_VAZIO = {
   codigo: '', nome: '', telefone: '', email: '', canal: 'Indicação', canal_outro: '',
   tipo: 'novo', responsavel_id: '', observacao: '',
+  // empresa (só ao criar): cadastra a empresa em Clientes e o responsável como primeiro contato
+  empresa: false, cnpj: '', contato_nome: '', contato_cargo: '',
 }
 const FORM_CLIENTE_VAZIO = {
   nome: '', email: '', telefone: '', cpf_cnpj: '', endereco: '', bairro: '', cidade: '', estado: '',
-  cep: '', tipo: 'pessoa_fisica', canal_origem: '', observacao: '',
+  cep: '', tipo: 'pessoa_fisica', canal_origem: '', observacao: '', razao_social: '', site: '',
 }
+const FORM_CONTATO_VAZIO = { id: '', nome: '', cargo: '', telefone: '', email: '', principal: false }
 
 export default function CRM() {
   const [leads, setLeads] = useState<any[]>([])
   const [clientes, setClientes] = useState<any[]>([])
+  const [contatos, setContatos] = useState<any[]>([])
+  const [fContato, setFContato] = useState<typeof FORM_CONTATO_VAZIO | null>(null)
   const [usuarios, setUsuarios] = useState<any[]>([])
   const [orcamentos, setOrcamentos] = useState<any[]>([])
   const [levantamentos, setLevantamentos] = useState<any[]>([])
@@ -135,13 +140,15 @@ export default function CRM() {
 
   async function carregar() {
     setLoading(true)
-    const [l, c, u, o, lev] = await Promise.all([
+    const [l, c, u, o, lev, ct] = await Promise.all([
       buscar('crm_leads', '?order=created_at.desc'),
       buscar('clientes', '?order=nome.asc'),
       buscar('usuarios', '?select=id,nome,email,role&order=nome'),
       buscar('orcamentos', '?select=id,codigo,cliente_nome,total_geral,condicao_pagamento,validade_dias,crm_lead_id&order=created_at.desc'),
       buscar('levantamentos', '?select=id,codigo,nome,cliente,cliente_nome&order=created_at.desc'),
+      buscar('cliente_contatos', '?order=principal.desc,nome.asc'),
     ])
+    setContatos(ct)
     setLeads(l); setClientes(c); setUsuarios(u); setOrcamentos(o); setLevantamentos(lev)
     setLoading(false)
     // Todo lead do pipeline precisa existir em Clientes: cadastra/vincula os que ainda não têm.
@@ -168,6 +175,7 @@ export default function CRM() {
       codigo: l.codigo || '', nome: l.nome || '', telefone: l.telefone || '', email: l.email || '',
       canal: l.canal || 'Indicação', canal_outro: l.canal_outro || '', tipo: l.tipo || 'novo',
       responsavel_id: l.responsavel_id || '', observacao: l.observacao || '',
+      empresa: false, cnpj: '', contato_nome: '', contato_cargo: '',
     })
     setJanela('form')
   }
@@ -185,6 +193,27 @@ export default function CRM() {
       if (!ok) return alert('Não foi possível salvar. Tente novamente.')
     } else {
       dados.etapa = 'lead_novo'
+      if (fLead.empresa) {
+        // Empresa: cadastra (ou reaproveita) o cliente pessoa jurídica e o responsável como contato
+        const dup = await encontrarClienteDuplicado(fLead.email, fLead.telefone, fLead.cnpj)
+        let clienteId: string | null = null
+        if (dup) {
+          if (!confirm('Já existe o cliente "' + dup.nome + '" com este CNPJ/telefone/e-mail. Vincular o lead a ele?')) return
+          clienteId = dup.id
+        } else {
+          const cli = await criar('clientes', {
+            nome: fLead.nome.trim(), cpf_cnpj: fLead.cnpj.trim() || null, tipo: 'pessoa_juridica',
+            telefone: fLead.telefone.trim() || null, email: fLead.email.trim() || null,
+            canal_origem: fLead.canal === 'Outro' ? (fLead.canal_outro.trim() || 'Outro') : fLead.canal, responsavel_id: fLead.responsavel_id || null,
+          })
+          if (!cli?.id) return alert('Não foi possível cadastrar a empresa. Tente novamente.')
+          clienteId = cli.id
+        }
+        if (fLead.contato_nome.trim() && clienteId) {
+          await criarContatoDoCliente(clienteId, { nome: fLead.contato_nome, cargo: fLead.contato_cargo, telefone: fLead.telefone, email: fLead.email })
+        }
+        dados.cliente_id = clienteId
+      }
       const novo = await criar('crm_leads', dados)
       if (!novo) return alert('Não foi possível criar. Tente novamente.')
     }
@@ -429,6 +458,7 @@ export default function CRM() {
       nome: c.nome || '', email: c.email || '', telefone: c.telefone || '', cpf_cnpj: c.cpf_cnpj || '',
       endereco: c.endereco || '', bairro: c.bairro || '', cidade: c.cidade || '', estado: c.estado || '',
       cep: c.cep || '', tipo: c.tipo || 'pessoa_fisica', canal_origem: c.canal_origem || '', observacao: c.observacao || '',
+      razao_social: c.razao_social || '', site: c.site || '',
     })
     setJanela('clienteForm')
   }
@@ -439,13 +469,23 @@ export default function CRM() {
       cpf_cnpj: fCliente.cpf_cnpj.trim() || null, endereco: fCliente.endereco.trim() || null, bairro: fCliente.bairro.trim() || null,
       cidade: fCliente.cidade.trim() || null, estado: fCliente.estado.trim() || null, cep: fCliente.cep.trim() || null,
       tipo: fCliente.tipo, canal_origem: fCliente.canal_origem.trim() || null, observacao: fCliente.observacao.trim() || null,
+      razao_social: fCliente.tipo === 'pessoa_juridica' ? (fCliente.razao_social.trim() || null) : null,
+      site: fCliente.tipo === 'pessoa_juridica' ? (fCliente.site.trim() || null) : null,
     }
     if (editandoCliente) {
       const ok = await editar('clientes', editandoCliente.id, dados)
       if (!ok) return alert('Não foi possível salvar. Tente novamente.')
+      if (clienteDetalhe?.id === editandoCliente.id) setClienteDetalhe({ ...clienteDetalhe, ...dados })
     } else {
       const novo = await criar('clientes', dados)
       if (!novo) return alert('Não foi possível criar. Tente novamente.')
+      // Empresa nova: já abre o cadastro de contatos para informar quem fala por ela
+      if (dados.tipo === 'pessoa_juridica' && novo.id) {
+        setJanela(null); setEditandoCliente(null)
+        await carregar()
+        setClienteDetalhe(novo); setFContato({ ...FORM_CONTATO_VAZIO, principal: true }); setJanela('clienteDetalhe')
+        return
+      }
     }
     setJanela(null); setEditandoCliente(null)
     await carregar()
@@ -462,13 +502,49 @@ export default function CRM() {
     carregar()
   }
   function negociosDoCliente(clienteId: string) { return leads.filter(l => l.cliente_id === clienteId) }
+  function contatosDoCliente(clienteId: string) { return contatos.filter(c => c.cliente_id === clienteId) }
+
+  // ── Contatos da empresa ───────────────────────────────────────
+  async function recarregarContatos() { setContatos(await buscar('cliente_contatos', '?order=principal.desc,nome.asc')) }
+  async function salvarContato() {
+    if (!fContato || !clienteDetalhe) return
+    if (!fContato.nome.trim()) return alert('Preencha o nome do contato')
+    const doCliente = contatosDoCliente(clienteDetalhe.id)
+    const principal = fContato.principal || (doCliente.length === 0 && !fContato.id)
+    const dados = {
+      cliente_id: clienteDetalhe.id, nome: fContato.nome.trim(), cargo: fContato.cargo.trim() || null,
+      telefone: fContato.telefone.trim() || null, email: fContato.email.trim() || null, principal,
+    }
+    // só pode haver um contato principal por empresa
+    if (principal) for (const o of doCliente) if (o.principal && o.id !== fContato.id) await editar('cliente_contatos', o.id, { principal: false })
+    if (fContato.id) {
+      const ok = await editar('cliente_contatos', fContato.id, dados)
+      if (!ok) return alert('Não foi possível salvar o contato. Tente novamente.')
+    } else {
+      const novo = await criar('cliente_contatos', dados)
+      if (!novo?.id) return alert('Não foi possível cadastrar o contato. Tente novamente.')
+    }
+    setFContato(null)
+    await recarregarContatos()
+  }
+  async function excluirContato(c: any) {
+    if (!confirm('Excluir o contato ' + c.nome + '? Propostas e obras que o citam continuam com o nome dele.')) return
+    const ok = await remover('cliente_contatos', c.id)
+    if (!ok) return alert('Não foi possível excluir o contato. Tente novamente.')
+    await recarregarContatos()
+  }
+  async function tornarPrincipal(c: any) {
+    for (const o of contatosDoCliente(c.cliente_id)) if (o.principal && o.id !== c.id) await editar('cliente_contatos', o.id, { principal: false })
+    await editar('cliente_contatos', c.id, { principal: true })
+    await recarregarContatos()
+  }
 
   const clientesFiltrados = clientes.filter(c => {
     if (filtroClientes === 'fidelizados' && !fidelizadoEfetivo(c)) return false
     if (filtroClientes === 'nao_fidelizados' && fidelizadoEfetivo(c)) return false
     if (!busca) return true
     const termo = busca.toLowerCase()
-    return [c.nome, c.email, c.telefone].some(v => v?.toLowerCase?.().includes(termo))
+    return [c.nome, c.email, c.telefone, c.razao_social, c.cpf_cnpj, ...contatosDoCliente(c.id).map(x => x.nome)].some(v => v?.toLowerCase?.().includes(termo))
   })
 
   if (loading) return (
@@ -619,9 +695,11 @@ export default function CRM() {
                 </thead>
                 <tbody>
                   {clientesFiltrados.map(c => (
-                    <tr key={c.id} className="border-b border-outline-variant hover:bg-surface-variant/20 cursor-pointer" onClick={() => { setClienteDetalhe(c); setJanela('clienteDetalhe') }}>
-                      <td className="px-2.5 py-2.5 font-semibold text-on-surface">{c.nome}</td>
-                      <td className="px-2.5 py-2.5 text-on-surface-variant">{c.telefone || c.email || '—'}</td>
+                    <tr key={c.id} className="border-b border-outline-variant hover:bg-surface-variant/20 cursor-pointer" onClick={() => { setClienteDetalhe(c); setFContato(null); setJanela('clienteDetalhe') }}>
+                      <td className="px-2.5 py-2.5 font-semibold text-on-surface">{c.tipo === 'pessoa_juridica' && <span title="Empresa">🏢 </span>}{c.nome}</td>
+                      <td className="px-2.5 py-2.5 text-on-surface-variant">{c.tipo === 'pessoa_juridica'
+                        ? (() => { const cs = contatosDoCliente(c.id); const p = cs.find(x => x.principal) || cs[0]; return p ? <>{p.nome}{cs.length > 1 ? <span className="text-[11px]"> +{cs.length - 1}</span> : null}</> : (c.telefone || c.email || 'sem contatos') })()
+                        : (c.telefone || c.email || '—')}</td>
                       <td className="px-2.5 py-2.5 text-on-surface-variant">{c.canal_origem || '—'}</td>
                       <td className="px-2.5 py-2.5 text-on-surface-variant">{negociosDoCliente(c.id).filter(l => l.etapa === 'fechado_ganho').length}</td>
                       <td className="px-2.5 py-2.5">
@@ -662,10 +740,36 @@ export default function CRM() {
               </div>
             </div>
 
+            {!editando && (
+              <div className="flex gap-2 mb-3.5">
+                {([false, true] as const).map(v => (
+                  <button key={String(v)} type="button" data-testid={v ? 'lead-empresa' : 'lead-pessoa'} onClick={() => setFLead({ ...fLead, empresa: v })}
+                    className={`flex-1 rounded-lg py-2 text-[12px] font-bold border transition-all cursor-pointer ${fLead.empresa === v ? 'bg-primary/15 border-primary text-primary' : 'bg-surface-container-low border-outline-variant text-on-surface-variant hover:bg-surface-variant/50'}`}>
+                    {v ? '🏢 Empresa' : '👤 Pessoa física'}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="mb-3.5">
-              <label className={labelCls}>Nome *</label>
-              <input className={inputCls} value={fLead.nome} onChange={e => setFLead({ ...fLead, nome: e.target.value })} />
+              <label className={labelCls}>{fLead.empresa && !editando ? 'Nome da empresa *' : 'Nome *'}</label>
+              <input className={inputCls} value={fLead.nome} onChange={e => setFLead({ ...fLead, nome: e.target.value })} data-testid="lead-nome" />
             </div>
+            {fLead.empresa && !editando && (
+              <div className="grid grid-cols-3 gap-3 mb-3.5">
+                <div>
+                  <label className={labelCls}>CNPJ</label>
+                  <input className={inputCls} value={fLead.cnpj} onChange={e => setFLead({ ...fLead, cnpj: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Contato (nome)</label>
+                  <input className={inputCls} placeholder="Quem fala pela empresa" value={fLead.contato_nome} onChange={e => setFLead({ ...fLead, contato_nome: e.target.value })} data-testid="lead-contato-nome" />
+                </div>
+                <div>
+                  <label className={labelCls}>Cargo</label>
+                  <input className={inputCls} value={fLead.contato_cargo} onChange={e => setFLead({ ...fLead, contato_cargo: e.target.value })} />
+                </div>
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3 mb-3.5">
               <div>
@@ -991,12 +1095,12 @@ export default function CRM() {
             <div className="text-base font-bold text-on-surface mb-5">👥 {editandoCliente ? 'Editar Cliente' : 'Novo Cliente'}</div>
 
             <div className="mb-3.5">
-              <label className={labelCls}>Nome *</label>
+              <label className={labelCls}>{fCliente.tipo === 'pessoa_juridica' ? 'Nome fantasia / empresa *' : 'Nome *'}</label>
               <input className={inputCls} value={fCliente.nome} onChange={e => setFCliente({ ...fCliente, nome: e.target.value })} />
             </div>
             <div className="grid grid-cols-2 gap-3 mb-3.5">
               <div>
-                <label className={labelCls}>Telefone</label>
+                <label className={labelCls}>{fCliente.tipo === 'pessoa_juridica' ? 'Telefone geral' : 'Telefone'}</label>
                 <input className={inputCls} value={fCliente.telefone} onChange={e => setFCliente({ ...fCliente, telefone: e.target.value })} />
               </div>
               <div>
@@ -1013,10 +1117,22 @@ export default function CRM() {
                 </select>
               </div>
               <div>
-                <label className={labelCls}>CPF/CNPJ</label>
+                <label className={labelCls}>{fCliente.tipo === 'pessoa_juridica' ? 'CNPJ' : 'CPF/CNPJ'}</label>
                 <input className={inputCls} value={fCliente.cpf_cnpj} onChange={e => setFCliente({ ...fCliente, cpf_cnpj: e.target.value })} />
               </div>
             </div>
+            {fCliente.tipo === 'pessoa_juridica' && (
+              <div className="grid grid-cols-2 gap-3 mb-3.5">
+                <div>
+                  <label className={labelCls}>Razão social</label>
+                  <input className={inputCls} value={fCliente.razao_social} onChange={e => setFCliente({ ...fCliente, razao_social: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Site</label>
+                  <input className={inputCls} placeholder="www.empresa.com.br" value={fCliente.site} onChange={e => setFCliente({ ...fCliente, site: e.target.value })} />
+                </div>
+              </div>
+            )}
             <div className="mb-3.5">
               <label className={labelCls}>Endereço</label>
               <input className={inputCls} value={fCliente.endereco} onChange={e => setFCliente({ ...fCliente, endereco: e.target.value })} />
@@ -1061,7 +1177,10 @@ export default function CRM() {
           <div className="bg-surface-container border border-outline-variant rounded-2xl w-full max-w-[640px] max-h-[92vh] overflow-y-auto custom-scrollbar p-7">
             <div className="flex items-start justify-between gap-3 mb-4">
               <div>
-                <div className="text-lg font-bold text-on-surface">{clienteDetalhe.nome}</div>
+                <div className="text-lg font-bold text-on-surface">{clienteDetalhe.tipo === 'pessoa_juridica' && '🏢 '}{clienteDetalhe.nome}</div>
+                {clienteDetalhe.tipo === 'pessoa_juridica' && (clienteDetalhe.razao_social || clienteDetalhe.cpf_cnpj || clienteDetalhe.site) && (
+                  <div className="text-[12px] text-on-surface-variant mt-0.5">{[clienteDetalhe.razao_social, clienteDetalhe.cpf_cnpj && 'CNPJ ' + clienteDetalhe.cpf_cnpj, clienteDetalhe.site].filter(Boolean).join(' · ')}</div>
+                )}
                 <div className="text-[12px] text-on-surface-variant flex items-center gap-3 mt-0.5 flex-wrap">
                   {clienteDetalhe.telefone && <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">call</span>{clienteDetalhe.telefone}</span>}
                   {clienteDetalhe.email && <span className="flex items-center gap-1"><span className="material-symbols-outlined text-[14px]">mail</span>{clienteDetalhe.email}</span>}
@@ -1083,6 +1202,49 @@ export default function CRM() {
               <button className={btnEditSmCls} onClick={() => alternarFidelizado(clienteDetalhe)}>{fidelizadoEfetivo(clienteDetalhe) ? 'Remover selo' : 'Marcar fidelizado'}</button>
               {clienteDetalhe.fidelizado_manual != null && <span className="text-[10px] text-on-surface-variant">(ajustado manualmente)</span>}
             </div>
+
+            {clienteDetalhe.tipo === 'pessoa_juridica' && (
+              <div className="mb-5" data-testid="contatos-empresa">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm font-bold text-on-surface">Contatos da empresa ({contatosDoCliente(clienteDetalhe.id).length})</div>
+                  {!fContato && <button className={btnEditSmCls} onClick={() => setFContato({ ...FORM_CONTATO_VAZIO })} data-testid="novo-contato">+ Novo contato</button>}
+                </div>
+                {fContato && (
+                  <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3 mb-3 flex flex-col gap-2.5" data-testid="form-contato">
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <div><label className={labelCls}>Nome *</label><input className={inputCls} value={fContato.nome} onChange={e => setFContato({ ...fContato, nome: e.target.value })} data-testid="contato-nome" /></div>
+                      <div><label className={labelCls}>Cargo</label><input className={inputCls} value={fContato.cargo} onChange={e => setFContato({ ...fContato, cargo: e.target.value })} /></div>
+                      <div><label className={labelCls}>Telefone</label><input className={inputCls} value={fContato.telefone} onChange={e => setFContato({ ...fContato, telefone: e.target.value })} /></div>
+                      <div><label className={labelCls}>E-mail</label><input className={inputCls} value={fContato.email} onChange={e => setFContato({ ...fContato, email: e.target.value })} /></div>
+                    </div>
+                    <label className="flex items-center gap-2 text-[12px] text-on-surface-variant cursor-pointer"><input type="checkbox" checked={fContato.principal} onChange={e => setFContato({ ...fContato, principal: e.target.checked })} />Contato principal da empresa</label>
+                    <div className="flex gap-2 justify-end">
+                      <button className={btnSecondaryCls} onClick={() => setFContato(null)}>Cancelar</button>
+                      <button className={btnPrimaryCls} onClick={salvarContato} data-testid="salvar-contato">{fContato.id ? 'Salvar contato' : 'Adicionar contato'}</button>
+                    </div>
+                  </div>
+                )}
+                {contatosDoCliente(clienteDetalhe.id).length === 0 && !fContato ? (
+                  <div className="text-center py-3 text-on-surface-variant text-sm">Nenhum contato cadastrado — adicione quem fala pela empresa</div>
+                ) : (
+                  <div className="flex flex-col gap-2">
+                    {contatosDoCliente(clienteDetalhe.id).map(c => (
+                      <div key={c.id} className="bg-surface-container-low border border-outline-variant rounded-lg p-3 flex items-center justify-between gap-2" data-testid="item-contato">
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-on-surface">{c.nome}{c.principal && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">PRINCIPAL</span>}</div>
+                          <div className="text-[11px] text-on-surface-variant">{[c.cargo, c.telefone, c.email].filter(Boolean).join(' · ') || 'sem dados de contato'}</div>
+                        </div>
+                        <div className="flex gap-1.5 shrink-0">
+                          {!c.principal && <button className={btnEditSmCls} onClick={() => tornarPrincipal(c)}>Tornar principal</button>}
+                          <button className={btnEditSmCls} onClick={() => setFContato({ id: c.id, nome: c.nome || '', cargo: c.cargo || '', telefone: c.telefone || '', email: c.email || '', principal: !!c.principal })}>Editar</button>
+                          <button className={btnDangerSmCls} onClick={() => excluirContato(c)}>Excluir</button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="text-sm font-bold text-on-surface mb-3">Negócios</div>
             {negociosDoCliente(clienteDetalhe.id).length === 0 ? (

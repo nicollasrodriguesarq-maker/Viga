@@ -24,10 +24,23 @@ export interface ValorClienteCrm {
   email: string
   canal: string
   canalOutro: string
+  // Empresa: o cliente é uma pessoa jurídica com contatos; o contato escolhido/cadastrado aqui é o
+  // "responsável" DESTE documento (proposta, levantamento, obra).
+  tipoCliente: 'pessoa' | 'empresa'
+  cnpj: string
+  contatoId: string // contato já cadastrado da empresa (modo carteira)
+  novoContato: boolean // modo carteira: cadastrar um novo contato na empresa
+  contatoNome: string
+  contatoCargo: string
+  contatoTelefone: string
+  contatoEmail: string
 }
 
 export const CANAIS_CRM = ['Indicação', 'Google Meu Negócio', 'Instagram', 'Site', 'Outro']
-export const CLIENTE_CRM_VAZIO: ValorClienteCrm = { modo: 'novo', clienteId: '', leadId: '', telefone: '', email: '', canal: 'Indicação', canalOutro: '' }
+export const CLIENTE_CRM_VAZIO: ValorClienteCrm = {
+  modo: 'novo', clienteId: '', leadId: '', telefone: '', email: '', canal: 'Indicação', canalOutro: '',
+  tipoCliente: 'pessoa', cnpj: '', contatoId: '', novoContato: false, contatoNome: '', contatoCargo: '', contatoTelefone: '', contatoEmail: '',
+}
 
 export const ETAPA_POR_ORIGEM: Record<OrigemCrm, string> = { levantamento: 'visita_realizada', orcamento: 'qualificacao', obra: 'fechado_ganho' }
 export const NOME_ETAPA_CRM: Record<string, string> = {
@@ -60,7 +73,21 @@ async function patch(tabela: string, id: string, dados: object): Promise<boolean
 const soDigitos = (s?: string | null) => String(s || '').replace(/\D/g, '')
 
 export async function listarClientesCarteira(): Promise<any[]> {
-  return get('clientes', '?select=id,nome,email,telefone,endereco,bairro,cidade,estado,canal_origem&order=nome')
+  return get('clientes', '?select=id,nome,email,telefone,endereco,bairro,cidade,estado,canal_origem,tipo,cpf_cnpj,razao_social&order=nome')
+}
+
+export async function listarContatosDoCliente(clienteId: string): Promise<any[]> {
+  if (!clienteId) return []
+  return get('cliente_contatos', `?cliente_id=eq.${clienteId}&select=id,nome,cargo,telefone,email,principal&order=principal.desc,nome`)
+}
+
+// Cria um contato na empresa; o primeiro contato da empresa vira o principal.
+export async function criarContatoDoCliente(clienteId: string, c: { nome: string; cargo?: string; telefone?: string; email?: string }, principal?: boolean) {
+  const existentes = await get('cliente_contatos', `?cliente_id=eq.${clienteId}&select=id&limit=1`)
+  return post('cliente_contatos', {
+    cliente_id: clienteId, nome: c.nome.trim(), cargo: c.cargo?.trim() || null, telefone: c.telefone?.trim() || null,
+    email: c.email?.trim() || null, principal: principal ?? existentes.length === 0,
+  })
 }
 
 async function gerarCodigoLead(): Promise<string> {
@@ -80,14 +107,17 @@ export function validarClienteCrm(v: ValorClienteCrm, nome: string): string | nu
   if (!nome.trim()) return 'Preencha o nome do cliente'
   if (v.modo === 'carteira' && !v.clienteId) return 'Selecione o cliente da carteira (ou troque para "Cliente novo")'
   if (v.modo === 'lead' && !v.leadId) return 'Selecione o lead do pipeline (ou troque para "Cliente novo")'
+  if (v.modo === 'carteira' && v.novoContato && !v.contatoNome.trim()) return 'Informe o nome do novo contato da empresa'
   return null
 }
 
 // Cliente já cadastrado com o mesmo e-mail ou telefone (evita duplicar a agenda de clientes).
-export async function encontrarClienteDuplicado(email: string, telefone: string): Promise<any | null> {
-  const clientes = await get('clientes', '?select=id,nome,email,telefone,canal_origem')
+export async function encontrarClienteDuplicado(email: string, telefone: string, cnpj = ''): Promise<any | null> {
+  const clientes = await get('clientes', '?select=id,nome,email,telefone,canal_origem,cpf_cnpj')
   const tel = soDigitos(telefone)
+  const doc = soDigitos(cnpj)
   return clientes.find(c =>
+    (doc.length >= 11 && soDigitos(c.cpf_cnpj) === doc) ||
     (email && c.email && c.email.trim().toLowerCase() === email.trim().toLowerCase()) ||
     (tel.length >= 8 && soDigitos(c.telefone).length >= 8 && soDigitos(c.telefone).endsWith(tel.slice(-8)))
   ) || null
@@ -103,7 +133,7 @@ export interface ContextoCrm {
   responsavelId?: string | null
 }
 export type ResultadoCrm =
-  | { ok: true; leadId: string | null; clienteId: string | null; criouCliente: boolean; criouLead: boolean; nomeCliente: string | null }
+  | { ok: true; leadId: string | null; clienteId: string | null; criouCliente: boolean; criouLead: boolean; nomeCliente: string | null; contatoId: string | null; contatoNome: string | null }
   | { ok: false; erro: string; duplicado?: any }
 
 export async function registrarClienteNoCrm(v: ValorClienteCrm, ctx: ContextoCrm): Promise<ResultadoCrm> {
@@ -111,7 +141,7 @@ export async function registrarClienteNoCrm(v: ValorClienteCrm, ctx: ContextoCrm
   if (v.modo === 'lead') {
     if (!v.leadId) return { ok: false, erro: 'Lead não selecionado' }
     const lead = (await get('crm_leads', `?id=eq.${v.leadId}&select=id,cliente_id`))[0]
-    return { ok: true, leadId: v.leadId, clienteId: lead?.cliente_id || null, criouCliente: false, criouLead: false, nomeCliente: null }
+    return { ok: true, leadId: v.leadId, clienteId: lead?.cliente_id || null, criouCliente: false, criouLead: false, nomeCliente: null, contatoId: null, contatoNome: null }
   }
 
   const telefone = (v.telefone || ctx.telefone || '').trim()
@@ -123,13 +153,28 @@ export async function registrarClienteNoCrm(v: ValorClienteCrm, ctx: ContextoCrm
   let canalOutro: string | null = v.canal === 'Outro' ? (v.canalOutro.trim() || null) : null
   let nomeLead = ctx.nome.trim()
   let telLead = telefone, emailLead = email
+  let contatoId: string | null = null
+  let contatoNome: string | null = null
 
   if (v.modo === 'carteira') {
-    const cliente = (await get('clientes', `?id=eq.${clienteId}&select=id,nome,email,telefone,canal_origem,fidelizado_manual`))[0]
+    const cliente = (await get('clientes', `?id=eq.${clienteId}&select=id,nome,email,telefone,canal_origem,fidelizado_manual,tipo`))[0]
     if (!cliente) return { ok: false, erro: 'Cliente da carteira não encontrado' }
     nomeLead = cliente.nome
     telLead = cliente.telefone || telefone
     emailLead = cliente.email || email
+    // Empresa: o responsável deste documento é um contato dela (existente ou recém-cadastrado)
+    if (cliente.tipo === 'pessoa_juridica') {
+      if (v.novoContato && v.contatoNome.trim()) {
+        const novoC = await criarContatoDoCliente(clienteId, { nome: v.contatoNome, cargo: v.contatoCargo, telefone: v.contatoTelefone, email: v.contatoEmail })
+        if (novoC?.id) { contatoId = novoC.id; contatoNome = novoC.nome }
+      } else if (v.contatoId) {
+        const c = (await get('cliente_contatos', `?id=eq.${v.contatoId}&select=id,nome`))[0]
+        if (c) { contatoId = c.id; contatoNome = c.nome }
+      }
+      const cont = contatoId ? (await get('cliente_contatos', `?id=eq.${contatoId}&select=telefone,email`))[0] : null
+      telLead = cont?.telefone || telLead
+      emailLead = cont?.email || emailLead
+    }
     if (cliente.canal_origem && CANAIS_CRM.includes(cliente.canal_origem)) { canal = cliente.canal_origem; canalOutro = null }
     else { canal = 'Outro'; canalOutro = cliente.canal_origem || 'Carteira' }
     // novo negócio FECHADO com quem já fechou antes → fidelizado (regra do CRM), salvo ajuste manual
@@ -138,16 +183,26 @@ export async function registrarClienteNoCrm(v: ValorClienteCrm, ctx: ContextoCrm
       if (ganhos.length >= 1) await patch('clientes', clienteId, { fidelizado: true })
     }
   } else {
-    const duplicado = await encontrarClienteDuplicado(email, telefone)
+    const ehEmpresa = v.tipoCliente === 'empresa'
+    // empresa: telefone/e-mail do cadastro vêm do contato (quando informado)
+    const telCad = ehEmpresa ? (v.contatoTelefone.trim() || telefone) : telefone
+    const emailCad = ehEmpresa ? (v.contatoEmail.trim() || email) : email
+    const duplicado = await encontrarClienteDuplicado(emailCad, telCad, ehEmpresa ? v.cnpj : '')
     if (duplicado) return { ok: false, erro: 'duplicado', duplicado }
     const canalFinal = canal === 'Outro' ? (canalOutro || 'Outro') : canal
     const novo = await post('clientes', {
-      nome: ctx.nome.trim(), email: email || null, telefone: telefone || null, endereco: ctx.endereco?.trim() || null,
-      canal_origem: canalFinal, responsavel_id: ctx.responsavelId || null, tipo: 'pessoa_fisica',
+      nome: ctx.nome.trim(), email: emailCad || null, telefone: telCad || null, endereco: ctx.endereco?.trim() || null,
+      cpf_cnpj: ehEmpresa ? (v.cnpj.trim() || null) : null,
+      canal_origem: canalFinal, responsavel_id: ctx.responsavelId || null, tipo: ehEmpresa ? 'pessoa_juridica' : 'pessoa_fisica',
     })
     if (!novo?.id) return { ok: false, erro: 'Não foi possível cadastrar o cliente na agenda de clientes' }
     clienteId = novo.id
     criouCliente = true
+    telLead = telCad; emailLead = emailCad
+    if (ehEmpresa && v.contatoNome.trim()) {
+      const c = await criarContatoDoCliente(clienteId, { nome: v.contatoNome, cargo: v.contatoCargo, telefone: v.contatoTelefone, email: v.contatoEmail }, true)
+      if (c?.id) { contatoId = c.id; contatoNome = c.nome }
+    }
   }
 
   const lead = await post('crm_leads', {
@@ -162,12 +217,12 @@ export async function registrarClienteNoCrm(v: ValorClienteCrm, ctx: ContextoCrm
     lead_id: lead.id, tipo: 'nota',
     descricao: `Lead criado automaticamente a partir de ${ctx.rotulo} (${v.modo === 'carteira' ? 'cliente da carteira' : 'cliente novo'}).`,
   })
-  return { ok: true, leadId: lead.id, clienteId, criouCliente, criouLead: true, nomeCliente: nomeLead }
+  return { ok: true, leadId: lead.id, clienteId, criouCliente, criouLead: true, nomeCliente: nomeLead, contatoId, contatoNome }
 }
 
 // Versão para telas: confirma duplicidade com o usuário e oferece criar sem CRM se algo falhar.
 // Retorna null se o usuário cancelou; { leadId, clienteId } (podendo ser nulos) caso contrário.
-export async function registrarClienteNoCrmInterativo(v: ValorClienteCrm, ctx: ContextoCrm): Promise<{ leadId: string | null; clienteId: string | null; nomeCliente: string | null } | null> {
+export async function registrarClienteNoCrmInterativo(v: ValorClienteCrm, ctx: ContextoCrm): Promise<{ leadId: string | null; clienteId: string | null; nomeCliente: string | null; contatoId: string | null; contatoNome: string | null } | null> {
   let r = await registrarClienteNoCrm(v, ctx)
   if (!r.ok && r.duplicado) {
     const d = r.duplicado
@@ -177,9 +232,9 @@ export async function registrarClienteNoCrmInterativo(v: ValorClienteCrm, ctx: C
   }
   if (!r.ok) {
     const seguir = confirm(`Não foi possível registrar o cliente no CRM: ${r.erro}.\n\nCriar ${ctx.rotulo.split(' ')[0].toLowerCase()} mesmo assim, sem CRM?`)
-    return seguir ? { leadId: null, clienteId: null, nomeCliente: null } : null
+    return seguir ? { leadId: null, clienteId: null, nomeCliente: null, contatoId: null, contatoNome: v.tipoCliente === 'empresa' ? (v.contatoNome.trim() || null) : null } : null
   }
-  return { leadId: r.leadId, clienteId: r.clienteId, nomeCliente: r.nomeCliente }
+  return { leadId: r.leadId, clienteId: r.clienteId, nomeCliente: r.nomeCliente, contatoId: r.contatoId, contatoNome: r.contatoNome }
 }
 
 // Depois que o registro (levantamento/obra) existe, grava o vínculo no lead.

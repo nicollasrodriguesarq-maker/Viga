@@ -5,6 +5,7 @@ import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import { obterTokenValido } from '../lib/authFetch'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
+import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../lib/clienteCrm'
 import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../lib/medicoesCalc'
 import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma, type ModoCronograma } from '../lib/cronograma'
@@ -1500,7 +1501,7 @@ export default function Obras() {
           <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Resumo do Projeto</span>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Projeto</span><span style="font-size:14px;font-weight:600">${obra.nome}</span></div>
-            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cliente</span><span style="font-size:14px;font-weight:600">${obra.cliente}</span></div>
+            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cliente</span><span style="font-size:14px;font-weight:600">${obra.cliente}${obra.contato_nome ? ' <span style="font-weight:400;color:#bcc9c7;font-size:12px">(A/C ' + obra.contato_nome + ')</span>' : ''}</span></div>
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Localização</span><span style="font-size:14px;font-weight:600">${obra.endereco || '—'}</span></div>
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cronograma</span><span style="font-size:14px;font-weight:600">${obra.data_inicio ? new Date(obra.data_inicio).toLocaleDateString('pt-BR') : '—'} — ${obra.data_previsao ? new Date(obra.data_previsao).toLocaleDateString('pt-BR') : '—'}</span></div>
           </div>
@@ -2074,7 +2075,7 @@ export default function Obras() {
     }
     // Obra NOVA = contrato fechado: registra o cliente na Agenda de Clientes e o lead no Pipeline
     // (cliente novo ou da carteira) já na etapa "Fechado Ganho".
-    let crm: { leadId: string | null; clienteId: string | null; nomeCliente: string | null } | null = { leadId: null, clienteId: null, nomeCliente: null }
+    let crm: { leadId: string | null; clienteId: string | null; nomeCliente: string | null; contatoId: string | null; contatoNome: string | null } | null = { leadId: null, clienteId: null, nomeCliente: null, contatoId: null, contatoNome: null }
     if (!obraEditando) {
       const erroCrm = validarClienteCrm(clienteCrm, fObra.cliente)
       if (erroCrm) return alert(erroCrm)
@@ -2108,6 +2109,9 @@ export default function Obras() {
         setDetalhe({ ...detalhe, ...dados })
       }
     } else {
+      if (crm?.clienteId) dados.cliente_id = crm.clienteId
+      if (crm?.contatoId) dados.contato_id = crm.contatoId
+      if (crm?.contatoNome) dados.contato_nome = crm.contatoNome
       const nova = await criar('obras', dados)
       obraId = nova?.id
       if (obraId) await vincularLeadAoRegistro(crm?.leadId || null, { obra_id: obraId })
@@ -2273,6 +2277,8 @@ export default function Obras() {
             </div>
             <h1 className="text-headline-md font-headline text-on-surface">{detalhe.nome}</h1>
             <p className="text-body-sm text-on-surface-variant">{detalhe.cliente}{detalhe.endereco ? ' · ' + detalhe.endereco : ''}</p>
+            <ResponsavelDoDocumento clienteId={detalhe.cliente_id} contatoId={detalhe.contato_id} contatoNome={detalhe.contato_nome}
+              onSalvar={async (cid, nome) => { const ok = await editar('obras', detalhe.id, { contato_id: cid, contato_nome: nome }); if (!ok) return alert('Não foi possível salvar o responsável. Tente novamente.'); setDetalhe({ ...detalhe, contato_id: cid, contato_nome: nome }) }} />
           </div>
           <div className="flex gap-2 flex-wrap items-start">
             <button onClick={() => abrirEditarObra(detalhe)} className={btnEditSmCls}>✏️ Editar</button>

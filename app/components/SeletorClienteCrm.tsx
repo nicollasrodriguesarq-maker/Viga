@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
-import { CANAIS_CRM, ETAPA_POR_ORIGEM, NOME_ETAPA_CRM, listarClientesCarteira, type OrigemCrm, type ValorClienteCrm } from '../lib/clienteCrm'
+import { CANAIS_CRM, ETAPA_POR_ORIGEM, NOME_ETAPA_CRM, listarClientesCarteira, listarContatosDoCliente, type OrigemCrm, type ValorClienteCrm } from '../lib/clienteCrm'
 
 // Pergunta, ao criar Orçamento / Levantamento / Obra, se o cliente é NOVO ou já da CARTEIRA, e
 // guarda a escolha para o cadastro automático no CRM (agenda de clientes + pipeline).
@@ -22,13 +22,30 @@ interface Props {
 export default function SeletorClienteCrm({ valor, onChange, origem, leads, mostrarContato, onClienteSelecionado, onLeadSelecionado }: Props) {
   const [clientes, setClientes] = useState<any[]>([])
   const [busca, setBusca] = useState('')
+  const [contatos, setContatos] = useState<any[]>([])
 
   useEffect(() => { listarClientesCarteira().then(setClientes) }, [])
+  // contatos da empresa escolhida na carteira (o principal vem pré-selecionado como responsável)
+  useEffect(() => {
+    let vivo = true
+    if (valor.modo !== 'carteira' || !valor.clienteId) { setContatos([]); return }
+    listarContatosDoCliente(valor.clienteId).then(lista => {
+      if (!vivo) return
+      setContatos(lista)
+      if (lista.length > 0 && !valor.contatoId && !valor.novoContato) {
+        const p = lista.find(c => c.principal) || lista[0]
+        onChange({ ...valor, contatoId: p.id })
+      }
+    })
+    return () => { vivo = false }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [valor.clienteId, valor.modo])
 
   const set = (parcial: Partial<ValorClienteCrm>) => onChange({ ...valor, ...parcial })
   const termo = busca.trim().toLowerCase()
   const filtrados = clientes.filter(c => !termo || [c.nome, c.telefone, c.email].some(x => String(x || '').toLowerCase().includes(termo)))
   const clienteSel = clientes.find(c => c.id === valor.clienteId)
+  const ehEmpresaSel = clienteSel?.tipo === 'pessoa_juridica'
 
   const botao = (modo: ValorClienteCrm['modo'], rotulo: string) => (
     <button type="button" data-testid={`modo-cliente-${modo}`}
@@ -49,6 +66,41 @@ export default function SeletorClienteCrm({ valor, onChange, origem, leads, most
 
       {valor.modo === 'novo' && (
         <div className="flex flex-col gap-2.5">
+          <div className="flex gap-2">
+            {(['pessoa', 'empresa'] as const).map(t => (
+              <button key={t} type="button" data-testid={`tipo-cliente-${t}`} onClick={() => set({ tipoCliente: t })}
+                className={`flex-1 rounded-lg py-1.5 text-[12px] font-semibold border transition-all cursor-pointer ${valor.tipoCliente === t ? 'bg-primary/15 border-primary text-primary' : 'bg-surface-container-low border-outline-variant text-on-surface-variant hover:bg-surface-variant/50'}`}>
+                {t === 'pessoa' ? '👤 Pessoa física' : '🏢 Empresa'}
+              </button>
+            ))}
+          </div>
+          {valor.tipoCliente === 'empresa' && (
+            <div className="flex flex-col gap-2.5 rounded-lg border border-outline-variant/60 p-2.5" data-testid="bloco-empresa-crm">
+              <div className="text-[11px] text-on-surface-variant">O nome acima é o da <b>empresa</b>. Informe também quem é o <b>responsável por esta proposta</b> — outros contatos podem ser adicionados depois no CRM.</div>
+              <div>
+                <label className={labelCls}>CNPJ</label>
+                <input className={inputCls} placeholder="00.000.000/0000-00" value={valor.cnpj} onChange={e => set({ cnpj: e.target.value })} data-testid="input-cnpj-crm" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className={labelCls}>Responsável (nome)</label>
+                  <input className={inputCls} placeholder="Ex.: Maria Souza" value={valor.contatoNome} onChange={e => set({ contatoNome: e.target.value })} data-testid="input-contato-nome-crm" />
+                </div>
+                <div>
+                  <label className={labelCls}>Cargo</label>
+                  <input className={inputCls} placeholder="Ex.: Gerente de compras" value={valor.contatoCargo} onChange={e => set({ contatoCargo: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>Telefone do responsável</label>
+                  <input className={inputCls} placeholder="(11) 90000-0000" value={valor.contatoTelefone} onChange={e => set({ contatoTelefone: e.target.value })} />
+                </div>
+                <div>
+                  <label className={labelCls}>E-mail do responsável</label>
+                  <input className={inputCls} type="email" value={valor.contatoEmail} onChange={e => set({ contatoEmail: e.target.value })} />
+                </div>
+              </div>
+            </div>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             <div>
               <label className={labelCls}>Como chegou até nós</label>
@@ -63,7 +115,7 @@ export default function SeletorClienteCrm({ valor, onChange, origem, leads, most
               </div>
             )}
           </div>
-          {mostrarContato && (
+          {mostrarContato && valor.tipoCliente !== 'empresa' && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <div>
                 <label className={labelCls}>Telefone</label>
@@ -83,10 +135,32 @@ export default function SeletorClienteCrm({ valor, onChange, origem, leads, most
         <div className="flex flex-col gap-2">
           <input className={inputCls} placeholder="Buscar cliente por nome, telefone ou e-mail..." value={busca} onChange={e => setBusca(e.target.value)} data-testid="busca-cliente-carteira" />
           <select className={inputCls} value={valor.clienteId} data-testid="select-cliente-carteira"
-            onChange={e => { const c = clientes.find(x => x.id === e.target.value); set({ clienteId: e.target.value }); if (c) onClienteSelecionado?.(c) }}>
+            onChange={e => { const c = clientes.find(x => x.id === e.target.value); set({ clienteId: e.target.value, contatoId: '', novoContato: false, contatoNome: '', contatoCargo: '', contatoTelefone: '', contatoEmail: '' }); if (c) onClienteSelecionado?.(c) }}>
             <option value="">{clientes.length === 0 ? 'Nenhum cliente cadastrado na carteira ainda' : 'Selecione o cliente...'}</option>
-            {filtrados.map(c => <option key={c.id} value={c.id}>{c.nome}{c.telefone ? ' · ' + c.telefone : ''}</option>)}
+            {filtrados.map(c => <option key={c.id} value={c.id}>{c.tipo === 'pessoa_juridica' ? '🏢 ' : ''}{c.nome}{c.telefone ? ' · ' + c.telefone : ''}</option>)}
           </select>
+          {clienteSel && ehEmpresaSel && (
+            <div className="flex flex-col gap-2 rounded-lg border border-outline-variant/60 p-2.5" data-testid="bloco-responsavel-crm">
+              <label className={labelCls + ' !mb-0'}>Responsável por esta proposta</label>
+              {!valor.novoContato ? (
+                <select className={inputCls} value={valor.contatoId} onChange={e => e.target.value === '__novo' ? set({ novoContato: true, contatoId: '' }) : set({ contatoId: e.target.value })} data-testid="select-contato-crm">
+                  <option value="">{contatos.length === 0 ? 'Nenhum contato cadastrado — cadastre abaixo' : 'Sem responsável definido'}</option>
+                  {contatos.map(c => <option key={c.id} value={c.id}>{c.nome}{c.cargo ? ' — ' + c.cargo : ''}{c.principal ? ' ★' : ''}</option>)}
+                  <option value="__novo">➕ Cadastrar novo contato desta empresa...</option>
+                </select>
+              ) : (
+                <div className="flex flex-col gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <input className={inputCls} placeholder="Nome do contato *" value={valor.contatoNome} onChange={e => set({ contatoNome: e.target.value })} data-testid="input-novo-contato-nome" />
+                    <input className={inputCls} placeholder="Cargo" value={valor.contatoCargo} onChange={e => set({ contatoCargo: e.target.value })} />
+                    <input className={inputCls} placeholder="Telefone" value={valor.contatoTelefone} onChange={e => set({ contatoTelefone: e.target.value })} />
+                    <input className={inputCls} type="email" placeholder="E-mail" value={valor.contatoEmail} onChange={e => set({ contatoEmail: e.target.value })} />
+                  </div>
+                  <button type="button" onClick={() => set({ novoContato: false, contatoNome: '', contatoCargo: '', contatoTelefone: '', contatoEmail: '' })} className="text-primary text-[12px] font-semibold text-left cursor-pointer hover:underline">← Escolher um contato já cadastrado</button>
+                </div>
+              )}
+            </div>
+          )}
           {clienteSel && <div className="text-[11px] text-on-surface-variant">Um novo negócio será aberto no Pipeline para <b>{clienteSel.nome}</b> (tipo Carteira), na etapa “{NOME_ETAPA_CRM[ETAPA_POR_ORIGEM[origem]]}”.</div>}
         </div>
       )}

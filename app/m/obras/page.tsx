@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, Fragment } from 'react'
 import MobileShell from '../components/MobileShell'
+import ResponsavelDoDocumento from '../../components/ResponsavelDoDocumento'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../../lib/medicoesCalc'
 import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma } from '../../lib/cronograma'
@@ -1216,7 +1217,7 @@ export default function ObrasMobile() {
           <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Resumo do Projeto</span>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Projeto</span><span style="font-size:14px;font-weight:600">${obra.nome}</span></div>
-            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cliente</span><span style="font-size:14px;font-weight:600">${obra.cliente}</span></div>
+            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cliente</span><span style="font-size:14px;font-weight:600">${obra.cliente}${obra.contato_nome ? ' <span style="font-weight:400;color:#bcc9c7;font-size:12px">(A/C ' + obra.contato_nome + ')</span>' : ''}</span></div>
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Localização</span><span style="font-size:14px;font-weight:600">${obra.endereco || '—'}</span></div>
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cronograma</span><span style="font-size:14px;font-weight:600">${obra.data_inicio ? new Date(obra.data_inicio).toLocaleDateString('pt-BR') : '—'} — ${obra.data_previsao ? new Date(obra.data_previsao).toLocaleDateString('pt-BR') : '—'}</span></div>
           </div>
@@ -1885,6 +1886,8 @@ export default function ObrasMobile() {
           <div>
             <div className="text-headline-sm font-headline text-on-surface">{detalhe.nome}</div>
             <div className="text-body-sm text-on-surface-variant">{detalhe.cliente}{detalhe.endereco ? ' · ' + detalhe.endereco : ''}</div>
+            <ResponsavelDoDocumento clienteId={detalhe.cliente_id} contatoId={detalhe.contato_id} contatoNome={detalhe.contato_nome}
+              onSalvar={async (cid, nome) => { const ok = await editar('obras', detalhe.id, { contato_id: cid, contato_nome: nome }); if (!ok) return alert('Não foi possível salvar o responsável. Tente novamente.'); setDetalhe({ ...detalhe, contato_id: cid, contato_nome: nome }) }} />
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-[11px] font-semibold text-on-surface-variant uppercase">{STATUS_NOME[detalhe.status] || detalhe.status}</span>
               {detalhe.gerenciamento && <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-secondary/10 text-secondary border-secondary/20">🤝 Gerenciamento</span>}

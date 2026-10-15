@@ -123,7 +123,7 @@ export default function OrcamentoMobile() {
   }
 
   // ═══ Proposta Completa (Inverso) — mesmo padrão visual de app/orcamento/page.tsx ═══
-  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string) {
+  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string, responsavel?: string | null) {
     return `
     <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
       <div style="width:55%;padding:60px 56px;display:flex;flex-direction:column;justify-content:center">
@@ -134,6 +134,7 @@ export default function OrcamentoMobile() {
         <div style="font-size:16px;color:#ccc;margin-bottom:32px">${subtitulo}</div>
         <table style="font-size:12px;border-collapse:collapse">
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">CLIENTE</td><td style="font-weight:700;padding:5px 0">${cliente}</td></tr>
+          ${responsavel ? `<tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">A/C</td><td style="font-weight:700;padding:5px 0">${responsavel}</td></tr>` : ''}
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">LOCAL</td><td style="font-weight:700;padding:5px 0">${local || '—'}</td></tr>
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">DATA</td><td style="font-weight:700;padding:5px 0">${dataStr}</td></tr>
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">VALIDADE</td><td style="font-weight:700;padding:5px 0">${validadeDias} dias</td></tr>
@@ -403,7 +404,7 @@ export default function OrcamentoMobile() {
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =
-      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin) +
+      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin, detalhe.contato_nome) +
       paginaHistoriaInversa(cfg) +
       paginaDivisorPortfolio(cfg) +
       paginasPortfolioInverso(origin, cfg) +
@@ -558,6 +559,7 @@ export default function OrcamentoMobile() {
               <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20">🔒 Somente leitura</span>
             </div>
             <div className="text-headline-sm font-headline text-on-surface">{detalhe.cliente_nome}</div>
+            {detalhe.contato_nome && <div className="text-body-sm text-on-surface-variant">A/C: {detalhe.contato_nome}</div>}
             {detalhe.endereco && <div className="text-body-sm text-on-surface-variant">📍 {detalhe.endereco}</div>}
             <span className="text-[11px] font-semibold text-on-surface-variant uppercase">{STATUS_ORC[detalhe.status] || detalhe.status}</span>
           </div>

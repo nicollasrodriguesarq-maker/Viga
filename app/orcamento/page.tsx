@@ -3,6 +3,7 @@ import { useState, useEffect, Fragment } from 'react'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
+import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, type ValorClienteCrm } from '../lib/clienteCrm'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -197,6 +198,9 @@ export default function Orcamento() {
       observacao: fOrc.observacao,
       tipo_execucao: fOrc.tipo_execucao,
       crm_lead_id: crm.leadId,
+      cliente_id: crm.clienteId,
+      contato_id: crm.contatoId,
+      contato_nome: crm.contatoNome,
       status: 'rascunho',
       total_material: 0,
       total_mao_obra: 0,
@@ -537,6 +541,9 @@ export default function Orcamento() {
       nome: detalhe.cliente_nome + (detalhe.endereco ? ' — ' + detalhe.endereco : ''),
       tipo: 'Reforma',
       cliente: detalhe.cliente_nome,
+      ...(detalhe.cliente_id ? { cliente_id: detalhe.cliente_id } : {}),
+      ...(detalhe.contato_id ? { contato_id: detalhe.contato_id } : {}),
+      ...(detalhe.contato_nome ? { contato_nome: detalhe.contato_nome } : {}),
       endereco: detalhe.endereco || '',
       responsavel: '',
       status: 'em_execucao',
@@ -680,6 +687,7 @@ export default function Orcamento() {
       <div style="background:#f0f4f8;border-radius:8px;padding:16px 20px;margin-bottom:28px">
         <div style="font-size:11px;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Proposta para</div>
         <div style="font-size:18px;font-weight:700;color:#1B3A5C">${detalhe.cliente_nome}</div>
+        ${detalhe.contato_nome ? '<div style="font-size:13px;color:#555;margin-top:4px">A/C: ' + detalhe.contato_nome + '</div>' : ''}
         ${detalhe.endereco ? '<div style="font-size:13px;color:#555;margin-top:4px">📍 ' + detalhe.endereco + '</div>' : ''}
       </div>
 
@@ -731,7 +739,7 @@ export default function Orcamento() {
   // Fontes Cambria/Calibri (nativas do Windows, sem depender de web font) e
   // paleta extraída do material de marketing da própria Inverso.
   // ════════════════════════════════════════════════════════════════════
-  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string) {
+  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string, responsavel?: string | null) {
     return `
     <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
       <div style="width:55%;padding:60px 56px;display:flex;flex-direction:column;justify-content:center">
@@ -742,6 +750,7 @@ export default function Orcamento() {
         <div style="font-size:16px;color:#ccc;margin-bottom:32px">${subtitulo}</div>
         <table style="font-size:12px;border-collapse:collapse">
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">CLIENTE</td><td style="font-weight:700;padding:5px 0">${cliente}</td></tr>
+          ${responsavel ? `<tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">A/C</td><td style="font-weight:700;padding:5px 0">${responsavel}</td></tr>` : ''}
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">LOCAL</td><td style="font-weight:700;padding:5px 0">${local || '—'}</td></tr>
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">DATA</td><td style="font-weight:700;padding:5px 0">${dataStr}</td></tr>
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">VALIDADE</td><td style="font-weight:700;padding:5px 0">${validadeDias} dias</td></tr>
@@ -1029,7 +1038,7 @@ export default function Orcamento() {
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =
-      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin) +
+      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin, detalhe.contato_nome) +
       paginaHistoriaInversa(cfg) +
       paginaDivisorPortfolio(cfg) +
       paginasPortfolioInverso(origin, cfg) +
@@ -1216,6 +1225,8 @@ export default function Orcamento() {
             </div>
             <h1 className="text-headline-md font-headline text-on-surface">{detalhe.cliente_nome}</h1>
             {detalhe.endereco && <p className="text-body-sm text-on-surface-variant">📍 {detalhe.endereco}</p>}
+            <ResponsavelDoDocumento clienteId={detalhe.cliente_id} contatoId={detalhe.contato_id} contatoNome={detalhe.contato_nome} podeEditar={podeEditar}
+              onSalvar={async (cid, nome) => { const ok = await editar('orcamentos', detalhe.id, { contato_id: cid, contato_nome: nome }); if (!ok) return alert('Não foi possível salvar o responsável. Tente novamente.'); setDetalhe({ ...detalhe, contato_id: cid, contato_nome: nome }) }} />
           </div>
           <div className="flex gap-2 flex-wrap items-start">
             {podeEditar ? (

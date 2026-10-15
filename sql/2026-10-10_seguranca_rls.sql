@@ -57,11 +57,16 @@ end $$;
 create policy modulo_obras on public.obra_funcionarios for all to authenticated using (public.has_module('obras')) with check (public.has_module('obras'));
 create policy modulo_obras on public.obra_funcionario_arquivos for all to authenticated using (public.has_module('obras')) with check (public.has_module('obras'));
 
--- 2d. CRM e clientes: módulo crm; o Orçamento só LÊ os leads (para vincular)
-create policy modulo_crm on public.crm_leads for all to authenticated using (public.has_module('crm')) with check (public.has_module('crm'));
-create policy leitura_orcamento on public.crm_leads for select to authenticated using (public.has_module('orcamento'));
-create policy modulo_crm on public.crm_atividades for all to authenticated using (public.has_module('crm')) with check (public.has_module('crm'));
-create policy modulo_crm on public.clientes for all to authenticated using (public.has_module('crm')) with check (public.has_module('crm'));
+-- 2d. CRM e clientes (agenda de clientes, contatos das empresas e pipeline): módulo crm. Quem monta
+--     Orçamento/Levantamento/Obra também cadastra o cliente e abre o lead (formulários "cliente novo / da
+--     carteira"), então os módulos orcamento, levantamento e obras têm o mesmo acesso a estas 4 tabelas.
+do $$
+declare t text;
+begin
+  foreach t in array array['crm_leads','crm_atividades','clientes','cliente_contatos'] loop
+    execute format('create policy modulo_crm on public.%I for all to authenticated using (public.has_module(''crm'') or public.has_module(''orcamento'') or public.has_module(''levantamento'') or public.has_module(''obras'')) with check (public.has_module(''crm'') or public.has_module(''orcamento'') or public.has_module(''levantamento'') or public.has_module(''obras''))', t);
+  end loop;
+end $$;
 
 -- 2e. configurações da empresa e times: todos leem, só admin altera
 create policy leitura on public.empresa_config for select to authenticated using (public.is_staff());

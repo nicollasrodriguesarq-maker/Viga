@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 import SeletorClienteCrm from '../../components/SeletorClienteCrm'
+import ResponsavelDoDocumento from '../../components/ResponsavelDoDocumento'
 import { CLIENTE_CRM_VAZIO, leadDoLevantamento, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../../lib/clienteCrm'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -216,7 +217,7 @@ export default function LevantamentoMobile() {
       telefone: fLev.cliente_telefone, email: fLev.cliente_email, endereco: fLev.endereco, responsavelId: meuId || null,
     })
     if (!crm) return
-    const novo = await criar('levantamentos', { ...fLev, ...(crm.nomeCliente ? { cliente: crm.nomeCliente } : {}), codigo, obra_id: fLev.obra_id || null, criado_por: meuId || null, ...(crm.clienteId ? { cliente_id: crm.clienteId } : {}) })
+    const novo = await criar('levantamentos', { ...fLev, ...(crm.nomeCliente ? { cliente: crm.nomeCliente } : {}), codigo, obra_id: fLev.obra_id || null, criado_por: meuId || null, ...(crm.clienteId ? { cliente_id: crm.clienteId } : {}), ...(crm.contatoId ? { contato_id: crm.contatoId } : {}), ...(crm.contatoNome ? { contato_nome: crm.contatoNome } : {}) })
     if (novo?.id) await vincularLeadAoRegistro(crm.leadId, { levantamento_id: novo.id })
     setTela(null); setFLev(FLEV_VAZIO); setClienteCrm(CLIENTE_CRM_VAZIO)
     await carregar()
@@ -263,7 +264,7 @@ export default function LevantamentoMobile() {
     const n = orcLista.filter((o: any) => o.codigo?.startsWith('ORC-' + ano)).length + 1
     const codigo = 'ORC-' + ano + '-' + String(n).padStart(3, '0')
     const leadCrm = await leadDoLevantamento(detalhe.id)
-    const novo = await criar('orcamentos', { codigo, levantamento_id: detalhe.id, cliente_nome: detalhe.cliente, endereco: detalhe.endereco, crm_lead_id: leadCrm, status: 'rascunho', total_material: 0, total_mao_obra: 0, total_geral: 0, desconto: 0 })
+    const novo = await criar('orcamentos', { codigo, levantamento_id: detalhe.id, cliente_nome: detalhe.cliente, ...(detalhe.cliente_id ? { cliente_id: detalhe.cliente_id } : {}), ...(detalhe.contato_id ? { contato_id: detalhe.contato_id } : {}), ...(detalhe.contato_nome ? { contato_nome: detalhe.contato_nome } : {}), endereco: detalhe.endereco, crm_lead_id: leadCrm, status: 'rascunho', total_material: 0, total_mao_obra: 0, total_geral: 0, desconto: 0 })
     return novo?.id || null
   }
   async function ambienteOrcamentoEspelhado(levAmbiente: any, orcId: string): Promise<string | null> {
@@ -455,7 +456,8 @@ export default function LevantamentoMobile() {
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
             <div class="card">
               <span style="font-size:10px;letter-spacing:0.08em;color:#869391;text-transform:uppercase">Cliente</span>
-              <p style="font-size:15px;font-weight:700;color:#dee2ec;margin:4px 0 10px">${lev.cliente}</p>
+              <p style="font-size:15px;font-weight:700;color:#dee2ec;margin:4px 0 ${lev.contato_nome ? '2px' : '10px'}">${lev.cliente}</p>
+              ${lev.contato_nome ? '<p style="font-size:12px;color:#bcc9c7;margin:0 0 10px">A/C: ' + lev.contato_nome + '</p>' : ''}
               <span style="font-size:10px;letter-spacing:0.08em;color:#869391;text-transform:uppercase">Contato</span>
               <p style="font-size:12px;color:#bcc9c7">${lev.cliente_telefone || '—'}</p>
               <p style="font-size:12px;color:#6ee9e0">${lev.cliente_email || ''}</p>
@@ -578,7 +580,7 @@ export default function LevantamentoMobile() {
     }
     return atual
   }
-  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string) {
+  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string, responsavel?: string | null) {
     return `
     <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
       <div style="width:55%;padding:60px 56px;display:flex;flex-direction:column;justify-content:center">
@@ -589,6 +591,7 @@ export default function LevantamentoMobile() {
         <div style="font-size:16px;color:#ccc;margin-bottom:32px">${subtitulo}</div>
         <table style="font-size:12px;border-collapse:collapse">
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">CLIENTE</td><td style="font-weight:700;padding:5px 0">${cliente}</td></tr>
+          ${responsavel ? `<tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">A/C</td><td style="font-weight:700;padding:5px 0">${responsavel}</td></tr>` : ''}
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">LOCAL</td><td style="font-weight:700;padding:5px 0">${local || '—'}</td></tr>
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">DATA</td><td style="font-weight:700;padding:5px 0">${dataStr}</td></tr>
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">VALIDADE</td><td style="font-weight:700;padding:5px 0">${validadeDias} dias</td></tr>
@@ -848,7 +851,7 @@ export default function LevantamentoMobile() {
     const prazoDias = Math.round((fimPrazo.getTime() - inicioValido.getTime()) / 86400000) + 1
 
     const paginas =
-      paginaCapaInversa(lev.nome || lev.cliente, lev.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', lev.cliente, lev.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(orc?.validade_dias || '30'), cfg, origin) +
+      paginaCapaInversa(lev.nome || lev.cliente, lev.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', lev.cliente, lev.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(orc?.validade_dias || '30'), cfg, origin, lev.contato_nome) +
       paginaHistoriaInversa(cfg) +
       paginaDivisorPortfolio(cfg) +
       paginasPortfolioInverso(origin, cfg) +
@@ -1106,6 +1109,8 @@ export default function LevantamentoMobile() {
           <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
             <div className="font-bold text-on-surface">{detalhe.nome || detalhe.cliente}</div>
             <div className="text-body-sm text-on-surface-variant mt-1">{detalhe.cliente}</div>
+            <div className="mt-1"><ResponsavelDoDocumento clienteId={detalhe.cliente_id} contatoId={detalhe.contato_id} contatoNome={detalhe.contato_nome}
+              onSalvar={async (cid, nome) => { const ok = await editar('levantamentos', detalhe.id, { contato_id: cid, contato_nome: nome }); if (!ok) return alert('Não foi possível salvar o responsável. Tente novamente.'); setDetalhe({ ...detalhe, contato_id: cid, contato_nome: nome }) }} /></div>
             {detalhe.endereco && <div className="text-[11px] text-on-surface-variant mt-1">📍 {detalhe.endereco}</div>}
             <div className="text-[11px] text-on-surface-variant mt-1">Status: {STATUS_LEVA[detalhe.status] || detalhe.status}</div>
             <div className="text-[11px] text-primary mt-1">{EXECUCAO_NOME[detalhe.tipo_execucao || 'obra']}</div>

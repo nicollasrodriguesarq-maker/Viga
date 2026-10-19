@@ -2380,7 +2380,7 @@ export default function Obras() {
                 <div className="text-body-sm text-on-surface-variant flex flex-col gap-1.5">
                   {soManual.length > 0 && <div>• <b>{moeda(somaManual)}</b> em serviços com valor informado só manualmente (sem lançamento no Financeiro): {soManual.map(sv => sv.nome + ' (' + moeda(parseFloat(sv.valor_realizado || 0)) + ')').join('; ')}.</div>}
                   {medsSemLanc.length > 0 && <div>• Medições de fornecedor sem pagamento programado no Financeiro: {medsSemLanc.map(m => m.numero).join(', ')}.</div>}
-                  {Math.abs(residual) >= 0.01 && <div>• <b>{moeda(residual)}</b> de {residual > 0 ? 'valor medido que ainda não foi lançado/pago no Financeiro' : 'lançamentos no Financeiro acima do que está apropriado nos serviços (ex.: lançamento sem serviço ou medição de menor valor)'}.</div>}
+                  {Math.abs(residual) >= 0.01 && <div>• <b>{moeda(Math.abs(residual))}</b> de {residual > 0 ? 'valor medido que ainda não foi lançado/pago no Financeiro' : 'lançamentos no Financeiro acima do que está apropriado nos serviços (ex.: lançamento sem serviço ou medição de menor valor)'}.</div>}
                   {detalhe.gerenciamento && <div className="text-[11px]">Obra de gerenciamento: o custo é do cliente e fica fora do balanço da Inverso.</div>}
                 </div>
               )}

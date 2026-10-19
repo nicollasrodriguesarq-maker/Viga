@@ -41,7 +41,7 @@ export async function GET(req: Request) {
     sbJson<any[]>(`obra_atribuicoes?obra_id=eq.${obraId}&select=usuario_id`),
     sbJson<any[]>(`medicoes?obra_id=eq.${obraId}&select=id,numero,data,tipo,fornecedor,observacao,lancamento_id,data_pagamento_programada,valor_adiantamento,desconto_adiantamento_pct,created_at&order=data`),
     sbJson<any[]>(`orcamentos?obra_id=eq.${obraId}&select=retencao_percentual&limit=1`),
-    sbJson<any[]>(`lancamentos?obra_id=eq.${obraId}&tipo=eq.entrada&select=id,data,descricao,valor,status,data_vencimento,forma_pagamento&order=data.desc`),
+    sbJson<any[]>(`lancamentos?obra_id=eq.${obraId}&tipo=eq.entrada&select=id,data,descricao,valor,status,data_vencimento,data_pagamento,forma_pagamento&order=data.desc`),
     sbJson<any[]>(`obra_relatorios_visita?obra_id=eq.${obraId}&select=id,data,clima,descricao,pendencias,equipe_presente,fotos&order=data.desc`),
     sbJson<any[]>(`empresa_config?select=nome_empresa,logo_url,telefone,site&limit=1`),
   ])
@@ -75,7 +75,7 @@ export async function GET(req: Request) {
 
   // Só os lançamentos ligados às medições visíveis (nunca outras saídas da obra)
   const idsLanc = medicoes.map(m => m.lancamento_id).filter((i: string) => i && UUID.test(i))
-  const lancMed = idsLanc.length ? await sbJson<any[]>(`lancamentos?id=in.(${idsLanc.join(',')})&select=id,data,valor,status,data_vencimento`) : []
+  const lancMed = idsLanc.length ? await sbJson<any[]>(`lancamentos?id=in.(${idsLanc.join(',')})&select=id,data,valor,status,data_vencimento,data_pagamento`) : []
   const lancPorId = new Map(lancMed.map(l => [l.id, l]))
 
   const contrato = num(obra.valor_contrato)
@@ -122,7 +122,7 @@ export async function GET(req: Request) {
         observacao: r.adiantamento ? (m.observacao || null) : null,
         bruto: r.bruto, retencao: r.retencao, desconto: abatimentoExibido, liquido: liquidoExibido,
         pagamento,
-        data_pagamento: lanc ? (lanc.status === 'pago' ? lanc.data : (lanc.data_vencimento || m.data_pagamento_programada || lanc.data)) : null,
+        data_pagamento: lanc ? (lanc.status === 'pago' ? (lanc.data_pagamento || lanc.data) : (lanc.data_vencimento || m.data_pagamento_programada || lanc.data)) : null,
       }
     })
     const pago = itens.filter(i => i.pagamento === 'pago').reduce((a, i) => a + i.liquido, 0)
@@ -164,7 +164,7 @@ export async function GET(req: Request) {
   const financeiro = {
     gerenciamento,
     contrato, pago, a_pagar: Math.max(contrato - pago, 0),
-    pagamentos: entradas.map(e => ({ id: e.id, data: e.status === 'pago' ? e.data : (e.data_vencimento || e.data), descricao: e.descricao, valor: num(e.valor), status: e.status === 'pago' ? 'pago' : 'pendente', forma_pagamento: e.forma_pagamento || null })),
+    pagamentos: entradas.map(e => ({ id: e.id, data: e.status === 'pago' ? (e.data_pagamento || e.data) : (e.data_vencimento || e.data), descricao: e.descricao, valor: num(e.valor), status: e.status === 'pago' ? 'pago' : 'pendente', forma_pagamento: e.forma_pagamento || null })),
     terceiros,
     // visão macro da obra (só gerenciamento): honorários nossos + contratos com terceiros
     macro: gerenciamento ? {

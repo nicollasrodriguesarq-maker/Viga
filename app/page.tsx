@@ -4,6 +4,8 @@ import Link from 'next/link'
 import Layout from './components/Layout'
 import PainelAlertas from './components/PainelAlertas'
 import { obterMinhasPermissoes, obterUsuariosVisiveis } from './lib/permissoes'
+import { hojeISO } from './lib/datas'
+import { calcularPeriodo } from './lib/financeiroCalc'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -131,8 +133,8 @@ export default function Home() {
         setUsuariosEquipe(u.filter((x: any) => visiveis.includes(x.id) && x.id !== perm?.id))
       }
 
-      const mesAtual = new Date().toISOString().slice(0, 7)
-      const hojeStr = new Date().toISOString().slice(0, 10)
+      const hojeStr = hojeISO()
+      const mesAtual = hojeStr.slice(0, 7)
       const filtroCompromissos = ehAdmin ? '' : '&usuario_id=in.(' + visiveis.join(',') + ')'
       const [obras, lancamentos, compromissos, atribuicoes] = await Promise.all([
         get('obras', '?order=created_at.desc'),
@@ -153,11 +155,11 @@ export default function Home() {
 
       // Obra de Gerenciamento: a saída paga ao fornecedor é dinheiro do cliente, não da
       // Inverso, e não deve aparecer como "a pagar" da empresa (mesma regra do Financeiro).
-      const obrasGerenciamento = new Set(obras.filter((o: any) => o.gerenciamento).map((o: any) => o.id))
-      const lancMes = lancamentos.filter((l: any) => l.data?.slice(0, 7) === mesAtual)
-      setFaturamentoMes(lancMes.filter((l: any) => l.tipo === 'entrada').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
-      setAReceber(lancamentos.filter((l: any) => l.tipo === 'entrada' && l.status === 'pendente').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
-      setAPagar(lancamentos.filter((l: any) => l.tipo === 'saida' && l.status === 'pendente' && !(l.obra_id && obrasGerenciamento.has(l.obra_id))).reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
+      // Mesmo motor de cálculo do Financeiro: recebido no mês = entradas PAGAS no mês (fora aportes/resgates).
+      const P = calcularPeriodo({ lancamentos, obras, contas: [], mes: mesAtual, hoje: hojeStr })
+      setFaturamentoMes(P.entradasReal)
+      setAReceber(P.aReceberTotal)
+      setAPagar(P.aPagarTotal)
     } catch (e) { console.error(e) }
     setLoadingDash(false)
   }
@@ -260,7 +262,7 @@ export default function Home() {
                 <span className="material-symbols-outlined">payments</span>
               </div>
             </div>
-            <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-widest mb-1">FATURAMENTO MÊS</p>
+            <p className="text-label-sm font-label-sm text-on-surface-variant uppercase tracking-widest mb-1">RECEBIDO NO MÊS</p>
             <div className="flex items-baseline gap-2">
               <h3 className="text-headline-md font-headline text-secondary">{loadingDash ? '...' : fmt(faturamentoMes)}</h3>
             </div>

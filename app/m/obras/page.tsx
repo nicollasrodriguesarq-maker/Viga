@@ -2,6 +2,7 @@
 import { useEffect, useState, Fragment } from 'react'
 import MobileShell from '../components/MobileShell'
 import ResponsavelDoDocumento from '../../components/ResponsavelDoDocumento'
+import { arred2 } from '../../lib/datas'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../../lib/medicoesCalc'
 import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma } from '../../lib/cronograma'
@@ -153,8 +154,8 @@ const btnPrimaryCls = 'bg-primary text-on-primary rounded-lg px-4 py-3 text-sm f
 const btnSecondaryCls = 'bg-surface-container-low border border-outline-variant text-on-surface-variant rounded-lg px-4 py-3 text-sm cursor-pointer'
 const fileCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface-variant text-xs px-2 py-2 file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:bg-primary/10 file:text-primary file:text-xs file:font-semibold cursor-pointer'
 
-const FRV_VAZIO = { data: new Date().toISOString().slice(0, 10), clima: '', descricao: '', pendencias: '', equipe_presente: [] as string[], nomeEquipeAtual: '' }
-const FMED_VAZIO = { tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' }
+const FRV_VAZIO = { data: hojeISO(), clima: '', descricao: '', pendencias: '', equipe_presente: [] as string[], nomeEquipeAtual: '' }
+const FMED_VAZIO = { tipo: 'cliente', fornecedor: '', data: hojeISO(), observacao: '', adiantamento: false, valor_adiantamento: '' }
 
 export default function ObrasMobile() {
   const [obras, setObras] = useState<any[]>([])
@@ -281,7 +282,7 @@ export default function ObrasMobile() {
     const svsObra = servicosObra(id)
     const porServico = svsObra.reduce((a, s) => a + cobradoClienteServicoAuto(s.id), 0)
     const idsLancDeMedicao = new Set(medicoes.filter(m => m.obra_id === id && m.lancamento_id).map(m => m.lancamento_id))
-    const semMedicao = lancs.filter(x => x.obra_id === id && x.tipo === 'entrada' && !idsLancDeMedicao.has(x.id)).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    const semMedicao = lancs.filter(x => x.obra_id === id && x.tipo === 'entrada' && x.status === 'pago' && !idsLancDeMedicao.has(x.id)).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
     return porServico + semMedicao
   }
   function servicosObra(id: string) { return servicos.filter(s => s.obra_id === id) }
@@ -1475,10 +1476,10 @@ export default function ObrasMobile() {
       await editar('medicoes', medicaoAtiva.id, { data_pagamento_programada: dataProgramar })
     } else {
       const dados = {
-        data: new Date().toISOString().slice(0, 10),
+        data: hojeISO(),
         descricao: 'Medição ' + medicaoAtiva.numero + (medicaoAtiva.fornecedor ? ' — ' + medicaoAtiva.fornecedor : ''),
         tipo: medicaoAtiva.tipo === 'fornecedor' ? 'saida' : 'entrada',
-        valor: Math.abs(totalLiquido), categoria: 'Medição de obra', status: 'pendente',
+        valor: arred2(Math.abs(totalLiquido)), categoria: 'Medição de obra', status: 'pendente',
         data_vencimento: dataProgramar, obra_id: detalhe.id,
       }
       const lanc = await criar('lancamentos', dados)
@@ -1506,7 +1507,7 @@ export default function ObrasMobile() {
       if (!okLink) return alert('Não foi possível desvincular o lançamento. Tente novamente.')
       await remover('lancamentos', lanc.id)
     } else {
-      const ok = await editar('lancamentos', lanc.id, { valor })
+      const ok = await editar('lancamentos', lanc.id, { valor: arred2(valor) })
       if (!ok) return alert('Não foi possível ajustar o lançamento. Tente novamente.')
     }
     const [med, lc] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('lancamentos', '?order=data.desc')])
@@ -1515,7 +1516,7 @@ export default function ObrasMobile() {
   }
 
   async function marcarMedicaoPaga(lancamentoId: string) {
-    const ok = await editar('lancamentos', lancamentoId, { status: 'pago' })
+    const ok = await editar('lancamentos', lancamentoId, { status: 'pago', data_pagamento: hojeISO() })
     if (!ok) return alert('Não foi possível marcar como pago. Tente novamente.')
     const lc = await buscar('lancamentos', '?order=data.desc')
     setLancs(lc)
@@ -1727,7 +1728,7 @@ export default function ObrasMobile() {
               ) : (
                 <>
                   <span>📅 Programado para {dataBR(medicaoAtiva.data_pagamento_programada)}{' '}
-                    <button className="text-primary underline font-semibold" onClick={() => { setDataProgramar(medicaoAtiva.data_pagamento_programada || new Date().toISOString().slice(0, 10)); setMostrarProgramar(true) }}>Alterar data</button>
+                    <button className="text-primary underline font-semibold" onClick={() => { setDataProgramar(medicaoAtiva.data_pagamento_programada || hojeISO()); setMostrarProgramar(true) }}>Alterar data</button>
                   </span>
                   <button className={btnSecondaryCls} onClick={() => marcarMedicaoPaga(medicaoAtiva.lancamento_id)}>✓ Confirmar Pagamento</button>
                 </>
@@ -1737,7 +1738,7 @@ export default function ObrasMobile() {
             <div className="text-[12px] text-primary-container font-semibold text-center" data-testid="sem-valor-a-pagar">✅ Sem valor a pagar — abatido do adiantamento</div>
           ) : (
             <button className={btnSecondaryCls}
-              onClick={() => { setDataProgramar(new Date().toISOString().slice(0, 10)); setMostrarProgramar(true) }} data-testid="btn-programar-pagamento">📅 Programar Pagamento{!ehAdiantamento ? ' (' + moeda(totalLiquido) + ')' : ''}</button>
+              onClick={() => { setDataProgramar(hojeISO()); setMostrarProgramar(true) }} data-testid="btn-programar-pagamento">📅 Programar Pagamento{!ehAdiantamento ? ' (' + moeda(totalLiquido) + ')' : ''}</button>
           )}
           {medicaoAtiva.lancamento_id && (() => {
             const lanc = lancs.find((l: any) => l.id === medicaoAtiva.lancamento_id)
@@ -1886,7 +1887,7 @@ export default function ObrasMobile() {
           <div>
             <div className="text-headline-sm font-headline text-on-surface">{detalhe.nome}</div>
             <div className="text-body-sm text-on-surface-variant">{detalhe.cliente}{detalhe.endereco ? ' · ' + detalhe.endereco : ''}</div>
-            <ResponsavelDoDocumento clienteId={detalhe.cliente_id} contatoId={detalhe.contato_id} contatoNome={detalhe.contato_nome}
+            <ResponsavelDoDocumento rotulo="Contato do cliente (A/C)" clienteId={detalhe.cliente_id} contatoId={detalhe.contato_id} contatoNome={detalhe.contato_nome}
               onSalvar={async (cid, nome) => { const ok = await editar('obras', detalhe.id, { contato_id: cid, contato_nome: nome }); if (!ok) return alert('Não foi possível salvar o responsável. Tente novamente.'); setDetalhe({ ...detalhe, contato_id: cid, contato_nome: nome }) }} />
             <div className="flex items-center gap-1.5 mt-0.5">
               <span className="text-[11px] font-semibold text-on-surface-variant uppercase">{STATUS_NOME[detalhe.status] || detalhe.status}</span>

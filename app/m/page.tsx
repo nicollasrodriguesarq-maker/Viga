@@ -4,6 +4,8 @@ import Link from 'next/link'
 import MobileShell from './components/MobileShell'
 import PainelAlertas from '../components/PainelAlertas'
 import { obterMinhasPermissoesApp, obterUsuariosVisiveis } from '../lib/permissoes'
+import { hojeISO } from '../lib/datas'
+import { calcularPeriodo } from '../lib/financeiroCalc'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -64,8 +66,8 @@ export default function DashboardMobile() {
     }
     const ehGestor = perm?.role === 'admin' || perm?.role === 'gerente_time'
     const visiveis = await obterUsuariosVisiveis(perm)
-    const mesAtual = new Date().toISOString().slice(0, 7)
-    const hojeStr = new Date().toISOString().slice(0, 10)
+    const hojeStr = hojeISO()
+    const mesAtual = hojeStr.slice(0, 7)
     const filtroCompromissos = perm?.role === 'admin' ? '' : '&usuario_id=in.(' + visiveis.join(',') + ')'
     const [obras, lancamentos, compromissos, atribuicoes] = await Promise.all([
       get('obras', '?order=created_at.desc'),
@@ -82,11 +84,11 @@ export default function DashboardMobile() {
     setCompromissosHoje(compromissos)
     // Obra de Gerenciamento: a saída paga ao fornecedor é dinheiro do cliente, não da
     // Inverso, e não deve aparecer como "a pagar" da empresa (mesma regra do Financeiro).
-    const obrasGerenciamento = new Set(obras.filter((o: any) => o.gerenciamento).map((o: any) => o.id))
-    const lancMes = lancamentos.filter((l: any) => l.data?.slice(0, 7) === mesAtual)
-    setFaturamentoMes(lancMes.filter((l: any) => l.tipo === 'entrada').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
-    setAReceber(lancamentos.filter((l: any) => l.tipo === 'entrada' && l.status === 'pendente').reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
-    setAPagar(lancamentos.filter((l: any) => l.tipo === 'saida' && l.status === 'pendente' && !(l.obra_id && obrasGerenciamento.has(l.obra_id))).reduce((a: number, l: any) => a + parseFloat(l.valor || 0), 0))
+    // Mesmo motor de cálculo do Financeiro: recebido no mês = entradas PAGAS no mês (fora aportes/resgates).
+    const P = calcularPeriodo({ lancamentos, obras, contas: [], mes: mesAtual, hoje: hojeStr })
+    setFaturamentoMes(P.entradasReal)
+    setAReceber(P.aReceberTotal)
+    setAPagar(P.aPagarTotal)
     setCarregando(false)
   }
 
@@ -104,7 +106,7 @@ export default function DashboardMobile() {
             <div className="text-headline-sm font-black text-on-surface mt-1">{carregando ? '—' : obrasAtivas}</div>
           </div>
           <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
-            <div className="text-[11px] text-on-surface-variant font-semibold uppercase">Faturamento Mês</div>
+            <div className="text-[11px] text-on-surface-variant font-semibold uppercase">Recebido no Mês</div>
             <div className="text-headline-sm font-black text-primary mt-1 truncate">{carregando ? '—' : formatarMoeda(faturamentoMes)}</div>
           </div>
           <div className="bg-surface-container border border-outline-variant rounded-xl p-4">

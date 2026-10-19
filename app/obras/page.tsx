@@ -4,6 +4,7 @@ import Link from 'next/link'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import { obterTokenValido } from '../lib/authFetch'
+import { arred2 } from '../lib/datas'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
 import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../lib/clienteCrm'
@@ -136,7 +137,7 @@ async function uploadFotoVisita(file: File): Promise<string | null> {
 }
 
 const CLIMA_OPCOES = [{ v: 'ensolarado', l: '☀️ Ensolarado' }, { v: 'nublado', l: '☁️ Nublado' }, { v: 'chuva', l: '🌧️ Chuva' }, { v: 'sem_expediente', l: '🚫 Sem expediente' }]
-const FRV_VAZIO = { data: new Date().toISOString().slice(0, 10), clima: '', descricao: '', pendencias: '', equipe_presente: [] as string[], nomeEquipeAtual: '' }
+const FRV_VAZIO = { data: hojeISO(), clima: '', descricao: '', pendencias: '', equipe_presente: [] as string[], nomeEquipeAtual: '' }
 
 async function uploadArquivoFuncionario(file: File): Promise<string | null> {
   try {
@@ -301,7 +302,7 @@ export default function Obras() {
   const [descAdiantPctInput, setDescAdiantPctInput] = useState('')
   const [clienteCrm, setClienteCrm] = useState<ValorClienteCrm>(CLIENTE_CRM_VAZIO)
   const [modoAbatInput, setModoAbatInput] = useState<ModoAbatimento>('compensacao')
-  const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' })
+  const [fMedicao, setFMedicao] = useState({ tipo: 'cliente', fornecedor: '', data: hojeISO(), observacao: '', adiantamento: false, valor_adiantamento: '' })
   const [grupoMedicaoAberto, setGrupoMedicaoAberto] = useState<string | null>(null)
   const [mapaGeralAberto, setMapaGeralAberto] = useState<string | null>(null)
   const [loading,  setLoading]  = useState(true)
@@ -715,7 +716,7 @@ export default function Obras() {
 
   function abrirProgramarPagamento(medicao: any, totalLiquido: number) {
     setMedicaoProgramando(medicao)
-    setDataProgramar(medicao.data_pagamento_programada || new Date().toISOString().slice(0, 10))
+    setDataProgramar(medicao.data_pagamento_programada || hojeISO())
     setTotalLiquidoProgramar(totalLiquido)
     setJanela('programar_pagamento')
   }
@@ -726,10 +727,10 @@ export default function Obras() {
       await editar('medicoes', medicaoProgramando.id, { data_pagamento_programada: dataProgramar })
     } else {
       const dados = {
-        data: new Date().toISOString().slice(0, 10),
+        data: hojeISO(),
         descricao: 'Medição ' + medicaoProgramando.numero + (medicaoProgramando.fornecedor ? ' — ' + medicaoProgramando.fornecedor : ''),
         tipo: medicaoProgramando.tipo === 'fornecedor' ? 'saida' : 'entrada',
-        valor: Math.abs(totalLiquidoProgramar),
+        valor: arred2(Math.abs(totalLiquidoProgramar)),
         categoria: 'Medição de obra',
         status: 'pendente',
         data_vencimento: dataProgramar,
@@ -762,7 +763,7 @@ export default function Obras() {
       if (!okLink) return alert('Não foi possível desvincular o lançamento. Tente novamente.')
       await remover('lancamentos', lanc.id)
     } else {
-      const ok = await editar('lancamentos', lanc.id, { valor })
+      const ok = await editar('lancamentos', lanc.id, { valor: arred2(valor) })
       if (!ok) return alert('Não foi possível ajustar o lançamento. Tente novamente.')
     }
     const [med, lc] = await Promise.all([buscar('medicoes', '?order=data.desc'), buscar('lancamentos', '?order=data.desc')])
@@ -771,7 +772,7 @@ export default function Obras() {
   }
 
   async function marcarMedicaoPaga(lancamentoId: string) {
-    const ok = await editar('lancamentos', lancamentoId, { status: 'pago' })
+    const ok = await editar('lancamentos', lancamentoId, { status: 'pago', data_pagamento: hojeISO() })
     if (!ok) return alert('Não foi possível marcar como pago. Tente novamente.')
     const lc = await buscar('lancamentos', '?order=data.desc')
     setLancs(lc)
@@ -1731,7 +1732,7 @@ export default function Obras() {
     const svsObra = servicosObra(id)
     const porServico = svsObra.reduce((a, s) => a + cobradoClienteServicoAuto(s.id), 0)
     const idsLancDeMedicao = new Set(medicoes.filter(m => m.obra_id === id && m.lancamento_id).map(m => m.lancamento_id))
-    const semMedicao = lancs.filter(x => x.obra_id === id && x.tipo === 'entrada' && !idsLancDeMedicao.has(x.id)).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
+    const semMedicao = lancs.filter(x => x.obra_id === id && x.tipo === 'entrada' && x.status === 'pago' && !idsLancDeMedicao.has(x.id)).reduce((a, x) => a + parseFloat(x.valor || 0), 0)
     return porServico + semMedicao
   }
   function servicosObra(id: string) { return servicos.filter(s => s.obra_id === id) }
@@ -2277,7 +2278,7 @@ export default function Obras() {
             </div>
             <h1 className="text-headline-md font-headline text-on-surface">{detalhe.nome}</h1>
             <p className="text-body-sm text-on-surface-variant">{detalhe.cliente}{detalhe.endereco ? ' · ' + detalhe.endereco : ''}</p>
-            <ResponsavelDoDocumento clienteId={detalhe.cliente_id} contatoId={detalhe.contato_id} contatoNome={detalhe.contato_nome}
+            <ResponsavelDoDocumento rotulo="Contato do cliente (A/C)" clienteId={detalhe.cliente_id} contatoId={detalhe.contato_id} contatoNome={detalhe.contato_nome}
               onSalvar={async (cid, nome) => { const ok = await editar('obras', detalhe.id, { contato_id: cid, contato_nome: nome }); if (!ok) return alert('Não foi possível salvar o responsável. Tente novamente.'); setDetalhe({ ...detalhe, contato_id: cid, contato_nome: nome }) }} />
           </div>
           <div className="flex gap-2 flex-wrap items-start">
@@ -2301,7 +2302,7 @@ export default function Obras() {
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-lg">
           {([
             ['Contrato', moeda(contrato), 'text-primary'],
-            ['Recebido', moeda(receitas), 'text-primary-container'],
+            ['Recebido + medido', moeda(receitas), 'text-primary-container'],
             [detalhe.gerenciamento ? 'Custos (do Cliente)' : 'Custos Reais', moeda(custos), 'text-error'],
             ['Margem Atual', moeda(margem), margem >= 0 ? 'text-primary-container' : 'text-error'],
             ['Prev. Serviços', moeda(prevTotal), 'text-tertiary'],
@@ -2344,6 +2345,48 @@ export default function Obras() {
             )}
           </div>
         )}
+
+        {/* conferência com o Financeiro: custo apropriado na obra x o que foi lançado no Financeiro */}
+        {(() => {
+          const lancadoFin = Math.round((lancD.filter(l => l.tipo === 'saida').reduce((a, l) => a + parseFloat(l.valor || 0), 0) + gastD.reduce((a, g) => a + parseFloat(g.valor || 0), 0)) * 100) / 100
+          const dif = Math.round((custos - lancadoFin) * 100) / 100
+          const soManual = svs.filter(sv => custoMaoObraServicoAuto(sv) + custoMaterialServicoAuto(sv) === 0 && parseFloat(sv.valor_realizado || 0) > 0)
+          const somaManual = soManual.reduce((a, sv) => a + parseFloat(sv.valor_realizado || 0), 0)
+          const medsSemLanc = medicoes.filter(m => m.obra_id === detalhe.id && m.tipo === 'fornecedor' && !m.lancamento_id)
+          const residual = Math.round((dif - somaManual) * 100) / 100
+          const bate = Math.abs(dif) < 0.01
+          return (
+            <div className={sectionCls} data-testid="conferencia-financeiro">
+              <div className="flex items-center justify-between flex-wrap gap-2 mb-3">
+                <div className="text-sm font-bold text-on-surface">🔗 Conferência com o Financeiro</div>
+                <Link href="/financeiro" className="text-primary text-[12px] font-semibold hover:underline">abrir Financeiro →</Link>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                {([
+                  ['Custo apropriado na obra', moeda(custos), 'serviços (medições + lançamentos) + indiretos + cartão'],
+                  ['Lançado no Financeiro', moeda(lancadoFin), 'saídas da obra + compras no cartão'],
+                  ['Diferença', moeda(dif), bate ? 'tudo conciliado' : 'ver explicação abaixo'],
+                ] as [string, string, string][]).map(([l, v, sub]) => (
+                  <div key={l} className="bg-surface-container-high border border-outline-variant rounded-lg p-3">
+                    <div className="text-[10px] text-on-surface-variant uppercase tracking-widest mb-1">{l}</div>
+                    <div className={'text-sm font-bold ' + (l === 'Diferença' ? (bate ? 'text-primary-container' : 'text-tertiary') : 'text-on-surface')}>{v}</div>
+                    <div className="text-[10px] text-on-surface-variant mt-1">{sub}</div>
+                  </div>
+                ))}
+              </div>
+              {bate ? (
+                <div className="text-body-sm text-primary-container">✅ O custo da obra e o que foi lançado no Financeiro estão iguais.</div>
+              ) : (
+                <div className="text-body-sm text-on-surface-variant flex flex-col gap-1.5">
+                  {soManual.length > 0 && <div>• <b>{moeda(somaManual)}</b> em serviços com valor informado só manualmente (sem lançamento no Financeiro): {soManual.map(sv => sv.nome + ' (' + moeda(parseFloat(sv.valor_realizado || 0)) + ')').join('; ')}.</div>}
+                  {medsSemLanc.length > 0 && <div>• Medições de fornecedor sem pagamento programado no Financeiro: {medsSemLanc.map(m => m.numero).join(', ')}.</div>}
+                  {Math.abs(residual) >= 0.01 && <div>• <b>{moeda(residual)}</b> de {residual > 0 ? 'valor medido que ainda não foi lançado/pago no Financeiro' : 'lançamentos no Financeiro acima do que está apropriado nos serviços (ex.: lançamento sem serviço ou medição de menor valor)'}.</div>}
+                  {detalhe.gerenciamento && <div className="text-[11px]">Obra de gerenciamento: o custo é do cliente e fica fora do balanço da Inverso.</div>}
+                </div>
+              )}
+            </div>
+          )
+        })()}
 
         {/* abas */}
         <div className="flex gap-2 mb-lg flex-wrap">
@@ -2910,7 +2953,7 @@ export default function Obras() {
                 <div className="text-sm font-bold text-on-surface">📐 Medições</div>
                 <div className="text-body-sm text-on-surface-variant mt-0.5">Avanço físico-financeiro para pagar fornecedores ou cobrar o cliente</div>
               </div>
-              <button className={btnPrimaryCls} onClick={() => { setFMedicao({ tipo: 'cliente', fornecedor: '', data: new Date().toISOString().slice(0, 10), observacao: '', adiantamento: false, valor_adiantamento: '' }); setJanela('nova_medicao') }}>+ Nova Medição</button>
+              <button className={btnPrimaryCls} onClick={() => { setFMedicao({ tipo: 'cliente', fornecedor: '', data: hojeISO(), observacao: '', adiantamento: false, valor_adiantamento: '' }); setJanela('nova_medicao') }}>+ Nova Medição</button>
             </div>
             {(() => {
               const recebidoCliente = medicoesObra.filter(m => m.tipo === 'cliente').reduce((a, m) => a + totalsMedicao(m).totalPeriodo, 0)
@@ -3926,10 +3969,10 @@ export default function Obras() {
             const cct = parseFloat(o.valor_contrato || 0)
             const pv = totalPrevisto(o.id)
             const rv = totalRealizado(o.id)
-            const pp = pct(cc, cct)
+            const pp = o.gerenciamento ? pct(rr, cct) : pct(cc, cct)
             const ns = servicosObra(o.id).length
             const at = o.data_previsao && new Date(o.data_previsao) < new Date() && o.status === 'em_execucao'
-            const margem = rr - cc
+            const margem = o.gerenciamento ? rr : rr - cc
             return (
               <div key={o.id}
                 onClick={() => { setDetalhe(o); setAbaDetalhe('resumo'); setMedicaoAtiva(null) }}
@@ -3954,7 +3997,7 @@ export default function Obras() {
                 </div>
                 <div className="p-lg space-y-4 flex-1 flex flex-col">
                   <div className="grid grid-cols-3 gap-2">
-                    {([['CONTRATO', moeda(cct), 'text-primary'], ['CUSTOS', moeda(cc), 'text-error'], ['MARGEM', moeda(margem), margem >= 0 ? 'text-primary-container' : 'text-error']] as [string, string, string][]).map(([l, v, c]) => (
+                    {([['CONTRATO', moeda(cct), 'text-primary'], [o.gerenciamento ? 'CUSTOS (CLIENTE)' : 'CUSTOS', moeda(cc), 'text-error'], ['MARGEM', moeda(margem), margem >= 0 ? 'text-primary-container' : 'text-error']] as [string, string, string][]).map(([l, v, c]) => (
                       <div key={l} className="p-2.5 rounded-lg bg-surface-container-high border border-outline-variant min-w-0">
                         <p className="text-label-sm text-outline-variant uppercase">{l}</p>
                         <p className={`text-[11px] sm:text-xs font-bold leading-tight whitespace-nowrap ${c}`}>{v}</p>

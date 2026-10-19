@@ -2,39 +2,67 @@
 import { useState, useEffect, useRef } from 'react'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
+import { hojeISO, somarDiasISO, somarMesesISO, arred2, dividirParcelas, dataBR } from '../lib/datas'
+import { calcularPeriodo, dataEfetiva, ehMovInvestimento, lancamentosDaEmpresa, CAT_APORTE, CAT_RESGATE, CAT_FATURA } from '../lib/financeiroCalc'
+import { agruparFaturas, vencimentoDaFatura } from '../lib/faturasCartao'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
+// Chave pública (anon): o acesso real é decidido pelo token do usuário, injetado em lib/authFetch.ts.
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
 const H = { 'Content-Type': 'application/json', 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}` }
 
-const fmt = (v: number) => v.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-const dataBR = (v: string) => v ? new Date(v + 'T00:00:00').toLocaleDateString('pt-BR') : '—'
+const fmt = (v: number) => (Number(v) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+const num = (v: any) => parseFloat(v || 0) || 0
 const meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
 
+// ── acesso ao banco ──────────────────────────────────────────────────────────────────────────────
+// Toda gravação confere a resposta do banco: se ele recusar (permissão, dado inválido, sessão expirada) o
+// erro sobe e o usuário é avisado — nada de "salvar" com sucesso aparente e o lançamento sumir.
+async function erroDe(r: Response): Promise<string> {
+  try { const d = await r.json(); return d?.message || d?.error || ('erro ' + r.status) } catch { return 'erro ' + r.status }
+}
 async function get(tabela: string, q = '') {
   const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}${q}`, { headers: H })
   const d = await r.json(); return Array.isArray(d) ? d : []
 }
-async function inserir(tabela: string, dados: object) {
-  const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, {
-    method: 'POST', headers: { ...H, 'Prefer': 'return=representation' },
-    body: JSON.stringify(dados)
-  }); return r.json()
+// Lê a tabela inteira em páginas de 1000 (o antigo limit=300 deixava os saldos errados depois de 300 lançamentos).
+async function getTudo(tabela: string, q = ''): Promise<any[]> {
+  const out: any[] = []
+  const passo = 1000
+  for (let off = 0; ; off += passo) {
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}${q}${q.includes('?') ? '&' : '?'}limit=${passo}&offset=${off}`, { headers: H })
+    const d = await r.json()
+    if (!Array.isArray(d)) throw new Error(`Não foi possível carregar "${tabela}": ${d?.message || r.status}`)
+    out.push(...d)
+    if (d.length < passo) break
+  }
+  return out
+}
+async function inserir(tabela: string, dados: object): Promise<any> {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}`, { method: 'POST', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(dados) })
+  if (!r.ok) throw new Error(await erroDe(r))
+  const d = await r.json()
+  return Array.isArray(d) ? d[0] : d
 }
 async function deletar(tabela: string, id: string) {
-  await fetch(`${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${id}`, { method: 'DELETE', headers: H })
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${id}`, { method: 'DELETE', headers: H })
+  if (!r.ok) throw new Error(await erroDe(r))
 }
 async function atualizar(tabela: string, id: string, dados: object) {
-  await fetch(`${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${id}`, {
-    method: 'PATCH', headers: H, body: JSON.stringify(dados)
-  })
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}?id=eq.${id}`, { method: 'PATCH', headers: H, body: JSON.stringify(dados) })
+  if (!r.ok) throw new Error(await erroDe(r))
+}
+async function atualizarOnde(tabela: string, filtro: string, dados: object) {
+  const r = await fetch(`${SUPABASE_URL}/rest/v1/${tabela}?${filtro}`, { method: 'PATCH', headers: H, body: JSON.stringify(dados) })
+  if (!r.ok) throw new Error(await erroDe(r))
 }
 
-// Upload de arquivo para Supabase Storage
+// Upload de arquivo para Supabase Storage (bucket notas-fiscais). Devolve null se falhar.
 async function uploadNF(file: File, lancamentoDesc: string): Promise<string | null> {
   try {
-    const ext = file.name.split('.').pop()
-    const nome = `nf_${Date.now()}_${lancamentoDesc.replace(/\s+/g, '_').slice(0, 20)}.${ext}`
+    const ext = (file.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '')
+    const limpo = lancamentoDesc.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 20)
+    const nome = `nf_${Date.now()}_${limpo}.${ext}`
     const r = await fetch(`${SUPABASE_URL}/storage/v1/object/notas-fiscais/${nome}`, {
       method: 'POST',
       headers: { 'apikey': SUPABASE_KEY, 'Authorization': `Bearer ${SUPABASE_KEY}`, 'Content-Type': file.type },
@@ -59,50 +87,20 @@ const PRINT_SAFE_CSS = `
         [style*="border:1px solid #3d4948"], [style*="border-bottom:1px solid #3d4948"], [style*="border-top:1px solid #3d4948"], [style*="border-color:#3d4948"] { border-color:#d7dbda !important; }
       }`
 
-// Relatório Financeiro Mensal em PDF — visão geral (balanço, lucro, impostos, distribuição
-// por categoria) seguida da lista completa de lançamentos com link direto para a NF anexada.
-// Pensado para encaminhar à contabilidade ou levar para reunião financeira.
-async function gerarPDFRelatorioMensal(lancamentosTodos: any[], obras: any[], mes: string) {
+// Relatório Financeiro Mensal em PDF — usa o mesmo motor de cálculo da tela (calcularPeriodo), então os
+// números do PDF são sempre os da tela. Realizado (pago no mês) e previsto (pendências) ficam separados.
+async function gerarPDFRelatorioMensal(lancamentos: any[], obras: any[], contas: any[], mes: string) {
   const cfg = (await get('empresa_config', '?limit=1'))[0] || {}
   const nomeEmpresa = cfg.nome_empresa || 'VIGA'
   const mesNome = meses[parseInt(mes.slice(5,7))-1] + ' ' + mes.slice(0,4)
-  // Obra de Gerenciamento: custo de fornecedor é do cliente, não da Inverso — fora do
-  // relatório financeiro da empresa, mesma regra da Visão Geral (ver componente principal).
-  const obrasGerenciamento = new Set(obras.filter((o: any) => o.gerenciamento).map((o: any) => o.id))
-  const lancamentos = lancamentosTodos.filter(l => !(l.tipo === 'saida' && l.obra_id && obrasGerenciamento.has(l.obra_id)))
-  const lancMesBase = lancamentos.filter(l => l.data?.slice(0,7) === mes)
+  const p = calcularPeriodo({ lancamentos, obras, contas, mes, hoje: hojeISO() })
+  const resultado = arred2(p.entradasReal - p.saidasReal)
+  const maxBarra = Math.max(p.entradasReal, p.saidasReal, 1)
 
-  // Pendência (atrasada ou vencendo nos próximos 7 dias) de fora do mês entra no relatório
-  // do mês corrente de verdade — mesmo critério usado na tela de Lançamentos, pra a
-  // contabilidade nunca receber um balanço que "esquece" uma dívida em aberto.
-  const hoje = new Date(); hoje.setHours(0,0,0,0)
-  const mesRealAtual = new Date().toISOString().slice(0,7)
-  const em7dias = new Date(); em7dias.setDate(hoje.getDate()+7)
-  const idsNoMes = new Set(lancMesBase.map(l => l.id))
-  const pendenciasTrazidas = mes === mesRealAtual
-    ? lancamentos.filter(l => {
-        if (l.status !== 'pendente' || idsNoMes.has(l.id)) return false
-        const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
-        return venc <= em7dias
-      })
-    : []
-  const lancMes = [...pendenciasTrazidas, ...lancMesBase].sort((a,b) => (a.data < b.data ? -1 : 1))
-
-  const entradas = lancMes.filter(l=>l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const saidas = lancMes.filter(l=>l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const impostos = lancMes.filter(l=>l.tipo==='saida' && l.categoria==='Imposto').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const lucro = entradas - saidas
-  const maxBarra = Math.max(entradas, saidas, 1)
-
-  const porCategoria: Record<string, number> = {}
-  lancMes.filter(l=>l.tipo==='saida').forEach(l => {
-    const cat = l.categoria || 'Outros'
-    porCategoria[cat] = (porCategoria[cat] || 0) + parseFloat(l.valor || 0)
-  })
-  const categoriasOrdenadas = Object.entries(porCategoria).sort((a,b) => b[1]-a[1])
+  const categoriasOrdenadas = Object.entries(p.porCategoria).sort((a,b) => b[1]-a[1])
   const coresCategorias = ['#6ee9e0','#cebdff','#ffcbac','#ffb4ab','#a6d5a1','#f4d35e','#8ecae6','#869391']
   const distribuicaoHtml = categoriasOrdenadas.map(([cat, valor], i) => {
-    const pct = saidas > 0 ? (valor/saidas)*100 : 0
+    const pct = p.saidasReal > 0 ? (valor/p.saidasReal)*100 : 0
     const cor = coresCategorias[i % coresCategorias.length]
     return `
       <div style="margin-bottom:12px">
@@ -116,24 +114,33 @@ async function gerarPDFRelatorioMensal(lancamentosTodos: any[], obras: any[], me
       </div>`
   }).join('')
 
-  const linhasHtml = lancMes.map(l => {
+  const hoje = hojeISO()
+  const linhasHtml = p.lista.map(l => {
     const obra = obras.find((o: any) => o.id === l.obra_id)
-    const trazidaDeFora = pendenciasTrazidas.includes(l)
+    const pago = l.status === 'pago'
+    const ef = dataEfetiva(l)
+    const atrasado = !pago && ef < hoje
+    const foraDoMes = p.atrasadosAntes.includes(l)
+    const rotuloStatus = pago ? 'Pago' : (atrasado ? 'Vencido' : 'Pendente')
+    const corStatus = pago ? '#6ee9e0' : (atrasado ? '#ffb4ab' : '#ffcbac')
     return `
     <tr>
-      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap">${dataBR(trazidaDeFora ? (l.data_vencimento||l.data) : l.data)}</td>
-      <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${l.descricao}${trazidaDeFora ? ' <span style="color:#ffb4ab;font-size:9px;font-weight:700;text-transform:uppercase">⚠ fora do mês</span>' : ''}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:11px;white-space:nowrap">${dataBR(ef)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${l.descricao}${foraDoMes ? ' <span style="color:#ffb4ab;font-size:9px;font-weight:700;text-transform:uppercase">⚠ atrasado</span>' : ''}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7;font-size:11px">${l.categoria || '—'}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7;font-size:11px">${obra ? obra.codigo : '—'}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">
-        <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;background:${l.status==='pago'?'#6ee9e01a':'#ffcbac1a'};color:${l.status==='pago'?'#6ee9e0':'#ffcbac'};text-transform:uppercase">${l.status==='pago'?'Pago':'Pendente'}</span>
+        <span style="font-size:9px;font-weight:700;padding:2px 8px;border-radius:4px;color:${corStatus};text-transform:uppercase">${rotuloStatus}</span>
       </td>
-      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;color:${l.tipo==='entrada'?'#6ee9e0':'#ffb4ab'};font-weight:600;white-space:nowrap">${l.tipo==='entrada'?'+':'-'}${fmt(parseFloat(l.valor||0))}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;color:${l.tipo==='entrada'?'#6ee9e0':'#ffb4ab'};font-weight:600;white-space:nowrap">${l.tipo==='entrada'?'+':'-'}${fmt(num(l.valor))}</td>
       <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">
         ${l.nf_url ? '<span style="color:#6ee9e0;font-size:11px;font-weight:600">📎 NF anexa</span>' : '<span style="color:#3d4948">—</span>'}
       </td>
     </tr>`
   }).join('')
+
+  const card = (rotulo: string, valor: number, cor: string, sub = '') =>
+    `<div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">${rotulo}</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:${cor}">${fmt(valor)}</p>${sub ? `<p style="font-size:9px;color:#869391;margin-top:3px">${sub}</p>` : ''}</div>`
 
   const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
   <title>Relatório Financeiro ${mesNome} — ${nomeEmpresa}</title>
@@ -168,27 +175,36 @@ async function gerarPDFRelatorioMensal(lancamentosTodos: any[], obras: any[], me
       </div>
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:20px">
-      <div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">Entradas</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#6ee9e0">${fmt(entradas)}</p></div>
-      <div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">Saídas</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#ffb4ab">${fmt(saidas)}</p></div>
-      <div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">Impostos</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:#ffcbac">${fmt(impostos)}</p></div>
-      <div class="card"><span style="font-size:9px;color:#869391;text-transform:uppercase">Resultado (Lucro)</span><p style="font-size:17px;font-weight:700;margin-top:4px;color:${lucro>=0?'#6ee9e0':'#ffb4ab'}">${fmt(lucro)}</p></div>
+    <p style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700;margin-bottom:8px">Realizado no mês (valores pagos / recebidos)</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:16px">
+      ${card('Entradas recebidas', p.entradasReal, '#6ee9e0')}
+      ${card('Saídas pagas', p.saidasReal, '#ffb4ab')}
+      ${card('Impostos pagos', p.impostosPagos, '#ffcbac')}
+      ${card('Resultado do mês', resultado, resultado>=0?'#6ee9e0':'#ffb4ab', 'entradas − saídas')}
     </div>
+    <p style="font-size:10px;color:#ffcbac;text-transform:uppercase;font-weight:700;margin-bottom:8px">Previsto (pendências do mês e atrasadas)</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px;margin-bottom:20px">
+      ${card('A receber', p.prevEntradas, '#6ee9e0')}
+      ${card('A pagar', p.prevSaidas, '#ffb4ab')}
+      ${card('Saldo final realizado', p.saldoFinalReal, p.saldoFinalReal>=0?'#6ee9e0':'#ffb4ab', 'saldo inicial ' + fmt(p.saldoAnterior))}
+      ${card('Saldo projetado', p.saldoProjetado, p.saldoProjetado>=0?'#6ee9e0':'#ffb4ab', 'realizado + previsto')}
+    </div>
+    ${p.investLiquido !== 0 ? `<p style="font-size:11px;color:#869391;margin-bottom:16px">Aportes líquidos em investimentos no mês: <strong>${fmt(p.investLiquido)}</strong> (movimentação entre a conta e o investimento — não entra nas entradas, saídas nem no resultado).</p>` : ''}
 
     <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:16px">
       <div class="card">
         <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Balanço do Mês — Entradas × Saídas</span>
         <div style="margin-top:16px">
-          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Entradas</span><span style="font-family:'JetBrains Mono',monospace;color:#6ee9e0;font-weight:700">${fmt(entradas)}</span></div>
-          <div style="height:20px;background:#30353d;border-radius:6px;overflow:hidden;margin-bottom:16px"><div style="height:100%;width:${(entradas/maxBarra)*100}%;background:#6ee9e0"></div></div>
-          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Saídas</span><span style="font-family:'JetBrains Mono',monospace;color:#ffb4ab;font-weight:700">${fmt(saidas)}</span></div>
-          <div style="height:20px;background:#30353d;border-radius:6px;overflow:hidden"><div style="height:100%;width:${(saidas/maxBarra)*100}%;background:#ffb4ab"></div></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Entradas</span><span style="font-family:'JetBrains Mono',monospace;color:#6ee9e0;font-weight:700">${fmt(p.entradasReal)}</span></div>
+          <div style="height:20px;background:#30353d;border-radius:6px;overflow:hidden;margin-bottom:16px"><div style="height:100%;width:${(p.entradasReal/maxBarra)*100}%;background:#6ee9e0"></div></div>
+          <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:6px"><span>Saídas</span><span style="font-family:'JetBrains Mono',monospace;color:#ffb4ab;font-weight:700">${fmt(p.saidasReal)}</span></div>
+          <div style="height:20px;background:#30353d;border-radius:6px;overflow:hidden"><div style="height:100%;width:${(p.saidasReal/maxBarra)*100}%;background:#ffb4ab"></div></div>
         </div>
       </div>
       <div class="card">
-        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Saídas por Categoria</span>
+        <span style="font-size:10px;color:#6ee9e0;text-transform:uppercase;font-weight:700">Saídas pagas por Categoria</span>
         <div style="margin-top:16px">
-          ${distribuicaoHtml || '<p style="color:#869391;text-align:center;padding:20px 0">Sem saídas no período</p>'}
+          ${distribuicaoHtml || '<p style="color:#869391;text-align:center;padding:20px 0">Sem saídas pagas no período</p>'}
         </div>
       </div>
     </div>
@@ -208,7 +224,7 @@ async function gerarPDFRelatorioMensal(lancamentosTodos: any[], obras: any[], me
     <table style="width:100%;border-collapse:collapse">
       <thead>
         <tr style="background:#252a32">
-          <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Data</th>
+          <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Pago em / Vence</th>
           <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Descrição</th>
           <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Categoria</th>
           <th style="padding:8px 10px;text-align:left;font-size:9px;color:#869391;text-transform:uppercase">Obra</th>
@@ -219,10 +235,10 @@ async function gerarPDFRelatorioMensal(lancamentosTodos: any[], obras: any[], me
       </thead>
       <tbody>${linhasHtml || '<tr><td colspan="7" style="padding:24px;text-align:center;color:#869391">Nenhum lançamento neste período</td></tr>'}</tbody>
     </table>
-    <div style="display:flex;justify-content:flex-end;gap:24px;margin-top:20px;padding-top:16px;border-top:1px solid #3d4948">
-      <span style="font-size:12px;color:#869391">Entradas: <strong style="color:#6ee9e0">${fmt(entradas)}</strong></span>
-      <span style="font-size:12px;color:#869391">Saídas: <strong style="color:#ffb4ab">${fmt(saidas)}</strong></span>
-      <span style="font-size:13px;font-weight:700">Resultado: <strong style="color:${lucro>=0?'#6ee9e0':'#ffb4ab'}">${fmt(lucro)}</strong></span>
+    <div style="display:flex;justify-content:flex-end;gap:24px;margin-top:20px;padding-top:16px;border-top:1px solid #3d4948;flex-wrap:wrap">
+      <span style="font-size:12px;color:#869391">Entradas recebidas: <strong style="color:#6ee9e0">${fmt(p.entradasReal)}</strong></span>
+      <span style="font-size:12px;color:#869391">Saídas pagas: <strong style="color:#ffb4ab">${fmt(p.saidasReal)}</strong></span>
+      <span style="font-size:13px;font-weight:700">Resultado: <strong style="color:${resultado>=0?'#6ee9e0':'#ffb4ab'}">${fmt(resultado)}</strong></span>
     </div>
     <div style="display:flex;justify-content:space-between;margin-top:24px;padding-top:16px;border-top:1px solid #3d4948;font-size:9px;color:#869391;text-transform:uppercase">
       <span>Documento Confidencial - ${nomeEmpresa}</span>
@@ -237,20 +253,21 @@ async function gerarPDFRelatorioMensal(lancamentosTodos: any[], obras: any[], me
   if (win) { win.document.write(html); win.document.close() }
 }
 
-const CAT_IN  = ['Medição de obra','Adiantamento','Sinal de contrato','Parcela de contrato','Outros']
-const CAT_OUT = ['Medição de obra','Material','Mão de obra','Terceiros','Aluguel','Equipamento','Imposto','Pessoal','Marketing','Administrativo','Reembolso','Investimento (aporte)','Resgate de investimento','Outros']
+const CAT_IN  = ['Medição de obra','Adiantamento','Sinal de contrato','Parcela de contrato', CAT_RESGATE, 'Outros']
+const CAT_OUT = ['Medição de obra','Material','Mão de obra','Terceiros','Aluguel','Equipamento','Imposto','Pessoal','Marketing','Administrativo','Reembolso', CAT_APORTE, CAT_FATURA,'Outros']
 
-const LZ = { data: new Date().toISOString().slice(0,10), descricao: '', tipo: 'saida', valor: '', categoria: '', conta: '', status: 'pago', data_vencimento: '', obra_id: '', servico_id: '', nf_numero: '', nf_url: '', nf_arquivo: null as File | null, recorrente: false, favorecido: '' }
-const CZ = { nome: '', banco: '', tipo: 'corrente', saldo_inicial: '' }
-const CAZ = { nome: '', bandeira: '', limite: '', dia_fechamento: '', dia_vencimento: '' }
-const GZ = { data: new Date().toISOString().slice(0,10), descricao: '', valor: '', categoria: '', cartao_id: '', parcelas: '1', obra_id: '', servico_id: '', nf_numero: '', nf_arquivo: null as File | null }
-const IZ = { descricao: '', tipo: 'aporte', valor: '', data: new Date().toISOString().slice(0,10), instituicao: '', observacao: '' }
-const RCZ = { data: new Date().toISOString().slice(0,10), valor: '', descricao: '', obra_id: '', servico_id: '', conta: '' }
+// Formulários em função (e não constante) para a data ser sempre a de HOJE no momento de abrir — e no horário local.
+const LZ = () => ({ data: hojeISO(), descricao: '', tipo: 'saida', valor: '', categoria: '', conta: '', status: 'pago', data_pagamento: '', data_vencimento: '', obra_id: '', servico_id: '', nf_numero: '', nf_url: '', nf_arquivo: null as File | null, recorrente: false, favorecido: '' })
+const CZ = () => ({ nome: '', banco: '', tipo: 'corrente', saldo_inicial: '' })
+const CAZ = () => ({ nome: '', bandeira: '', limite: '', dia_fechamento: '', dia_vencimento: '' })
+const GZ = () => ({ data: hojeISO(), descricao: '', valor: '', categoria: '', cartao_id: '', parcelas: '1', obra_id: '', servico_id: '', nf_numero: '', nf_arquivo: null as File | null })
+const IZ = () => ({ descricao: '', tipo: 'aporte', valor: '', data: hojeISO(), instituicao: '', observacao: '', conta: '' })
+const RCZ = () => ({ data: hojeISO(), valor: '', descricao: '', obra_id: '', servico_id: '', conta: '' })
 
-const WZ_VAZIO = {
+const WZ_VAZIO = () => ({
   step: 'tipo',
   tipo: 'saida' as 'saida' | 'entrada',
-  data: new Date().toISOString().slice(0, 10),
+  data: hojeISO(),
   descricao: '', valor: '', categoria: '',
   nf_numero: '', nf_arquivo: null as File | null,
   destino: 'empresa' as 'empresa' | 'obra',
@@ -262,7 +279,7 @@ const WZ_VAZIO = {
   favorecido: '',
   recorrente: false,
   conta: '',
-}
+})
 
 // classes reutilizáveis
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -302,26 +319,31 @@ export default function Financeiro() {
   const [obraDetalhe, setObraDetalhe] = useState<any>(null)
   const [servicosObra, setServicosObra] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [erroCarga, setErroCarga] = useState('')
   const [salvando, setSalvando] = useState(false)
   const salvandoLancRef = useRef(false)
   const garantindoRecorrentesRef = useRef(false)
   const [modal, setModal] = useState('')
-  const [filtroMes, setFiltroMes] = useState(new Date().toISOString().slice(0,7))
-  const [fLanc, setFLanc] = useState<any>({...LZ})
+  const [filtroMes, setFiltroMes] = useState(hojeISO().slice(0, 7))
+  const [fLanc, setFLanc] = useState<any>(LZ())
   const [lancEditando, setLancEditando] = useState<any>(null)
-  const [fConta, setFConta] = useState({...CZ})
-  const [fCartao, setFCartao] = useState({...CAZ})
-  const [fGasto, setFGasto] = useState<any>({...GZ})
+  const [fConta, setFConta] = useState(CZ())
+  const [fCartao, setFCartao] = useState(CAZ())
+  const [fGasto, setFGasto] = useState<any>(GZ())
   const [investimentos, setInvestimentos] = useState<any[]>([])
-  const [fInvest, setFInvest] = useState({...IZ})
+  const [fInvest, setFInvest] = useState(IZ())
   const [userEmail, setUserEmail] = useState('')
   const [wizardAberto, setWizardAberto] = useState(false)
-  const [wiz, setWiz] = useState<any>({...WZ_VAZIO})
+  const [wiz, setWiz] = useState<any>(WZ_VAZIO())
   const [wizSalvando, setWizSalvando] = useState(false)
   // Trava síncrona contra duplo-clique (o estado `wizSalvando` só bloqueia o botão depois de
   // um re-render; um duplo-clique muito rápido pode passar antes disso).
   const salvandoLockRef = useRef(false)
-  const [fRecebCartao, setFRecebCartao] = useState({...RCZ})
+  const [fRecebCartao, setFRecebCartao] = useState(RCZ())
+  // pagar um lançamento pendente (data do pagamento + conta) e pagar fatura de cartão
+  const [fPagamento, setFPagamento] = useState<{ lanc: any; data: string; conta: string } | null>(null)
+  const [fFatura, setFFatura] = useState<{ cartao: any; fatura: any; conta: string; jaPaga: boolean; data: string } | null>(null)
+  const [atribuicoes, setAtribuicoes] = useState<Record<string, string>>({})
 
   useEffect(() => {
     const token = localStorage.getItem('viga_token')
@@ -340,24 +362,29 @@ export default function Financeiro() {
 
   async function carregar() {
     setLoading(true)
-    const [c,l,ca,g,o,sv,inv] = await Promise.all([
-      get('contas','?order=created_at'),
-      get('lancamentos','?order=data.desc&limit=300'),
-      get('cartoes','?order=created_at'),
-      get('gastos_cartao','?order=data.desc&limit=300'),
-      get('obras','?order=created_at.desc'),
-      get('obra_servicos','?order=created_at'),
-      get('investimentos','?order=data.desc&limit=200'),
-    ])
-    setContas(c); setCartoes(ca); setGastosCartao(g); setObras(o); setServicosObra(sv); setInvestimentos(inv)
-    // Trava contra chamadas concorrentes de carregar() — sem isso, duas execuções em paralelo
-    // veriam o mesmo "mês faltando" e cada uma criaria sua própria cópia da recorrência.
-    let criouRecorrente = false
-    if (!garantindoRecorrentesRef.current) {
-      garantindoRecorrentesRef.current = true
-      try { criouRecorrente = await garantirRecorrentes(l) } finally { garantindoRecorrentesRef.current = false }
+    try {
+      const [c,l,ca,g,o,sv,inv] = await Promise.all([
+        getTudo('contas','?order=created_at'),
+        getTudo('lancamentos','?order=data.desc,id'),
+        getTudo('cartoes','?order=created_at'),
+        getTudo('gastos_cartao','?order=data.desc,id'),
+        getTudo('obras','?order=created_at.desc'),
+        getTudo('obra_servicos','?order=created_at'),
+        getTudo('investimentos','?order=data.desc,id'),
+      ])
+      setContas(c); setCartoes(ca); setGastosCartao(g); setObras(o); setServicosObra(sv); setInvestimentos(inv)
+      // Trava contra chamadas concorrentes de carregar() — sem isso, duas execuções em paralelo
+      // veriam o mesmo "mês faltando" e cada uma criaria sua própria cópia da recorrência.
+      let criouRecorrente = false
+      if (!garantindoRecorrentesRef.current) {
+        garantindoRecorrentesRef.current = true
+        try { criouRecorrente = await garantirRecorrentes(l) } catch { /* recorrência é secundária: não impede de abrir o financeiro */ } finally { garantindoRecorrentesRef.current = false }
+      }
+      setLancamentos(criouRecorrente ? await getTudo('lancamentos','?order=data.desc,id') : l)
+      setErroCarga('')
+    } catch (e: any) {
+      setErroCarga(e?.message || 'Falha ao carregar os dados financeiros')
     }
-    setLancamentos(criouRecorrente ? await get('lancamentos','?order=data.desc&limit=300') : l)
     setLoading(false)
   }
 
@@ -372,18 +399,17 @@ export default function Financeiro() {
         grupos.get(l.recorrente_grupo)!.push(l)
       }
     })
-    const hoje = new Date()
-    const mesAtual = hoje.toISOString().slice(0, 7)
-    const proxMesData = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
-    const proxMes = proxMesData.toISOString().slice(0, 7)
+    const hoje = hojeISO()
+    const mesAtual = hoje.slice(0, 7)
+    const proxMes = somarMesesISO(mesAtual + '-01', 1).slice(0, 7)
     let criouAlgum = false
     for (const itens of grupos.values()) {
       const maisRecente = itens.slice().sort((a, b) => (a.data < b.data ? 1 : -1))[0]
       const mesesExistentes = new Set(itens.map((i: any) => i.data.slice(0, 7)))
       for (const mesAlvo of [mesAtual, proxMes]) {
         if (mesesExistentes.has(mesAlvo)) continue
-        const [ano, mes] = mesAlvo.split('-').map(Number)
         const diaOriginal = parseInt(maisRecente.data.slice(8, 10), 10)
+        const [ano, mes] = mesAlvo.split('-').map(Number)
         const ultimoDiaMes = new Date(ano, mes, 0).getDate()
         const novaData = `${mesAlvo}-${String(Math.min(diaOriginal, ultimoDiaMes)).padStart(2, '0')}`
         const nova: any = {
@@ -401,101 +427,264 @@ export default function Financeiro() {
     return criouAlgum
   }
 
+  // Aporte/resgate lançado no financeiro é a MESMA coisa que o movimento da aba Investimentos: um único
+  // registro de dinheiro (o lançamento, que mexe na conta) com o espelho na aba Investimentos.
+  async function sincronizarInvestimento(lanc: any, extra: { instituicao?: string; observacao?: string } = {}) {
+    const existentes = await get('investimentos', `?lancamento_id=eq.${lanc.id}&select=id`)
+    if (!ehMovInvestimento(lanc)) {
+      for (const e of existentes) await deletar('investimentos', e.id)
+      return
+    }
+    const dados: any = {
+      descricao: lanc.descricao,
+      tipo: lanc.categoria === CAT_APORTE ? 'aporte' : 'resgate',
+      valor: Math.abs(num(lanc.valor)),
+      data: lanc.data_pagamento || lanc.data,
+      lancamento_id: lanc.id,
+    }
+    if (extra.instituicao !== undefined) dados.instituicao = extra.instituicao
+    if (extra.observacao !== undefined) dados.observacao = extra.observacao
+    if (existentes[0]) await atualizar('investimentos', existentes[0].id, dados)
+    else await inserir('investimentos', { instituicao: '', observacao: 'Gerado automaticamente a partir do lançamento financeiro', ...dados })
+  }
+
   async function salvarLanc() {
     if (salvandoLancRef.current) return
-    if (!fLanc.descricao || !fLanc.valor) return alert('Preencha descrição e valor')
+    const valor = arred2(fLanc.valor)
+    if (!fLanc.descricao || !(valor > 0)) return alert('Preencha a descrição e um valor maior que zero')
+    if (fLanc.status === 'pago' && !fLanc.conta) return alert('Selecione a conta: todo lançamento pago precisa de conta para os saldos fecharem')
     salvandoLancRef.current = true
     setSalvando(true)
     try {
       let nf_url = fLanc.nf_url || ''
       if (fLanc.nf_arquivo) {
         const url = await uploadNF(fLanc.nf_arquivo, fLanc.descricao)
-        if (url) nf_url = url
+        if (!url) { alert('Não foi possível enviar o arquivo da NF. O lançamento NÃO foi salvo — tente de novo.'); return }
+        nf_url = url
       }
-      const dados: any = { ...fLanc, valor: parseFloat(fLanc.valor), nf_arquivo: undefined, nf_url: nf_url || undefined }
+      const pago = fLanc.status === 'pago'
+      const dados: any = {
+        ...fLanc, valor, nf_arquivo: undefined, nf_url: nf_url || undefined,
+        data_pagamento: pago ? (fLanc.data_pagamento || fLanc.data) : null,
+        data_vencimento: pago ? (fLanc.data_vencimento || undefined) : (fLanc.data_vencimento || fLanc.data),
+      }
       if (!dados.obra_id) delete dados.obra_id
       if (!dados.servico_id) delete dados.servico_id
       if (!dados.data_vencimento) delete dados.data_vencimento
       if (!dados.nf_url) delete dados.nf_url
       if (!dados.favorecido) delete dados.favorecido
+      if (!dados.conta) delete dados.conta
       if (!dados.recorrente) { delete dados.recorrente; delete dados.recorrente_grupo }
+      let gravado: any
       if (lancEditando) {
         delete dados.recorrente_grupo
         await atualizar('lancamentos', lancEditando.id, dados)
+        gravado = { ...lancEditando, ...dados, id: lancEditando.id }
       } else {
         if (dados.recorrente) dados.recorrente_grupo = crypto.randomUUID()
-        await inserir('lancamentos', dados)
-        await sincronizarInvestimento(dados)
+        gravado = await inserir('lancamentos', dados)
       }
-      setModal(''); setFLanc({...LZ}); setLancEditando(null); await carregar()
-    } catch {
-      alert('Não foi possível salvar o lançamento. Verifique a conexão e tente novamente.')
+      await sincronizarInvestimento(gravado)
+      setModal(''); setFLanc(LZ()); setLancEditando(null); await carregar()
+    } catch (e: any) {
+      alert('Não foi possível salvar o lançamento: ' + (e?.message || 'verifique a conexão e tente novamente.'))
     } finally {
       salvandoLancRef.current = false
       setSalvando(false)
     }
   }
 
-  // Categoria "Investimento (aporte)"/"Resgate de investimento" no lançamento também
-  // registra o movimento na aba Investimentos, sem precisar lançar duas vezes.
-  async function sincronizarInvestimento(dados: any) {
-    if (dados.categoria !== 'Investimento (aporte)' && dados.categoria !== 'Resgate de investimento') return
-    await inserir('investimentos', {
-      descricao: dados.descricao,
-      tipo: dados.categoria === 'Investimento (aporte)' ? 'aporte' : 'resgate',
-      valor: Math.abs(parseFloat(dados.valor || 0)),
-      data: dados.data,
-      instituicao: '',
-      observacao: 'Gerado automaticamente a partir do lançamento financeiro',
-    })
-  }
-
   async function salvarConta() {
-    if (!fConta.nome) return alert('Preencha o nome')
-    await inserir('contas', { ...fConta, saldo_inicial: parseFloat(fConta.saldo_inicial||'0') })
-    setModal(''); setFConta({...CZ}); carregar()
+    if (!fConta.nome.trim()) return alert('Preencha o nome')
+    if (contas.some(c => c.nome.trim().toLowerCase() === fConta.nome.trim().toLowerCase())) return alert('Já existe uma conta com esse nome')
+    try {
+      await inserir('contas', { ...fConta, nome: fConta.nome.trim(), saldo_inicial: arred2(fConta.saldo_inicial || '0') })
+      setModal(''); setFConta(CZ()); await carregar()
+    } catch (e: any) { alert('Não foi possível salvar a conta: ' + e.message) }
   }
 
   async function salvarCartao() {
-    if (!fCartao.nome) return alert('Preencha o nome')
-    await inserir('cartoes', { ...fCartao, limite: parseFloat(fCartao.limite||'0'), dia_fechamento: parseInt(fCartao.dia_fechamento||'1'), dia_vencimento: parseInt(fCartao.dia_vencimento||'10') })
-    setModal(''); setFCartao({...CAZ}); carregar()
+    if (!fCartao.nome.trim()) return alert('Preencha o nome')
+    const fech = parseInt(fCartao.dia_fechamento || '1'), venc = parseInt(fCartao.dia_vencimento || '10')
+    if (!(fech >= 1 && fech <= 31 && venc >= 1 && venc <= 31)) return alert('Dias de fechamento e vencimento devem estar entre 1 e 31')
+    try {
+      await inserir('cartoes', { ...fCartao, nome: fCartao.nome.trim(), limite: arred2(fCartao.limite || '0'), dia_fechamento: fech, dia_vencimento: venc })
+      setModal(''); setFCartao(CAZ()); await carregar()
+    } catch (e: any) { alert('Não foi possível salvar o cartão: ' + e.message) }
   }
 
-  async function marcarPago(id: string) {
-    await atualizar('lancamentos', id, { status: 'pago' })
-    await carregar()
+  // Pagar um lançamento pendente: pede a data em que foi pago e a conta (obrigatória, exceto saída de obra de gerenciamento).
+  function abrirPagamento(l: any) {
+    setFPagamento({ lanc: l, data: hojeISO(), conta: l.conta || '' })
+  }
+  const contaDispensada = (l: any) => l.tipo === 'saida' && !!l.obra_id && obras.some(o => o.id === l.obra_id && o.gerenciamento)
+  async function confirmarPagamento() {
+    if (!fPagamento) return
+    const { lanc, data, conta } = fPagamento
+    if (!data) return alert('Informe a data do pagamento')
+    if (!conta && !contaDispensada(lanc)) return alert('Selecione a conta onde o pagamento foi feito/recebido')
+    try {
+      await atualizar('lancamentos', lanc.id, { status: 'pago', data_pagamento: data, ...(conta ? { conta } : {}) })
+      const pagoAgora = { ...lanc, status: 'pago', data_pagamento: data, conta: conta || lanc.conta }
+      if (ehMovInvestimento(pagoAgora)) await sincronizarInvestimento(pagoAgora)
+      setFPagamento(null); await carregar()
+    } catch (e: any) { alert('Não foi possível marcar como pago: ' + e.message) }
+  }
+
+  // ── exclusões (sempre com confirmação, sem deixar registro solto) ──────────────────────────────
+  async function excluirLancamento(l: any) {
+    const extras: string[] = []
+    if (l.categoria === CAT_FATURA) extras.push('As compras dessa fatura voltam para "em aberto" no cartão.')
+    if (l.categoria === 'Medição de obra') extras.push('Se for o pagamento de uma medição, a medição ficará sem pagamento programado.')
+    if (ehMovInvestimento(l)) extras.push('O movimento correspondente na aba Investimentos também será removido.')
+    if (!confirm(`Excluir o lançamento "${l.descricao}" (${fmt(num(l.valor))})?\n${extras.join('\n')}\nEsta ação não pode ser desfeita.`)) return
+    try {
+      const meds = await get('medicoes', `?lancamento_id=eq.${l.id}&select=id`)
+      for (const m of meds) await atualizar('medicoes', m.id, { lancamento_id: null, data_pagamento_programada: null })
+      await deletar('lancamentos', l.id)
+      await carregar()
+    } catch (e: any) { alert('Não foi possível excluir: ' + e.message) }
+  }
+  async function excluirGasto(g: any) {
+    if (g.fatura_lancamento_id) return alert('Esta compra já faz parte de um pagamento de fatura. Exclua o lançamento da fatura (aba Lançamentos) antes de apagar a compra.')
+    if (!confirm(`Excluir a compra "${g.descricao}" (${fmt(num(g.valor))}) do cartão?`)) return
+    try { await deletar('gastos_cartao', g.id); await carregar() } catch (e: any) { alert('Não foi possível excluir: ' + e.message) }
+  }
+  async function excluirConta(c: any) {
+    const usados = lancamentos.filter(l => l.conta === c.nome).length
+    if (usados > 0) return alert(`A conta "${c.nome}" tem ${usados} lançamento(s) vinculado(s) e não pode ser excluída (os saldos deixariam de fechar). Mova os lançamentos para outra conta antes.`)
+    if (!confirm(`Excluir a conta "${c.nome}"?`)) return
+    try { await deletar('contas', c.id); await carregar() } catch (e: any) { alert('Não foi possível excluir: ' + e.message) }
+  }
+  async function excluirCartao(c: any) {
+    const usados = gastosCartao.filter(g => g.cartao_id === c.id).length
+    if (usados > 0) return alert(`O cartão "${c.nome}" tem ${usados} compra(s) lançada(s) e não pode ser excluído. Exclua as compras antes.`)
+    if (!confirm(`Excluir o cartão "${c.nome}"?`)) return
+    try { await deletar('cartoes', c.id); await carregar() } catch (e: any) { alert('Não foi possível excluir: ' + e.message) }
+  }
+  async function excluirInvestimento(inv: any) {
+    if (!confirm(`Excluir o movimento "${inv.descricao}" (${fmt(num(inv.valor))})?${inv.lancamento_id ? '\nO lançamento correspondente na conta também será excluído.' : ''}`)) return
+    try {
+      if (inv.lancamento_id) await deletar('lancamentos', inv.lancamento_id) // o espelho some junto (cascade)
+      else await deletar('investimentos', inv.id)
+      await carregar()
+    } catch (e: any) { alert('Não foi possível excluir: ' + e.message) }
   }
 
   async function salvarGasto() {
-    if (!fGasto.descricao || !fGasto.valor || !fGasto.cartao_id) return alert('Preencha todos os campos obrigatórios')
+    const valor = arred2(fGasto.valor)
+    if (!fGasto.descricao || !(valor > 0) || !fGasto.cartao_id) return alert('Preencha o cartão, a descrição e um valor maior que zero')
+    if (salvandoLancRef.current) return
+    salvandoLancRef.current = true
     setSalvando(true)
-    let nf_url = ''
-    if (fGasto.nf_arquivo) {
-      const url = await uploadNF(fGasto.nf_arquivo, fGasto.descricao)
-      if (url) nf_url = url
+    try {
+      let nf_url = ''
+      if (fGasto.nf_arquivo) {
+        const url = await uploadNF(fGasto.nf_arquivo, fGasto.descricao)
+        if (!url) { alert('Não foi possível enviar o arquivo da NF. A compra NÃO foi salva — tente de novo.'); return }
+        nf_url = url
+      }
+      await gravarCompraCartao({
+        data: fGasto.data, descricao: fGasto.descricao, valor, categoria: fGasto.categoria, cartao_id: fGasto.cartao_id,
+        parcelas: parseInt(fGasto.parcelas || '1'), obra_id: fGasto.obra_id, servico_id: fGasto.servico_id, nf_numero: fGasto.nf_numero, nf_url,
+      })
+      setModal(''); setFGasto(GZ()); await carregar()
+    } catch (e: any) {
+      alert('Não foi possível salvar a compra no cartão: ' + e.message)
+    } finally {
+      salvandoLancRef.current = false
+      setSalvando(false)
     }
-    const dados: any = { ...fGasto, valor: parseFloat(fGasto.valor), parcelas: parseInt(fGasto.parcelas||'1'), nf_arquivo: undefined, nf_url: nf_url || undefined }
-    if (!dados.obra_id) delete dados.obra_id
-    if (!dados.nf_url) delete dados.nf_url
-    await inserir('gastos_cartao', dados)
-    setModal(''); setFGasto({...GZ}); await carregar(); setSalvando(false)
   }
 
+  // Compra no cartão: uma linha por parcela, datas mês a mês (sem pular mês) e centavos que fecham o total.
+  async function gravarCompraCartao(c: { data: string; descricao: string; valor: number; categoria: string; cartao_id: string; parcelas: number; obra_id?: string; servico_id?: string; nf_numero?: string; nf_url?: string }) {
+    const n = Math.max(1, c.parcelas || 1)
+    const valores = dividirParcelas(c.valor, n)
+    for (let i = 0; i < n; i++) {
+      const dados: any = {
+        data: somarMesesISO(c.data, i),
+        descricao: c.descricao + (n > 1 ? ` (parcela ${i + 1}/${n})` : ''),
+        valor: valores[i],
+        categoria: c.categoria,
+        cartao_id: c.cartao_id,
+        parcelas: n,
+        parcela_numero: i + 1,
+      }
+      if (c.nf_numero) dados.nf_numero = c.nf_numero
+      if (c.obra_id) dados.obra_id = c.obra_id
+      if (c.obra_id && c.servico_id) dados.servico_id = c.servico_id
+      if (c.nf_url) dados.nf_url = c.nf_url
+      await inserir('gastos_cartao', dados)
+    }
+  }
+
+  // Pagar (ou programar) a fatura: vira UM lançamento de saída na conta; as compras ficam ligadas a ele.
+  async function confirmarFatura() {
+    if (!fFatura) return
+    const { cartao, fatura, conta, jaPaga, data } = fFatura
+    if (fatura.aberto <= 0) return
+    if (jaPaga && !conta) return alert('Selecione a conta de onde a fatura foi paga')
+    if (jaPaga && !data) return alert('Informe a data do pagamento')
+    if (salvandoLancRef.current) return
+    salvandoLancRef.current = true
+    try {
+      const dados: any = {
+        data: jaPaga ? data : fatura.vencimento,
+        descricao: `Fatura ${cartao.nome} — venc. ${dataBR(fatura.vencimento)}`,
+        tipo: 'saida', valor: fatura.aberto, categoria: CAT_FATURA, forma_pagamento: 'cartao',
+        status: jaPaga ? 'pago' : 'pendente',
+        data_vencimento: fatura.vencimento,
+      }
+      if (conta) dados.conta = conta
+      if (jaPaga) dados.data_pagamento = data
+      const lanc = await inserir('lancamentos', dados)
+      for (const g of fatura.itensAbertos) await atualizar('gastos_cartao', g.id, { fatura_lancamento_id: lanc.id })
+      setFFatura(null); await carregar()
+    } catch (e: any) {
+      alert('Não foi possível registrar a fatura: ' + e.message)
+    } finally { salvandoLancRef.current = false }
+  }
+
+  // Investimento: aporte sai da conta, resgate volta para ela. É um lançamento (para os saldos) com o espelho em Investimentos.
   async function salvarInvestimento() {
-    if (!fInvest.descricao || !fInvest.valor) return alert('Preencha descrição e valor')
-    await inserir('investimentos', { ...fInvest, valor: parseFloat(fInvest.valor || '0') })
-    setModal(''); setFInvest({...IZ}); carregar()
+    const valor = arred2(fInvest.valor)
+    if (!fInvest.descricao || !(valor > 0)) return alert('Preencha a descrição e um valor maior que zero')
+    if (!fInvest.conta) return alert(fInvest.tipo === 'aporte' ? 'Selecione a conta de onde o dinheiro saiu' : 'Selecione a conta para onde o dinheiro voltou')
+    if (salvandoLancRef.current) return
+    salvandoLancRef.current = true
+    try {
+      const lanc = await inserir('lancamentos', {
+        data: fInvest.data, descricao: fInvest.descricao, valor,
+        tipo: fInvest.tipo === 'aporte' ? 'saida' : 'entrada',
+        categoria: fInvest.tipo === 'aporte' ? CAT_APORTE : CAT_RESGATE,
+        status: 'pago', data_pagamento: fInvest.data, conta: fInvest.conta,
+      })
+      await sincronizarInvestimento(lanc, { instituicao: fInvest.instituicao, observacao: fInvest.observacao })
+      setModal(''); setFInvest(IZ()); await carregar()
+    } catch (e: any) {
+      alert('Não foi possível registrar o movimento: ' + e.message)
+    } finally { salvandoLancRef.current = false }
+  }
+
+  // Atribui conta, de uma vez, aos lançamentos pagos que estão sem conta.
+  async function salvarAtribuicoes() {
+    const itens = Object.entries(atribuicoes).filter(([, conta]) => conta)
+    if (itens.length === 0) return alert('Escolha a conta de pelo menos um lançamento')
+    try {
+      for (const [id, conta] of itens) await atualizar('lancamentos', id, { conta })
+      setAtribuicoes({}); setModal(''); await carregar()
+    } catch (e: any) { alert('Não foi possível atribuir as contas: ' + e.message) }
   }
 
   // ── Fluxo guiado de lançamento (NF → obra/empresa → forma de pagamento) ──
   function abrirWizard() {
-    setWiz({ ...WZ_VAZIO, data: new Date().toISOString().slice(0, 10) })
+    setWiz({ ...WZ_VAZIO(), data: hojeISO() })
     setWizardAberto(true)
   }
   function fecharWizard() {
     setWizardAberto(false)
-    setWiz({ ...WZ_VAZIO })
+    setWiz(WZ_VAZIO())
   }
   function voltarWizard() {
     const anterior: Record<string, string> = {
@@ -514,48 +703,38 @@ export default function Financeiro() {
   }
   function irParaFormularioTradicional() {
     setWizardAberto(false)
-    setFLanc({ ...LZ, tipo: 'entrada' })
+    setFLanc({ ...LZ(), tipo: 'entrada' })
+    setLancEditando(null)
     setModal('lancamento')
-    setWiz({ ...WZ_VAZIO })
+    setWiz(WZ_VAZIO())
   }
 
-  async function finalizarSaidaWizard(overrides: Partial<typeof WZ_VAZIO> = {}) {
+  async function finalizarSaidaWizard(overrides: Partial<ReturnType<typeof WZ_VAZIO>> = {}) {
     if (salvandoLockRef.current) return
     const wizFinal = { ...wiz, ...overrides }
-    if (!wizFinal.descricao || !wizFinal.valor) return alert('Preencha descrição e valor')
+    const valorTotal = arred2(wizFinal.valor)
+    if (!wizFinal.descricao || !(valorTotal > 0)) return alert('Preencha a descrição e um valor maior que zero')
+    if (wizFinal.forma_pagamento !== 'cartao' && !wizFinal.conta) return alert('Selecione a conta de saída')
+    if (wizFinal.forma_pagamento === 'cartao' && !wizFinal.cartao_id) return alert('Selecione o cartão')
     salvandoLockRef.current = true
     setWizSalvando(true)
     try {
       let nf_url = ''
       if (wizFinal.nf_arquivo) {
         const url = await uploadNF(wizFinal.nf_arquivo, wizFinal.descricao)
-        if (url) nf_url = url
+        if (!url) { alert('Não foi possível enviar o arquivo da NF. O lançamento NÃO foi salvo — tente de novo.'); return }
+        nf_url = url
       }
       const obraId = wizFinal.destino === 'obra' ? wizFinal.obra_id : ''
       const servicoId = wizFinal.destino === 'obra' ? wizFinal.servico_id : ''
-      const valorTotal = parseFloat(wizFinal.valor || '0')
 
       if (wizFinal.forma_pagamento === 'cartao') {
-        const n = parseInt(wizFinal.parcelas || '1')
-        const valorParcela = Math.round((valorTotal / n) * 100) / 100
-        for (let i = 0; i < n; i++) {
-          const dataParcela = new Date(wizFinal.data + 'T00:00:00')
-          dataParcela.setMonth(dataParcela.getMonth() + i)
-          const dados: any = {
-            data: dataParcela.toISOString().slice(0, 10),
-            descricao: wizFinal.descricao + (n > 1 ? ` (parcela ${i + 1}/${n})` : ''),
-            valor: valorParcela,
-            categoria: wizFinal.categoria,
-            cartao_id: wizFinal.cartao_id,
-            parcelas: n,
-            parcela_numero: i + 1,
-          }
-          if (wizFinal.nf_numero) dados.nf_numero = wizFinal.nf_numero
-          if (obraId) dados.obra_id = obraId
-          if (nf_url) dados.nf_url = nf_url
-          await inserir('gastos_cartao', dados)
-        }
+        await gravarCompraCartao({
+          data: wizFinal.data, descricao: wizFinal.descricao, valor: valorTotal, categoria: wizFinal.categoria, cartao_id: wizFinal.cartao_id,
+          parcelas: parseInt(wizFinal.parcelas || '1'), obra_id: obraId, servico_id: servicoId, nf_numero: wizFinal.nf_numero, nf_url,
+        })
       } else {
+        const pago = wizFinal.forma_pagamento !== 'faturado'
         const dados: any = {
           data: wizFinal.data,
           descricao: wizFinal.descricao,
@@ -563,36 +742,26 @@ export default function Financeiro() {
           valor: valorTotal,
           categoria: wizFinal.categoria,
           forma_pagamento: wizFinal.forma_pagamento,
-          status: wizFinal.forma_pagamento === 'faturado' ? 'pendente' : 'pago',
+          status: pago ? 'pago' : 'pendente',
+          conta: wizFinal.conta,
         }
-        if (wizFinal.forma_pagamento === 'faturado') {
-          const venc = new Date(wizFinal.data + 'T00:00:00')
-          venc.setDate(venc.getDate() + parseInt(wizFinal.dias_prazo || '0'))
-          dados.data_vencimento = venc.toISOString().slice(0, 10)
-        }
+        if (pago) dados.data_pagamento = wizFinal.data
+        else dados.data_vencimento = somarDiasISO(wizFinal.data, parseInt(wizFinal.dias_prazo || '0'))
         if (wizFinal.nf_numero) dados.nf_numero = wizFinal.nf_numero
         if (obraId) dados.obra_id = obraId
         if (servicoId) dados.servico_id = servicoId
         if (nf_url) dados.nf_url = nf_url
         if (wizFinal.favorecido) dados.favorecido = wizFinal.favorecido
         if (wizFinal.recorrente) { dados.recorrente = true; dados.recorrente_grupo = crypto.randomUUID() }
-        if (wizFinal.conta) dados.conta = wizFinal.conta
-        await inserir('lancamentos', dados)
-        await sincronizarInvestimento(dados)
+        const gravado = await inserir('lancamentos', dados)
+        await sincronizarInvestimento(gravado)
       }
-
-      if (servicoId) {
-        const serv = servicosObra.find((s: any) => s.id === servicoId)
-        if (serv) {
-          const novoRealizado = parseFloat(serv.valor_realizado || 0) + valorTotal
-          await atualizar('obra_servicos', servicoId, { valor_realizado: novoRealizado })
-        }
-      }
-
+      // O "valor realizado" do serviço da obra é calculado a partir dos lançamentos vinculados a ele (tela de Obras):
+      // não se soma mais nada manualmente aqui — era isso que duplicava custos e não voltava ao excluir.
       fecharWizard()
       await carregar()
-    } catch {
-      alert('Não foi possível salvar o lançamento. Verifique a conexão e tente novamente.')
+    } catch (e: any) {
+      alert('Não foi possível salvar o lançamento: ' + (e?.message || 'verifique a conexão e tente novamente.'))
     } finally {
       salvandoLockRef.current = false
       setWizSalvando(false)
@@ -601,7 +770,8 @@ export default function Financeiro() {
 
   async function finalizarEntradaComNFWizard() {
     if (salvandoLockRef.current) return
-    if (!wiz.descricao || !wiz.valor || !wiz.data_pagamento_combinada) return alert('Preencha descrição, valor e data de pagamento')
+    const valor = arred2(wiz.valor)
+    if (!wiz.descricao || !(valor > 0) || !wiz.data_pagamento_combinada) return alert('Preencha descrição, valor maior que zero e data de pagamento')
     if (!wiz.conta) return alert('Selecione em qual conta o pagamento vai cair')
     salvandoLockRef.current = true
     setWizSalvando(true)
@@ -609,13 +779,14 @@ export default function Financeiro() {
       let nf_url = ''
       if (wiz.nf_arquivo) {
         const url = await uploadNF(wiz.nf_arquivo, wiz.descricao)
-        if (url) nf_url = url
+        if (!url) { alert('Não foi possível enviar o arquivo da NF. O lançamento NÃO foi salvo — tente de novo.'); return }
+        nf_url = url
       }
       const dados: any = {
         data: wiz.data,
         descricao: wiz.descricao,
         tipo: 'entrada',
-        valor: parseFloat(wiz.valor || '0'),
+        valor,
         categoria: wiz.categoria,
         status: 'pendente',
         data_vencimento: wiz.data_pagamento_combinada,
@@ -628,8 +799,8 @@ export default function Financeiro() {
       await inserir('lancamentos', dados)
       fecharWizard()
       await carregar()
-    } catch {
-      alert('Não foi possível salvar o lançamento. Verifique a conexão e tente novamente.')
+    } catch (e: any) {
+      alert('Não foi possível salvar o lançamento: ' + (e?.message || 'verifique a conexão e tente novamente.'))
     } finally {
       salvandoLockRef.current = false
       setWizSalvando(false)
@@ -638,107 +809,105 @@ export default function Financeiro() {
 
   async function salvarRecebimentoCartao() {
     if (salvandoLancRef.current) return
-    if (!fRecebCartao.valor || !fRecebCartao.data) return alert('Preencha valor e data de recebimento')
+    const valor = arred2(fRecebCartao.valor)
+    if (!(valor > 0) || !fRecebCartao.data) return alert('Preencha valor maior que zero e data de recebimento')
     if (!fRecebCartao.conta) return alert('Selecione em qual conta o valor vai cair')
     salvandoLancRef.current = true
     setSalvando(true)
     try {
-      const hojeStr = new Date().toISOString().slice(0, 10)
+      const hojeStr = hojeISO()
+      const recebido = fRecebCartao.data <= hojeStr
       const dados: any = {
         data: fRecebCartao.data,
         descricao: fRecebCartao.descricao || 'Recebimento no cartão',
         tipo: 'entrada',
-        valor: parseFloat(fRecebCartao.valor),
+        valor,
         meio_recebimento: 'cartao',
-        status: fRecebCartao.data <= hojeStr ? 'pago' : 'pendente',
+        status: recebido ? 'pago' : 'pendente',
         conta: fRecebCartao.conta,
       }
-      if (fRecebCartao.data > hojeStr) dados.data_vencimento = fRecebCartao.data
+      if (recebido) dados.data_pagamento = fRecebCartao.data
+      else dados.data_vencimento = fRecebCartao.data
       if (fRecebCartao.obra_id) dados.obra_id = fRecebCartao.obra_id
       if (fRecebCartao.servico_id) dados.servico_id = fRecebCartao.servico_id
       await inserir('lancamentos', dados)
-      setModal(''); setFRecebCartao({...RCZ}); await carregar()
-    } catch {
-      alert('Não foi possível salvar o recebimento. Verifique a conexão e tente novamente.')
+      setModal(''); setFRecebCartao(RCZ()); await carregar()
+    } catch (e: any) {
+      alert('Não foi possível salvar o recebimento: ' + (e?.message || 'verifique a conexão e tente novamente.'))
     } finally {
       salvandoLancRef.current = false
       setSalvando(false)
     }
   }
 
-  // Cálculos
+  // ── Cálculos (um só motor para tela, PDF e Dashboard) ──────────────────────────────────────────
+  const hojeStr = hojeISO()
   const mesNome = meses[parseInt(filtroMes.slice(5,7))-1] + ' ' + filtroMes.slice(0,4)
-  // Obra de Gerenciamento: o fornecedor é contratado e pago pelo cliente, não pela Inverso —
-  // toda saída vinculada a essa obra é dinheiro de terceiro (a Inverso só controla a medição
-  // e o pagamento), então fica fora do balanço geral da empresa. A entrada (taxa de
-  // gerenciamento cobrada do cliente) continua contando normalmente. Isso não mexe na aba
-  // Obras (que continua mostrando o custo real pro cliente) nem no saldo de cada conta
-  // bancária (saldoConta, que reflete o extrato real independente de quem é o dono do dinheiro).
-  const obrasGerenciamento = new Set(obras.filter((o: any) => o.gerenciamento).map((o: any) => o.id))
-  const lancamentosEmpresa = lancamentos.filter(l => !(l.tipo === 'saida' && l.obra_id && obrasGerenciamento.has(l.obra_id)))
-  const lancMes = lancamentosEmpresa.filter(l => l.data?.slice(0,7) === filtroMes)
-  const saldoBase = contas.reduce((a,c)=>a+parseFloat(c.saldo_inicial||0),0)
-  const saldoTotal = saldoBase
-    + lancamentosEmpresa.filter(l=>l.tipo==='entrada'&&l.status==='pago').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-    - lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status==='pago').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const saldoAnterior = saldoBase
-    + lancamentosEmpresa.filter(l=>l.tipo==='entrada'&&l.status==='pago'&&(l.data||'').slice(0,7)<filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0)
-    - lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status==='pago'&&(l.data||'').slice(0,7)<filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const aPagar  = lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status==='pendente').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+  const P = calcularPeriodo({ lancamentos, obras, contas, mes: filtroMes, hoje: hojeStr })
   const totalInvestido = investimentos.reduce((a,i) => {
-    const v = parseFloat(i.valor||0)
+    const v = num(i.valor)
     return i.tipo === 'aporte' ? a + v : a - v
   }, 0)
-  const aReceber = lancamentosEmpresa.filter(l=>l.tipo==='entrada'&&l.status==='pendente').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const custosFixosMes = lancamentosEmpresa.filter(l=>l.recorrente && l.tipo==='saida' && (l.data||'').slice(0,7)===filtroMes)
-  const totalCustosFixos = custosFixosMes.reduce((a,l)=>a+parseFloat(l.valor||0),0)
-
-  const hoje = new Date(); hoje.setHours(0,0,0,0)
-  const mesRealAtual = new Date().toISOString().slice(0,7)
-  const em7dias = new Date(); em7dias.setDate(hoje.getDate()+7)
-  const vencProximos = lancamentosEmpresa.filter(l => {
-    if (l.status !== 'pendente' || l.tipo !== 'saida') return false
-    const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
-    return venc >= hoje && venc <= em7dias
-  })
-  const vencAtrasados = lancamentosEmpresa.filter(l => {
-    if (l.status !== 'pendente' || l.tipo !== 'saida') return false
-    const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
-    return venc < hoje
-  })
-  // Boleto vencido e não pago "vira o mês", e tudo que está na Agenda de Pagamentos
-  // (atrasado ou vencendo em 7 dias, de entrada ou saída) também entra na lista E nos
-  // cálculos do mês corrente de verdade — não fica esquecido em uma aba antiga nem some
-  // do balanço quando o mês vira.
-  const idsNoMes = new Set(lancMes.map(l => l.id))
-  const vencidosArrastados = filtroMes === mesRealAtual
-    ? lancamentosEmpresa.filter(l => {
-        if (l.status !== 'pendente' || idsNoMes.has(l.id)) return false
-        const venc = l.data_vencimento ? new Date(l.data_vencimento) : new Date(l.data)
-        return venc <= em7dias
-      }).sort((a,b) => (a.data_vencimento||a.data) < (b.data_vencimento||b.data) ? -1 : 1)
-    : []
-  const lancMesExibicao = [...vencidosArrastados, ...lancMes]
-  const entradas = lancMesExibicao.filter(l=>l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const saidas   = lancMesExibicao.filter(l=>l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-  const saldoFinalMes = saldoAnterior + entradas - saidas
-
-  // Saldo real de cada conta bancária: inicial + entradas pagas - saídas pagas vinculadas
-  // àquela conta especificamente (não o total geral de todas as contas somadas).
-  function saldoConta(conta: any) {
-    const mov = lancamentos.filter(l => l.status === 'pago' && l.conta === conta.nome)
-    const entr = mov.filter(l => l.tipo === 'entrada').reduce((a,l) => a+parseFloat(l.valor||0), 0)
-    const said = mov.filter(l => l.tipo === 'saida').reduce((a,l) => a+parseFloat(l.valor||0), 0)
-    return parseFloat(conta.saldo_inicial||0) + entr - said
-  }
+  const lancamentosEmpresa = P.empresa
+  const idsAtrasadosAntes = new Set(P.atrasadosAntes.map(l => l.id))
+  const nomeObra = (id: string) => obras.find(o => o.id === id)?.codigo
 
   function getCustosObra(id: string) {
-    return lancamentos.filter(l=>l.obra_id===id&&l.tipo==='saida').reduce((a,l)=>a+parseFloat(l.valor||0),0)
-     + gastosCartao.filter(g=>g.obra_id===id).reduce((a,g)=>a+parseFloat(g.valor||0),0)
+    return lancamentos.filter(l=>l.obra_id===id&&l.tipo==='saida').reduce((a,l)=>a+num(l.valor),0)
+     + gastosCartao.filter(g=>g.obra_id===id).reduce((a,g)=>a+num(g.valor),0)
   }
   function getReceitasObra(id: string) {
-    return lancamentos.filter(l=>l.obra_id===id&&l.tipo==='entrada').reduce((a,l)=>a+parseFloat(l.valor||0),0)
+    return lancamentos.filter(l=>l.obra_id===id&&l.tipo==='entrada').reduce((a,l)=>a+num(l.valor),0)
   }
+  function getRecebidoObra(id: string) {
+    return lancamentos.filter(l=>l.obra_id===id&&l.tipo==='entrada'&&l.status==='pago').reduce((a,l)=>a+num(l.valor),0)
+  }
+
+  function editarLancamento(l: any) {
+    setLancEditando(l)
+    setFLanc({
+      data: l.data||'', descricao: l.descricao||'', tipo: l.tipo||'saida', valor: l.valor||'', categoria: l.categoria||'',
+      conta: l.conta||'', status: l.status||'pago', data_pagamento: l.data_pagamento||'', data_vencimento: l.data_vencimento||'',
+      obra_id: l.obra_id||'', servico_id: l.servico_id||'', nf_numero: l.nf_numero||'', nf_url: l.nf_url||'', nf_arquivo: null,
+      recorrente: l.recorrente||false, favorecido: l.favorecido||'',
+    })
+    setModal('lancamento')
+  }
+
+  // Linha de lançamento reutilizada na lista do mês e no detalhe da obra
+  function LinhaStatus({ l }: { l: any }) {
+    const pago = l.status === 'pago'
+    const atrasado = !pago && dataEfetiva(l) < hojeStr
+    return (
+      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${atrasado ? 'bg-error/10 text-error border-error/20' : statusBadge(pago)}`}>
+        {atrasado ? 'Vencido' : (pago ? 'Pago' : 'Pendente')}
+      </span>
+    )
+  }
+
+  const modaisComuns = (
+    <>
+      {fPagamento && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1100] p-4" onClick={e=>e.target===e.currentTarget&&setFPagamento(null)}>
+          <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[460px]">
+            <div className="text-base font-bold text-on-surface mb-1">{fPagamento.lanc.tipo === 'entrada' ? '💰 Confirmar recebimento' : '✅ Confirmar pagamento'}</div>
+            <div className="text-body-sm text-on-surface-variant mb-4">{fPagamento.lanc.descricao} — <strong>{fmt(num(fPagamento.lanc.valor))}</strong></div>
+            <div className="mb-3.5"><label className={labelCls}>Data do {fPagamento.lanc.tipo === 'entrada' ? 'recebimento' : 'pagamento'} *</label>
+              <input type="date" className={inputCls} value={fPagamento.data} onChange={e=>setFPagamento({...fPagamento, data:e.target.value})} /></div>
+            <div className="mb-5"><label className={labelCls}>Conta {contaDispensada(fPagamento.lanc) ? '(opcional — obra de gerenciamento)' : '*'}</label>
+              <select className={inputCls} value={fPagamento.conta} onChange={e=>setFPagamento({...fPagamento, conta:e.target.value})}>
+                <option value="">Selecione</option>
+                {contas.map(c=><option key={c.id} value={c.nome}>{c.nome}</option>)}
+              </select></div>
+            <div className="flex gap-2 justify-end">
+              <button className={btnSecondaryCls} onClick={()=>setFPagamento(null)}>Cancelar</button>
+              <button className={btnPrimaryCls} onClick={confirmarPagamento} data-testid="confirmar-pagamento">Confirmar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
 
   if (loading) return (
     <div className="min-h-screen bg-background flex items-center justify-center">
@@ -746,13 +915,25 @@ export default function Financeiro() {
     </div>
   )
 
+  if (erroCarga) return (
+    <Layout userEmail={userEmail} onLogout={sair}>
+      <div className={sectionCls + ' text-center py-16'}>
+        <div className="text-5xl mb-4">⚠️</div>
+        <div className="text-base font-bold text-on-surface mb-2">Não foi possível carregar os dados financeiros</div>
+        <p className="text-body-sm text-on-surface-variant mb-4">{erroCarga}. Os números não são exibidos para você não decidir em cima de dados incompletos.</p>
+        <button className={btnPrimaryCls} onClick={carregar}>Tentar novamente</button>
+      </div>
+    </Layout>
+  )
+
   // ── DETALHE OBRA ──────────────────────────────────────────────
   if (obraDetalhe) {
     const lancObra = lancamentos.filter(l=>l.obra_id===obraDetalhe.id)
     const gastObra = gastosCartao.filter(g=>g.obra_id===obraDetalhe.id)
     const receitas = getReceitasObra(obraDetalhe.id)
+    const recebido = getRecebidoObra(obraDetalhe.id)
     const custos   = getCustosObra(obraDetalhe.id)
-    const contrato = parseFloat(obraDetalhe.valor_contrato||0)
+    const contrato = num(obraDetalhe.valor_contrato)
     // Gerenciamento: custo é do cliente, não da Inverso — margem é só a taxa recebida.
     const margem   = obraDetalhe.gerenciamento ? receitas : receitas - custos
     const pctC     = contrato > 0 ? Math.min(((obraDetalhe.gerenciamento ? receitas : custos)/contrato)*100, 100) : 0
@@ -769,20 +950,21 @@ export default function Financeiro() {
             <div className="text-body-sm text-on-surface-variant">{obraDetalhe.codigo} · Financeiro da Obra</div>
           </div>
           <div className="ml-auto">
-            <button className={btnPrimaryCls} onClick={() => { setFLanc({...LZ, obra_id: obraDetalhe.id}); setModal('lancamento') }}>+ Lançamento</button>
+            <button className={btnPrimaryCls} onClick={() => { setLancEditando(null); setFLanc({...LZ(), obra_id: obraDetalhe.id}); setModal('lancamento') }}>+ Lançamento</button>
           </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-lg">
           {[
-            {l:'Contrato', v:fmt(contrato), c:'text-primary'},
-            {l:'Receitas', v:fmt(receitas), c:'text-primary-container'},
-            {l: obraDetalhe.gerenciamento ? 'Custos (do Cliente)' : 'Custos', v:fmt(custos), c:'text-error'},
-            {l:'Margem', v:fmt(margem), c: margem>=0?'text-primary-container':'text-error'},
-          ].map(({l,v,c}) => (
+            {l:'Contrato', v:fmt(contrato), c:'text-primary', sub:''},
+            {l:'Receitas', v:fmt(receitas), c:'text-primary-container', sub:`recebido ${fmt(recebido)} · a receber ${fmt(receitas-recebido)}`},
+            {l: obraDetalhe.gerenciamento ? 'Custos (do Cliente)' : 'Custos', v:fmt(custos), c:'text-error', sub:'lançamentos + cartão'},
+            {l:'Margem', v:fmt(margem), c: margem>=0?'text-primary-container':'text-error', sub:''},
+          ].map(({l,v,c,sub}) => (
             <div key={l} className={cardCls}>
               <div className="text-[11px] text-on-surface-variant uppercase tracking-widest mb-2">{l}</div>
               <div className={`text-xl font-bold ${c}`}>{v}</div>
+              {sub && <div className="text-[11px] text-on-surface-variant mt-1">{sub}</div>}
             </div>
           ))}
         </div>
@@ -804,7 +986,7 @@ export default function Financeiro() {
         <div className={sectionCls}>
           <div className="flex justify-between items-center mb-4">
             <div className="text-sm font-bold text-on-surface">Lançamentos</div>
-            <button className={btnPrimaryCls} onClick={() => { setFLanc({...LZ, obra_id: obraDetalhe.id}); setModal('lancamento') }}>+ Novo</button>
+            <button className={btnPrimaryCls} onClick={() => { setLancEditando(null); setFLanc({...LZ(), obra_id: obraDetalhe.id}); setModal('lancamento') }}>+ Novo</button>
           </div>
           {lancObra.length === 0 && gastObra.length === 0 ? (
             <div className="text-center py-8 text-on-surface-variant">Nenhum lançamento nesta obra</div>
@@ -819,11 +1001,9 @@ export default function Financeiro() {
                   </tr>
                 </thead>
                 <tbody>
-                  {lancObra.map(l=>{
-                    const atrasadoLinha = l.status==='pendente' && new Date(l.data_vencimento||l.data)<hoje
-                    return (
+                  {lancObra.map(l=>(
                     <tr key={l.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
-                      <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(l.data)}</td>
+                      <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(dataEfetiva(l))}</td>
                       <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
                       <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria||'—'}</td>
                       <td className="px-3 py-2.5">
@@ -831,22 +1011,19 @@ export default function Financeiro() {
                         {l.nf_url && <a href={l.nf_url} target="_blank" rel="noreferrer" className="text-[11px] text-primary">📎 Ver NF</a>}
                         {!l.nf_numero && !l.nf_url && <span className="text-on-surface-variant/50 text-[11px]">—</span>}
                       </td>
-                      <td className="px-3 py-2.5">
-                        <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${atrasadoLinha ? 'bg-error/10 text-error border-error/20' : statusBadge(l.status==='pago')}`}>
-                          {atrasadoLinha ? 'Vencido' : (l.status==='pago'?'Pago':'Pendente')}
-                        </span>
-                      </td>
+                      <td className="px-3 py-2.5"><LinhaStatus l={l} /></td>
                       <td className={`px-3 py-2.5 font-bold ${l.tipo==='entrada'?'text-primary-container':'text-error'}`}>
-                        {l.tipo==='entrada'?'+':'-'}{fmt(parseFloat(l.valor))}
+                        {l.tipo==='entrada'?'+':'-'}{fmt(num(l.valor))}
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex gap-1.5">
-                          {l.status==='pendente' && <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>}
-                          <button className={btnDangerSmCls} onClick={()=>deletar('lancamentos',l.id).then(carregar)}>×</button>
+                          {l.status!=='pago' && <button className={btnEditSmCls} onClick={()=>abrirPagamento(l)}>✓ Pago</button>}
+                          <button className={btnEditSmCls} onClick={()=>editarLancamento(l)}>✏️</button>
+                          <button className={btnDangerSmCls} onClick={()=>excluirLancamento(l)}>×</button>
                         </div>
                       </td>
                     </tr>
-                  )})}
+                  ))}
                   {gastObra.map(g=>(
                     <tr key={g.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
                       <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(g.data)}</td>
@@ -858,9 +1035,9 @@ export default function Financeiro() {
                         {!g.nf_numero && !g.nf_url && <span className="text-on-surface-variant/50 text-[11px]">—</span>}
                       </td>
                       <td className="px-3 py-2.5"><span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-secondary/10 text-secondary border-secondary/20">Cartão</span></td>
-                      <td className="px-3 py-2.5 font-bold text-error">-{fmt(parseFloat(g.valor))}</td>
+                      <td className="px-3 py-2.5 font-bold text-error">-{fmt(num(g.valor))}</td>
                       <td className="px-3 py-2.5">
-                        <button className={btnDangerSmCls} onClick={()=>deletar('gastos_cartao',g.id).then(carregar)}>×</button>
+                        <button className={btnDangerSmCls} onClick={()=>excluirGasto(g)}>×</button>
                       </td>
                     </tr>
                   ))}
@@ -873,12 +1050,13 @@ export default function Financeiro() {
         {modal === 'lancamento' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e=>e.target===e.currentTarget&&setModal('')}>
             <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[560px] max-h-[92vh] overflow-y-auto">
-              <div className="text-base font-bold text-on-surface mb-1.5">📋 Novo Lançamento</div>
+              <div className="text-base font-bold text-on-surface mb-1.5">{lancEditando ? '✏️ Editar Lançamento' : '📋 Novo Lançamento'}</div>
               <div className="text-body-sm text-primary mb-4">Obra: {obraDetalhe.nome}</div>
-              <ModalLancamento fLanc={fLanc} setFLanc={setFLanc} contas={contas} obras={obras} servicos={servicosObra} salvando={salvando} onSalvar={salvarLanc} onCancel={()=>setModal('')} />
+              <ModalLancamento fLanc={fLanc} setFLanc={setFLanc} contas={contas} obras={obras} servicos={servicosObra} salvando={salvando} onSalvar={salvarLanc} onCancel={()=>{setModal('');setLancEditando(null)}} />
             </div>
           </div>
         )}
+        {modaisComuns}
       </Layout>
     )
   }
@@ -895,7 +1073,7 @@ export default function Financeiro() {
       }
       topbarSlot={
         <>
-          <button className={btnSecondaryCls + ' flex items-center gap-2'} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, filtroMes)}>
+          <button className={btnSecondaryCls + ' flex items-center gap-2'} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, contas, filtroMes)}>
             <span className="material-symbols-outlined text-[18px]">picture_as_pdf</span> PDF
           </button>
           <button onClick={abrirWizard} className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20">
@@ -906,14 +1084,20 @@ export default function Financeiro() {
       }
     >
       {/* ALERTAS */}
-      {vencAtrasados.length > 0 && (
-        <div className="bg-error/10 border border-error/30 rounded-lg px-4 py-3 mb-4 text-sm text-error">
-          🔴 <strong>{vencAtrasados.length} pagamento(s) atrasado(s)</strong> — Total: {fmt(vencAtrasados.reduce((a,l)=>a+parseFloat(l.valor||0),0))}
+      {P.vencAtrasados.length > 0 && (
+        <div className="bg-error/10 border border-error/30 rounded-lg px-4 py-3 mb-4 text-sm text-error" data-testid="alerta-atrasados">
+          🔴 <strong>{P.vencAtrasados.length} pagamento(s) atrasado(s)</strong> — Total: {fmt(P.vencAtrasados.reduce((a,l)=>a+num(l.valor),0))}
         </div>
       )}
-      {vencProximos.length > 0 && (
-        <div className="bg-tertiary/10 border border-tertiary/30 rounded-lg px-4 py-3 mb-4 text-sm text-tertiary">
-          ⚠️ <strong>{vencProximos.length} pagamento(s) vencem nos próximos 7 dias</strong> — Total: {fmt(vencProximos.reduce((a,l)=>a+parseFloat(l.valor||0),0))}
+      {P.vencProximos.length > 0 && (
+        <div className="bg-tertiary/10 border border-tertiary/30 rounded-lg px-4 py-3 mb-4 text-sm text-tertiary" data-testid="alerta-proximos">
+          ⚠️ <strong>{P.vencProximos.length} pagamento(s) vencem hoje ou nos próximos 7 dias</strong> — Total: {fmt(P.vencProximos.reduce((a,l)=>a+num(l.valor),0))}
+        </div>
+      )}
+      {P.semConta.length > 0 && (
+        <div className="bg-tertiary/10 border border-tertiary/30 rounded-lg px-4 py-3 mb-4 text-sm text-tertiary flex items-center justify-between gap-3 flex-wrap" data-testid="alerta-sem-conta">
+          <span>🏦 <strong>{P.semConta.length} lançamento(s) pago(s) sem conta</strong> (líquido {fmt(P.semContaLiquido)}) — o Saldo Acumulado já os considera, mas nenhuma conta mostra esse valor.</span>
+          <button className={btnEditSmCls} onClick={()=>{ setAtribuicoes({}); setModal('semconta') }}>Atribuir contas</button>
         </div>
       )}
 
@@ -931,25 +1115,41 @@ export default function Financeiro() {
         <>
           <div className="flex items-center gap-3 mb-lg flex-wrap">
             <span className="text-on-surface-variant text-sm">Período:</span>
-            <input type="month" value={filtroMes} onChange={e=>setFiltroMes(e.target.value)} className={inputCls + ' w-40'} />
+            <input type="month" value={filtroMes} onChange={e=>e.target.value && setFiltroMes(e.target.value)} className={inputCls + ' w-40'} />
             <span className="text-on-surface font-semibold">{mesNome}</span>
-            <button className={btnSecondaryCls + ' ml-auto flex items-center gap-2'} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, filtroMes)}>
+            <button className={btnSecondaryCls + ' ml-auto flex items-center gap-2'} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, contas, filtroMes)}>
               <span className="material-symbols-outlined text-[18px] text-primary">picture_as_pdf</span>
               Exportar Relatório Mensal — {mesNome}
             </button>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-lg">
+          <div className="text-[11px] text-primary font-bold uppercase tracking-widest mb-2">Realizado — dinheiro que já entrou e saiu</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4 mb-lg" data-testid="cards-realizado">
             {[
-              {l:'Saldo Acumulado', v:fmt(saldoTotal), c: saldoTotal>=0?'text-primary':'text-error', sub:'Todas as contas'},
+              {l:'Saldo Acumulado', v:fmt(P.saldoTotal), c: P.saldoTotal>=0?'text-primary':'text-error', sub:'Contas + pagos sem conta'},
               {l:'Total Investido', v:fmt(totalInvestido), c:'text-secondary', sub:'Ver aba Investimentos'},
-              {l:'Saldo Início '+mesNome, v:fmt(saldoAnterior), c: saldoAnterior>=0?'text-primary-fixed-dim':'text-error', sub:'Vindo de meses anteriores'},
-              {l:'Entradas '+mesNome, v:fmt(entradas), c:'text-primary', sub:lancMesExibicao.filter(l=>l.tipo==='entrada').length+' lançamento(s)', border:'border-l-4 border-l-primary/30'},
-              {l:'Saídas '+mesNome, v:fmt(saidas), c:'text-error', sub:lancMesExibicao.filter(l=>l.tipo==='saida').length+' lançamento(s)', border:'border-l-4 border-l-error/30'},
-              {l:'Saldo Final '+mesNome, v:fmt(saldoFinalMes), c:saldoFinalMes>=0?'text-primary':'text-error', sub:'A receber: '+fmt(aReceber), destaque:true},
+              {l:'Saldo Início '+mesNome, v:fmt(P.saldoAnterior), c: P.saldoAnterior>=0?'text-primary-fixed-dim':'text-error', sub:'Vindo de meses anteriores'},
+              {l:'Entradas '+mesNome, v:fmt(P.entradasReal), c:'text-primary', sub:'recebidas no mês', border:'border-l-4 border-l-primary/30'},
+              {l:'Saídas '+mesNome, v:fmt(P.saidasReal), c:'text-error', sub:'pagas no mês', border:'border-l-4 border-l-error/30'},
+              {l:'Saldo Final '+mesNome, v:fmt(P.saldoFinalReal), c:P.saldoFinalReal>=0?'text-primary':'text-error', sub:P.investLiquido!==0 ? 'após '+fmt(P.investLiquido)+' em investimentos' : 'só o que foi pago', destaque:true},
             ].map(({l,v,c,sub,border,destaque}: any)=>(
               <div key={l} className={`${destaque ? 'bg-surface-container-high border border-primary/30 ring-2 ring-primary/10' : 'bg-surface-container border border-outline-variant'} ${border||''} rounded-xl p-4`}>
                 <div className={`text-[11px] uppercase tracking-widest mb-2 ${destaque ? 'text-primary font-bold' : 'text-on-surface-variant'}`}>{l}</div>
+                <div className={`text-xl font-bold ${c}`}>{v}</div>
+                <div className="text-[11px] text-on-surface-variant mt-1.5">{sub}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="text-[11px] text-tertiary font-bold uppercase tracking-widest mb-2">Previsto — pendências do mês e atrasadas (ainda não mexem no saldo)</div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-lg" data-testid="cards-previsto">
+            {[
+              {l:'A receber', v:fmt(P.prevEntradas), c:'text-primary-container', sub:P.pendentesMes.filter(l=>l.tipo==='entrada'&&!ehMovInvestimento(l)).length+' lançamento(s)'},
+              {l:'A pagar', v:fmt(P.prevSaidas), c:'text-error', sub:P.pendentesMes.filter(l=>l.tipo==='saida'&&!ehMovInvestimento(l)).length+' lançamento(s)'+(P.pendentesMes.filter(l=>dataEfetiva(l)<hojeStr).length>0?' · '+P.pendentesMes.filter(l=>dataEfetiva(l)<hojeStr).length+' atrasado(s)':'')},
+              {l:'Saldo projetado '+mesNome, v:fmt(P.saldoProjetado), c:P.saldoProjetado>=0?'text-primary':'text-error', sub:'realizado + previsto'},
+            ].map(({l,v,c,sub}: any)=>(
+              <div key={l} className="bg-surface-container border border-tertiary/30 rounded-xl p-4">
+                <div className="text-[11px] uppercase tracking-widest mb-2 text-on-surface-variant">{l}</div>
                 <div className={`text-xl font-bold ${c}`}>{v}</div>
                 <div className="text-[11px] text-on-surface-variant mt-1.5">{sub}</div>
               </div>
@@ -968,55 +1168,66 @@ export default function Financeiro() {
               </div>
             ) : (
               <div className="divide-y divide-outline-variant">
-                {contas.map(c=>{
-                  const saldoC = saldoConta(c)
-                  return (
+                {P.saldosContas.map(({conta: c, saldo: saldoC})=>(
                   <div key={c.id} className="p-4 flex items-center justify-between hover:bg-surface-variant/20 transition-all">
                     <div><div className="font-semibold text-on-surface">{c.nome}</div><div className="text-[11px] text-on-surface-variant">{c.banco} · {c.tipo}</div></div>
                     <div className="flex items-center gap-4">
                       <div className="text-right">
                         <div className={`text-lg font-bold ${saldoC>=0?'text-primary':'text-error'}`}>{fmt(saldoC)}</div>
-                        <div className="text-[10px] text-on-surface-variant mt-0.5">saldo atual · inicial: {fmt(parseFloat(c.saldo_inicial||0))}</div>
+                        <div className="text-[10px] text-on-surface-variant mt-0.5">saldo atual · inicial: {fmt(num(c.saldo_inicial))}</div>
                       </div>
-                      <button className={btnDangerSmCls} onClick={()=>deletar('contas',c.id).then(carregar)}>×</button>
+                      <button className={btnDangerSmCls} onClick={()=>excluirConta(c)}>×</button>
                     </div>
                   </div>
-                )})}
+                ))}
+                {P.semConta.length > 0 && (
+                  <div className="p-4 flex items-center justify-between bg-tertiary/5">
+                    <div><div className="font-semibold text-tertiary">Pagos sem conta</div><div className="text-[11px] text-on-surface-variant">{P.semConta.length} lançamento(s) — atribua uma conta para o saldo de cada conta fechar</div></div>
+                    <div className="flex items-center gap-3">
+                      <div className={`text-lg font-bold ${P.semContaLiquido>=0?'text-primary':'text-error'}`}>{fmt(P.semContaLiquido)}</div>
+                      <button className={btnEditSmCls} onClick={()=>{ setAtribuicoes({}); setModal('semconta') }}>Atribuir</button>
+                    </div>
+                  </div>
+                )}
+                <div className="p-4 flex items-center justify-between bg-surface-container-high/40">
+                  <div className="font-bold text-on-surface">Total (= Saldo Acumulado)</div>
+                  <div className={`text-lg font-bold ${P.saldoTotal>=0?'text-primary':'text-error'}`} data-testid="total-contas">{fmt(P.saldoTotal)}</div>
+                </div>
               </div>
             )}
           </section>
 
-          {totalCustosFixos > 0 && (
+          {P.custosFixosMes.length > 0 && (
             <div className="bg-surface-container border border-tertiary/30 rounded-xl p-5 mb-4">
-              <div className="text-sm font-bold text-on-surface mb-3">🔁 Custos Fixos — {mesNome} — {fmt(totalCustosFixos)}</div>
-              {custosFixosMes.map(l=>(
+              <div className="text-sm font-bold text-on-surface mb-3">🔁 Custos Fixos — {mesNome} — {fmt(P.custosFixosMes.reduce((a,l)=>a+num(l.valor),0))}</div>
+              {P.custosFixosMes.map(l=>(
                 <div key={l.id} className={rowCls}>
-                  <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">{l.categoria||'—'} · {l.status==='pago'?'Pago':'Vence '+(l.data_vencimento||l.data)}</div></div>
-                  <div className="text-tertiary font-bold">{fmt(parseFloat(l.valor))}</div>
+                  <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">{l.categoria||'—'} · {l.status==='pago'?'Pago em '+dataBR(l.data_pagamento||l.data):'Vence '+dataBR(l.data_vencimento||l.data)}</div></div>
+                  <div className="text-tertiary font-bold">{fmt(num(l.valor))}</div>
                 </div>
               ))}
             </div>
           )}
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-            {aPagar > 0 && (
+            {P.aPagarTotal > 0 && (
               <div className="bg-surface-container border border-error/30 rounded-xl p-5">
-                <div className="text-sm font-bold text-on-surface mb-3">⚠️ A Pagar — {fmt(aPagar)}</div>
-                {lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status==='pendente').map(l=>(
+                <div className="text-sm font-bold text-on-surface mb-3">⚠️ A Pagar (todas as pendências) — {fmt(P.aPagarTotal)}</div>
+                {lancamentosEmpresa.filter(l=>l.tipo==='saida'&&l.status!=='pago').sort((a,b)=>dataEfetiva(a)<dataEfetiva(b)?-1:1).map(l=>(
                   <div key={l.id} className={rowCls}>
-                    <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">Venc: {l.data_vencimento||l.data}</div></div>
-                    <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
+                    <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">Venc: {dataBR(dataEfetiva(l))}</div></div>
+                    <div className="text-error font-bold">{fmt(num(l.valor))}</div>
                   </div>
                 ))}
               </div>
             )}
-            {aReceber > 0 && (
+            {P.aReceberTotal > 0 && (
               <div className="bg-surface-container border border-primary-container/30 rounded-xl p-5">
-                <div className="text-sm font-bold text-on-surface mb-3">💰 A Receber — {fmt(aReceber)}</div>
-                {lancamentos.filter(l=>l.tipo==='entrada'&&l.status==='pendente').map(l=>(
+                <div className="text-sm font-bold text-on-surface mb-3">💰 A Receber (todas as pendências) — {fmt(P.aReceberTotal)}</div>
+                {lancamentos.filter(l=>l.tipo==='entrada'&&l.status!=='pago').sort((a,b)=>dataEfetiva(a)<dataEfetiva(b)?-1:1).map(l=>(
                   <div key={l.id} className={rowCls}>
-                    <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">Venc: {l.data_vencimento||l.data}</div></div>
-                    <div className="text-primary-container font-bold">{fmt(parseFloat(l.valor))}</div>
+                    <div><div className="font-semibold text-on-surface">{l.descricao}</div><div className="text-[11px] text-on-surface-variant">Venc: {dataBR(dataEfetiva(l))}</div></div>
+                    <div className="text-primary-container font-bold">{fmt(num(l.valor))}</div>
                   </div>
                 ))}
               </div>
@@ -1031,10 +1242,10 @@ export default function Financeiro() {
           <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
             <div className="flex items-center gap-3">
               <span className="text-on-surface-variant text-sm">Mês:</span>
-              <input type="month" value={filtroMes} onChange={e=>setFiltroMes(e.target.value)} className={inputCls + ' w-40'} />
+              <input type="month" value={filtroMes} onChange={e=>e.target.value && setFiltroMes(e.target.value)} className={inputCls + ' w-40'} />
             </div>
             <div className="flex gap-2">
-              <button className={btnSecondaryCls} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, filtroMes)}>🖨️ Exportar PDF</button>
+              <button className={btnSecondaryCls} onClick={()=>gerarPDFRelatorioMensal(lancamentos, obras, contas, filtroMes)}>🖨️ Exportar PDF</button>
               <button className={btnPrimaryCls} onClick={abrirWizard}>+ Novo Lançamento</button>
             </div>
           </div>
@@ -1043,48 +1254,40 @@ export default function Financeiro() {
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-outline-variant">
-                    {['Data','Descrição','Categoria','Obra','NF','Status','Valor',''].map(h=>(
+                    {['Pago em / Vence','Descrição','Categoria','Obra','Conta','NF','Status','Valor',''].map(h=>(
                       <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {lancMesExibicao.length===0 ? (
-                    <tr><td colSpan={8} className="text-center py-8 text-on-surface-variant">Nenhum lançamento em {mesNome}</td></tr>
-                  ) : lancMesExibicao.map(l=>{
-                    const obra = obras.find(o=>o.id===l.obra_id)
-                    const arrastadoDeOutroMes = vencidosArrastados.includes(l)
-                    const atrasadoLinha = l.status==='pendente' && new Date(l.data_vencimento||l.data)<hoje
+                  {P.lista.length===0 ? (
+                    <tr><td colSpan={9} className="text-center py-8 text-on-surface-variant">Nenhum lançamento em {mesNome}</td></tr>
+                  ) : P.lista.map(l=>{
+                    const cod = nomeObra(l.obra_id)
+                    const atrasadoDeOutroMes = idsAtrasadosAntes.has(l.id)
                     return (
-                      <tr key={l.id} className={`border-b border-outline-variant hover:bg-surface-variant/20 ${arrastadoDeOutroMes ? 'bg-error/5' : ''}`}>
-                        <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{dataBR(arrastadoDeOutroMes ? (l.data_vencimento||l.data) : l.data)}</td>
-                        <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{arrastadoDeOutroMes && <span title="Pendência de fora do mês trazida para o cálculo atual (atrasada ou vencendo em breve)" className="ml-1.5 text-[10px] font-semibold text-error">⚠ fora do mês</span>}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
+                      <tr key={l.id} className={`border-b border-outline-variant hover:bg-surface-variant/20 ${atrasadoDeOutroMes ? 'bg-error/5' : ''}`}>
+                        <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{dataBR(dataEfetiva(l))}</td>
+                        <td className="px-3 py-2.5 font-semibold text-on-surface">{l.descricao}{atrasadoDeOutroMes && <span title="Pendência de mês anterior ainda em aberto" className="ml-1.5 text-[10px] font-semibold text-error">⚠ atrasado</span>}{l.recorrente && <span title="Custo fixo — repete todo mês" className="ml-1.5 text-[10px] font-semibold text-tertiary">🔁</span>}{l.favorecido && <div className="text-[11px] font-normal text-on-surface-variant">👤 {l.favorecido}</div>}</td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{l.categoria||'—'}</td>
                         <td className="px-3 py-2.5">
-                          {obra ? <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-primary/10 text-primary border-primary/20">{obra.codigo}</span> : <span className="text-on-surface-variant/50 text-xs">—</span>}
+                          {cod ? <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-primary/10 text-primary border-primary/20">{cod}</span> : <span className="text-on-surface-variant/50 text-xs">—</span>}
                         </td>
+                        <td className="px-3 py-2.5 text-xs">{l.conta ? <span className="text-on-surface-variant">{l.conta}</span> : (l.status==='pago' ? <span className="text-tertiary font-semibold">sem conta</span> : <span className="text-on-surface-variant/50">—</span>)}</td>
                         <td className="px-3 py-2.5">
                           {l.nf_numero && <span className="text-[11px] text-on-surface-variant">#{l.nf_numero} </span>}
                           {l.nf_url && <a href={l.nf_url} target="_blank" rel="noreferrer" className="text-[11px] text-primary">📎</a>}
                           {!l.nf_numero && !l.nf_url && <span className="text-on-surface-variant/50 text-[11px]">—</span>}
                         </td>
-                        <td className="px-3 py-2.5">
-                          <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${atrasadoLinha ? 'bg-error/10 text-error border-error/20' : statusBadge(l.status==='pago')}`}>
-                            {atrasadoLinha ? 'Vencido' : (l.status==='pago'?'Pago':'Pendente')}
-                          </span>
-                        </td>
+                        <td className="px-3 py-2.5"><LinhaStatus l={l} /></td>
                         <td className={`px-3 py-2.5 font-bold whitespace-nowrap ${l.tipo==='entrada'?'text-primary-container':'text-error'}`}>
-                          {l.tipo==='entrada'?'+':'-'}{fmt(parseFloat(l.valor))}
+                          {l.tipo==='entrada'?'+':'-'}{fmt(num(l.valor))}
                         </td>
                         <td className="px-3 py-2.5">
                           <div className="flex gap-1.5">
-                            {l.status==='pendente' && <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>}
-                            <button className={btnEditSmCls} onClick={()=>{
-                              setLancEditando(l)
-                              setFLanc({data:l.data||'',descricao:l.descricao||'',tipo:l.tipo||'saida',valor:l.valor||'',categoria:l.categoria||'',conta:l.conta||'',status:l.status||'pago',data_vencimento:l.data_vencimento||'',obra_id:l.obra_id||'',servico_id:l.servico_id||'',nf_numero:l.nf_numero||'',nf_url:l.nf_url||'',nf_arquivo:null,recorrente:l.recorrente||false,favorecido:l.favorecido||''})
-                              setModal('lancamento')
-                            }}>✏️</button>
-                            <button className={btnDangerSmCls} onClick={()=>deletar('lancamentos',l.id).then(carregar)}>×</button>
+                            {l.status!=='pago' && <button className={btnEditSmCls} onClick={()=>abrirPagamento(l)} data-testid="btn-pagar">✓ Pago</button>}
+                            <button className={btnEditSmCls} onClick={()=>editarLancamento(l)}>✏️</button>
+                            <button className={btnDangerSmCls} onClick={()=>excluirLancamento(l)} data-testid="btn-excluir">×</button>
                           </div>
                         </td>
                       </tr>
@@ -1093,17 +1296,24 @@ export default function Financeiro() {
                 </tbody>
               </table>
             </div>
-            {lancMesExibicao.length>0 && (
-              <div className="flex gap-5 pt-4 mt-2 border-t-2 border-outline-variant flex-wrap items-center">
-                <span className="text-xs text-on-surface-variant font-semibold">Saldo anterior: <strong className="text-primary">{fmt(saldoAnterior)}</strong></span>
-                <span className="text-xs text-on-surface-variant">+</span>
-                <span className="text-xs text-on-surface-variant font-semibold">Entradas: <strong className="text-primary-container">{fmt(entradas)}</strong></span>
-                <span className="text-xs text-on-surface-variant">−</span>
-                <span className="text-xs text-on-surface-variant font-semibold">Saídas: <strong className="text-error">{fmt(saidas)}</strong></span>
-                <span className="text-xs text-on-surface-variant">=</span>
-                <span className={`text-sm font-black ${saldoFinalMes>=0?'text-primary':'text-error'}`}>Saldo Final {mesNome}: {fmt(saldoFinalMes)}</span>
+            <div className="pt-4 mt-2 border-t-2 border-outline-variant flex flex-col gap-2">
+              <div className="flex gap-3 flex-wrap items-center text-xs text-on-surface-variant font-semibold" data-testid="rodape-realizado">
+                <span>Realizado:</span>
+                <span>Saldo anterior <strong className="text-primary">{fmt(P.saldoAnterior)}</strong></span><span>+</span>
+                <span>Entradas <strong className="text-primary-container">{fmt(P.entradasReal)}</strong></span><span>−</span>
+                <span>Saídas <strong className="text-error">{fmt(P.saidasReal)}</strong></span>
+                {P.investLiquido!==0 && <><span>−</span><span>Investimentos <strong className="text-secondary">{fmt(P.investLiquido)}</strong></span></>}
+                <span>=</span>
+                <span className={`text-sm font-black ${P.saldoFinalReal>=0?'text-primary':'text-error'}`}>Saldo final {mesNome}: {fmt(P.saldoFinalReal)}</span>
               </div>
-            )}
+              <div className="flex gap-3 flex-wrap items-center text-xs text-on-surface-variant font-semibold" data-testid="rodape-previsto">
+                <span>Previsto:</span>
+                <span>+ a receber <strong className="text-primary-container">{fmt(P.prevEntradas)}</strong></span>
+                <span>− a pagar <strong className="text-error">{fmt(P.prevSaidas)}</strong></span>
+                <span>=</span>
+                <span className={`text-sm font-black ${P.saldoProjetado>=0?'text-primary':'text-error'}`}>Saldo projetado: {fmt(P.saldoProjetado)}</span>
+              </div>
+            </div>
           </div>
         </>
       )}
@@ -1121,7 +1331,7 @@ export default function Financeiro() {
             {obras.map(obra=>{
               const custos = getCustosObra(obra.id)
               const receitas = getReceitasObra(obra.id)
-              const contrato = parseFloat(obra.valor_contrato||0)
+              const contrato = num(obra.valor_contrato)
               const margem = obra.gerenciamento ? receitas : receitas - custos
               const pctO = contrato>0?Math.min(((obra.gerenciamento ? receitas : custos)/contrato)*100,100):0
               return (
@@ -1170,23 +1380,29 @@ export default function Financeiro() {
               <div className="text-5xl mb-4">🏦</div>
               <button className={btnPrimaryCls} onClick={()=>setModal('conta')}>Cadastrar conta</button>
             </div>
-          ) : contas.map(c=>{
-            const saldoC = saldoConta(c)
-            return (
+          ) : P.saldosContas.map(({conta: c, saldo: saldoC})=>(
             <div key={c.id} className={sectionCls}>
               <div className="flex justify-between items-center">
                 <div><div className="text-base font-bold text-on-surface">{c.nome}</div><div className="text-body-sm text-on-surface-variant mt-1">{c.banco} · Conta {c.tipo}</div></div>
                 <div className="text-right">
                   <div className={`text-xl font-bold ${saldoC>=0?'text-primary':'text-error'}`}>{fmt(saldoC)}</div>
                   <div className="text-[11px] text-on-surface-variant mt-0.5">saldo atual</div>
-                  <div className="text-[10px] text-on-surface-variant/60 mt-0.5">inicial: {fmt(parseFloat(c.saldo_inicial||0))}</div>
+                  <div className="text-[10px] text-on-surface-variant/60 mt-0.5">inicial: {fmt(num(c.saldo_inicial))}</div>
                 </div>
               </div>
               <div className="mt-3 pt-3 border-t border-outline-variant">
-                <button className={btnDangerSmCls} onClick={()=>deletar('contas',c.id).then(carregar)}>Excluir conta</button>
+                <button className={btnDangerSmCls} onClick={()=>excluirConta(c)}>Excluir conta</button>
               </div>
             </div>
-          )})}
+          ))}
+          {P.semConta.length > 0 && (
+            <div className={sectionCls + ' border-tertiary/40'}>
+              <div className="flex justify-between items-center">
+                <div><div className="text-base font-bold text-tertiary">Pagos sem conta</div><div className="text-body-sm text-on-surface-variant mt-1">{P.semConta.length} lançamento(s) pago(s) que não dizem de qual conta saiu/entrou o dinheiro</div></div>
+                <div className="text-right"><div className="text-xl font-bold text-on-surface">{fmt(P.semContaLiquido)}</div><button className={btnEditSmCls + ' mt-2'} onClick={()=>{ setAtribuicoes({}); setModal('semconta') }}>Atribuir contas</button></div>
+              </div>
+            </div>
+          )}
         </>
       )}
 
@@ -1196,8 +1412,8 @@ export default function Financeiro() {
           <div className="flex justify-between mb-4 gap-2 flex-wrap">
             <button className={btnPrimaryCls} onClick={()=>setModal('cartao')}>+ Novo Cartão</button>
             <div className="flex gap-2">
-              {cartoes.length>0 && <button className={btnSecondaryCls} onClick={()=>setModal('gasto')}>+ Lançar Gasto no Cartão</button>}
-              <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={()=>{ setFRecebCartao({...RCZ}); setModal('recebimento_cartao') }}>+ Recebimento no Cartão</button>
+              {cartoes.length>0 && <button className={btnSecondaryCls} onClick={()=>{ setFGasto(GZ()); setModal('gasto') }}>+ Lançar Gasto no Cartão</button>}
+              <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={()=>{ setFRecebCartao(RCZ()); setModal('recebimento_cartao') }}>+ Recebimento no Cartão</button>
             </div>
           </div>
           {cartoes.length===0 ? (
@@ -1206,45 +1422,66 @@ export default function Financeiro() {
               <button className={btnPrimaryCls} onClick={()=>setModal('cartao')}>Cadastrar cartão</button>
             </div>
           ) : cartoes.map(c=>{
-            const gastosMes = gastosCartao.filter(g=>g.cartao_id===c.id&&g.data?.slice(0,7)===filtroMes)
-            const totalGasto = gastosMes.reduce((a,g)=>a+parseFloat(g.valor||0),0)
-            const limite = parseFloat(c.limite||0)
-            const pctG = limite>0?Math.min((totalGasto/limite)*100,100):0
+            const gastosDoCartao = gastosCartao.filter(g=>g.cartao_id===c.id)
+            const faturas = agruparFaturas(gastosDoCartao, c)
+            const emAberto = Math.round(faturas.reduce((a,f)=>a+f.aberto,0)*100)/100
+            const limite = num(c.limite)
+            const pctG = limite>0?Math.min((emAberto/limite)*100,100):0
             return (
-              <div key={c.id} className={sectionCls}>
+              <div key={c.id} className={sectionCls} data-testid="cartao-bloco">
                 <div className="bg-gradient-to-br from-[#1B3A5C] to-[#2E86AB] rounded-xl p-5 mb-4">
                   <div className="text-[11px] text-white/60 tracking-widest mb-3">INVERSO · {c.bandeira?.toUpperCase()}</div>
                   <div className="text-base font-bold text-white mb-4">{c.nome}</div>
                   <div className="flex justify-between">
-                    <div><div className="text-[10px] text-white/50">FATURA {mesNome.toUpperCase()}</div><div className="text-xl font-bold text-white">{fmt(totalGasto)}</div></div>
-                    <div className="text-right"><div className="text-[10px] text-white/50">DISPONÍVEL</div><div className="text-xl font-bold text-primary">{fmt(limite-totalGasto)}</div></div>
+                    <div><div className="text-[10px] text-white/50">FATURAS EM ABERTO</div><div className="text-xl font-bold text-white" data-testid="cartao-em-aberto">{fmt(emAberto)}</div></div>
+                    <div className="text-right"><div className="text-[10px] text-white/50">LIMITE DISPONÍVEL</div><div className="text-xl font-bold text-primary">{fmt(limite-emAberto)}</div></div>
                   </div>
                 </div>
                 <div className="h-1.5 bg-surface-variant rounded overflow-hidden mb-3">
                   <div className={`h-full rounded ${pctG>80?'bg-error':'bg-primary'}`} style={{ width: `${pctG}%` }} />
                 </div>
-                <div className="text-body-sm text-on-surface-variant mb-3">Fecha dia {c.dia_fechamento} · Vence dia {c.dia_vencimento}</div>
-                {gastosMes.map(g=>{
-                  const obra = obras.find(o=>o.id===g.obra_id)
+                <div className="text-body-sm text-on-surface-variant mb-3">Fecha dia {c.dia_fechamento} · Vence dia {c.dia_vencimento} · compra depois do fechamento entra na fatura seguinte</div>
+                {faturas.length===0 && <div className="text-center py-4 text-on-surface-variant text-sm">Nenhuma compra neste cartão</div>}
+                {faturas.slice().reverse().map(f=>{
+                  const lancsFatura = [...new Set(f.itens.map(i=>i.fatura_lancamento_id).filter(Boolean))].map(id=>lancamentos.find(l=>l.id===id)).filter(Boolean)
+                  const toda = f.aberto === 0
                   return (
-                    <div key={g.id} className={rowCls}>
-                      <div>
-                        <div className="font-semibold text-sm text-on-surface">{g.descricao}</div>
-                        <div className="text-[11px] text-on-surface-variant">
-                          {dataBR(g.data)} · {g.categoria||'—'} {obra?`· ${obra.codigo}`:''}
-                          {g.nf_numero && ` · NF #${g.nf_numero}`}
-                          {g.nf_url && <a href={g.nf_url} target="_blank" rel="noreferrer" className="text-primary ml-1.5 text-[11px]">📎 NF</a>}
+                    <div key={f.vencimento} className="border border-outline-variant rounded-lg mb-3 overflow-hidden" data-testid="fatura-bloco">
+                      <div className="px-3.5 py-2.5 bg-surface-container-high/60 flex items-center justify-between gap-2 flex-wrap">
+                        <div>
+                          <div className="text-sm font-bold text-on-surface">Fatura com vencimento em {dataBR(f.vencimento)} — {fmt(f.total)}</div>
+                          <div className="text-[11px] text-on-surface-variant">
+                            {toda
+                              ? (lancsFatura.every(l=>l.status==='pago') ? '✅ Paga' + (lancsFatura[0]?.data_pagamento ? ' em ' + dataBR(lancsFatura[0].data_pagamento) : '') : '🗓️ Programada — aparece em "A pagar"')
+                              : (f.aberto < f.total ? `Em aberto: ${fmt(f.aberto)} (o restante já foi incluído em pagamento)` : (f.vencimento < hojeStr ? '🔴 Vencida e não paga' : 'Em aberto'))}
+                          </div>
                         </div>
+                        {!toda && <button className={btnPrimaryCls + ' !py-1.5 !text-xs'} onClick={()=>setFFatura({ cartao: c, fatura: f, conta: '', jaPaga: true, data: hojeStr })} data-testid="btn-pagar-fatura">Pagar fatura</button>}
                       </div>
-                      <div className="flex items-center gap-2.5">
-                        <div className="text-error font-bold">{fmt(parseFloat(g.valor))}</div>
-                        <button className={btnDangerSmCls} onClick={()=>deletar('gastos_cartao',g.id).then(carregar)}>×</button>
-                      </div>
+                      {f.itens.map(g=>{
+                        const obra = obras.find(o=>o.id===g.obra_id)
+                        return (
+                          <div key={g.id} className={rowCls + ' px-3.5'}>
+                            <div>
+                              <div className="font-semibold text-sm text-on-surface">{g.descricao}</div>
+                              <div className="text-[11px] text-on-surface-variant">
+                                {dataBR(g.data)} · {g.categoria||'—'} {obra?`· ${obra.codigo}`:''}
+                                {g.nf_numero && ` · NF #${g.nf_numero}`}
+                                {g.nf_url && <a href={g.nf_url} target="_blank" rel="noreferrer" className="text-primary ml-1.5 text-[11px]">📎 NF</a>}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2.5">
+                              <div className="text-error font-bold">{fmt(num(g.valor))}</div>
+                              <button className={btnDangerSmCls} onClick={()=>excluirGasto(g)}>×</button>
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   )
                 })}
                 <div className="mt-3">
-                  <button className={btnDangerSmCls} onClick={()=>deletar('cartoes',c.id).then(carregar)}>Excluir cartão</button>
+                  <button className={btnDangerSmCls} onClick={()=>excluirCartao(c)}>Excluir cartão</button>
                 </div>
               </div>
             )
@@ -1259,12 +1496,12 @@ export default function Financeiro() {
                   <div key={l.id} className={rowCls}>
                     <div>
                       <div className="font-semibold text-sm text-on-surface">{l.descricao}</div>
-                      <div className="text-[11px] text-on-surface-variant">{dataBR(l.data)} {obra?`· ${obra.codigo}`:''}</div>
+                      <div className="text-[11px] text-on-surface-variant">{dataBR(dataEfetiva(l))} {obra?`· ${obra.codigo}`:''}</div>
                     </div>
                     <div className="flex items-center gap-2.5">
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${statusBadge(l.status==='pago')}`}>{l.status==='pago'?'Recebido':'A receber'}</span>
-                      <div className="text-primary-container font-bold">{fmt(parseFloat(l.valor))}</div>
-                      <button className={btnDangerSmCls} onClick={()=>deletar('lancamentos',l.id).then(carregar)}>×</button>
+                      <div className="text-primary-container font-bold">{fmt(num(l.valor))}</div>
+                      <button className={btnDangerSmCls} onClick={()=>excluirLancamento(l)}>×</button>
                     </div>
                   </div>
                 )
@@ -1279,74 +1516,74 @@ export default function Financeiro() {
         <>
           <div className="flex items-center gap-3 mb-lg flex-wrap">
             <span className="text-on-surface-variant text-sm">Mês:</span>
-            <input type="month" value={filtroMes} onChange={e=>setFiltroMes(e.target.value)} className={inputCls + ' w-40'} />
+            <input type="month" value={filtroMes} onChange={e=>e.target.value && setFiltroMes(e.target.value)} className={inputCls + ' w-40'} />
             <span className="font-semibold text-on-surface">{mesNome}</span>
           </div>
 
-          {vencAtrasados.length>0 && (
+          {P.vencAtrasados.length>0 && (
             <div className="bg-surface-container border border-error/40 rounded-xl p-5 mb-4">
-              <div className="text-sm font-bold text-error mb-3">🔴 Atrasados — {fmt(vencAtrasados.reduce((a,l)=>a+parseFloat(l.valor||0),0))}</div>
-              {vencAtrasados.map(l=>(
+              <div className="text-sm font-bold text-error mb-3">🔴 Atrasados — {fmt(P.vencAtrasados.reduce((a,l)=>a+num(l.valor),0))}</div>
+              {P.vencAtrasados.map(l=>(
                 <div key={l.id} className={rowCls}>
                   <div>
                     <div className="font-semibold text-on-surface">{l.descricao}</div>
-                    <div className="text-[11px] text-error">Venceu em {l.data_vencimento||l.data} · {l.categoria||'—'}</div>
+                    <div className="text-[11px] text-error">Venceu em {dataBR(dataEfetiva(l))} · {l.categoria||'—'}</div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>
-                    <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
+                    <button className={btnEditSmCls} onClick={()=>abrirPagamento(l)}>✓ Pago</button>
+                    <div className="text-error font-bold">{fmt(num(l.valor))}</div>
                   </div>
                 </div>
               ))}
             </div>
           )}
 
-          {vencProximos.length>0 && (
+          {P.vencProximos.length>0 && (
             <div className="bg-surface-container border border-tertiary/40 rounded-xl p-5 mb-4">
-              <div className="text-sm font-bold text-tertiary mb-3">⚠️ Próximos 7 dias — {fmt(vencProximos.reduce((a,l)=>a+parseFloat(l.valor||0),0))}</div>
-              {vencProximos.map(l=>(
+              <div className="text-sm font-bold text-tertiary mb-3">⚠️ Hoje e próximos 7 dias — {fmt(P.vencProximos.reduce((a,l)=>a+num(l.valor),0))}</div>
+              {P.vencProximos.map(l=>(
                 <div key={l.id} className={rowCls}>
                   <div>
                     <div className="font-semibold text-on-surface">{l.descricao}</div>
-                    <div className="text-[11px] text-on-surface-variant">Vence em {l.data_vencimento||l.data} · {l.categoria||'—'}</div>
+                    <div className="text-[11px] text-on-surface-variant">{dataEfetiva(l)===hojeStr ? 'Vence hoje' : 'Vence em ' + dataBR(dataEfetiva(l))} · {l.categoria||'—'}</div>
                   </div>
-                  <div className="text-tertiary font-bold">{fmt(parseFloat(l.valor))}</div>
+                  <div className="flex items-center gap-3">
+                    <button className={btnEditSmCls} onClick={()=>abrirPagamento(l)}>✓ Pago</button>
+                    <div className="text-tertiary font-bold">{fmt(num(l.valor))}</div>
+                  </div>
                 </div>
               ))}
             </div>
           )}
 
-          <div className={sectionCls}>
-            <div className="text-sm font-bold text-on-surface mb-3">📅 Todos os pagamentos — {mesNome}</div>
-            {lancamentosEmpresa.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes).length===0 ? (
-              <div className="text-center py-8 text-on-surface-variant">Nenhum pagamento neste mês</div>
-            ) : lancamentosEmpresa.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes)
-              .sort((a,b)=>((a.data_vencimento||a.data)<(b.data_vencimento||b.data)?-1:1))
-              .map(l=>{
-                const venc = l.data_vencimento||l.data
-                const atrasado = l.status==='pendente' && new Date(venc)<hoje
-                return (
+          {(() => {
+            const doMes = lancamentosEmpresa.filter(l=>l.tipo==='saida' && dataEfetiva(l).slice(0,7)===filtroMes).sort((a,b)=>(dataEfetiva(a)<dataEfetiva(b)?-1:1))
+            return (
+              <div className={sectionCls}>
+                <div className="text-sm font-bold text-on-surface mb-3">📅 Todos os pagamentos — {mesNome}</div>
+                {doMes.length===0 ? (
+                  <div className="text-center py-8 text-on-surface-variant">Nenhum pagamento neste mês</div>
+                ) : doMes.map(l=>(
                   <div key={l.id} className={rowCls}>
                     <div>
                       <div className="font-semibold text-on-surface">{l.descricao}</div>
-                      <div className={`text-[11px] ${atrasado?'text-error':'text-on-surface-variant'}`}>{venc} · {l.categoria||'—'}</div>
+                      <div className={`text-[11px] ${l.status!=='pago'&&dataEfetiva(l)<hojeStr?'text-error':'text-on-surface-variant'}`}>{l.status==='pago'?'Pago em ':'Vence '}{dataBR(dataEfetiva(l))} · {l.categoria||'—'}</div>
                     </div>
                     <div className="flex items-center gap-3">
-                      <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${atrasado ? 'bg-error/10 text-error border-error/20' : statusBadge(l.status==='pago')}`}>
-                        {atrasado ? 'Vencido' : (l.status==='pago'?'Pago':'Pendente')}
-                      </span>
-                      {l.status==='pendente' && <button className={btnEditSmCls} onClick={()=>marcarPago(l.id)}>✓ Pago</button>}
-                      <div className="text-error font-bold">{fmt(parseFloat(l.valor))}</div>
+                      <LinhaStatus l={l} />
+                      {l.status!=='pago' && <button className={btnEditSmCls} onClick={()=>abrirPagamento(l)}>✓ Pago</button>}
+                      <div className="text-error font-bold">{fmt(num(l.valor))}</div>
                     </div>
                   </div>
-                )
-              })}
-            <div className="pt-3 border-t border-outline-variant mt-1">
-              <span className="text-sm text-error font-bold">
-                Total: {fmt(lancamentosEmpresa.filter(l=>l.tipo==='saida'&&(l.data_vencimento||l.data)?.slice(0,7)===filtroMes).reduce((a,l)=>a+parseFloat(l.valor||0),0))}
-              </span>
-            </div>
-          </div>
+                ))}
+                <div className="pt-3 border-t border-outline-variant mt-1 flex gap-5 flex-wrap">
+                  <span className="text-sm text-error font-bold">Total do mês: {fmt(doMes.reduce((a,l)=>a+num(l.valor),0))}</span>
+                  <span className="text-sm text-on-surface-variant">Já pago: {fmt(doMes.filter(l=>l.status==='pago').reduce((a,l)=>a+num(l.valor),0))}</span>
+                  <span className="text-sm text-tertiary">A pagar: {fmt(doMes.filter(l=>l.status!=='pago').reduce((a,l)=>a+num(l.valor),0))}</span>
+                </div>
+              </div>
+            )
+          })()}
         </>
       )}
 
@@ -1355,14 +1592,14 @@ export default function Financeiro() {
         <>
           <div className="flex justify-between items-center mb-lg flex-wrap gap-3">
             <div className="text-base font-bold text-on-surface">📈 Controle de Investimentos</div>
-            <button className={btnPrimaryCls} onClick={()=>setModal('investimento')}>+ Novo Movimento</button>
+            <button className={btnPrimaryCls} onClick={()=>{ setFInvest(IZ()); setModal('investimento') }}>+ Novo Movimento</button>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-lg">
             {[
               {l:'Total Investido', v:fmt(totalInvestido), c:'text-secondary', sub:'Saldo atual guardado'},
-              {l:'Total Aportado', v:fmt(investimentos.filter(i=>i.tipo==='aporte').reduce((a,i)=>a+parseFloat(i.valor||0),0)), c:'text-primary-container', sub:`${investimentos.filter(i=>i.tipo==='aporte').length} aporte(s)`},
-              {l:'Total Resgatado', v:fmt(investimentos.filter(i=>i.tipo==='resgate').reduce((a,i)=>a+parseFloat(i.valor||0),0)), c:'text-error', sub:`${investimentos.filter(i=>i.tipo==='resgate').length} resgate(s)`},
+              {l:'Total Aportado', v:fmt(investimentos.filter(i=>i.tipo==='aporte').reduce((a,i)=>a+num(i.valor),0)), c:'text-primary-container', sub:`${investimentos.filter(i=>i.tipo==='aporte').length} aporte(s)`},
+              {l:'Total Resgatado', v:fmt(investimentos.filter(i=>i.tipo==='resgate').reduce((a,i)=>a+num(i.valor),0)), c:'text-error', sub:`${investimentos.filter(i=>i.tipo==='resgate').length} resgate(s)`},
             ].map(({l,v,c,sub})=>(
               <div key={l} className={cardCls}>
                 <div className="text-[11px] text-on-surface-variant uppercase tracking-widest mb-2">{l}</div>
@@ -1378,7 +1615,7 @@ export default function Financeiro() {
               <div className="h-3 bg-surface-variant rounded-full overflow-hidden mb-2">
                 <div className="h-full bg-gradient-to-r from-secondary to-primary-container rounded-full" style={{ width: '100%' }} />
               </div>
-              <div className="text-body-sm text-on-surface-variant">Rendimentos não são calculados automaticamente — registre como novo aporte ao receber</div>
+              <div className="text-body-sm text-on-surface-variant">Rendimentos não são calculados automaticamente — registre como resgate/aporte ao receber. Aporte e resgate movimentam a conta escolhida, mas não entram como despesa nem receita no resultado.</div>
             </div>
           )}
 
@@ -1389,24 +1626,27 @@ export default function Financeiro() {
                 <div className="text-4xl mb-3">📈</div>
                 <div className="text-on-surface text-base font-bold mb-2">Nenhum investimento registrado</div>
                 <div className="text-on-surface-variant text-body-sm mb-5">Registre aportes quando transferir dinheiro para investimentos e resgates quando trazer de volta</div>
-                <button className={btnPrimaryCls} onClick={()=>setModal('investimento')}>+ Registrar primeiro movimento</button>
+                <button className={btnPrimaryCls} onClick={()=>{ setFInvest(IZ()); setModal('investimento') }}>+ Registrar primeiro movimento</button>
               </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-outline-variant">
-                      {['Data','Descrição','Instituição','Tipo','Observação','Valor',''].map(h=>(
+                      {['Data','Descrição','Instituição','Conta','Tipo','Observação','Valor',''].map(h=>(
                         <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {investimentos.map(inv=>(
+                    {investimentos.map(inv=>{
+                      const lancVinc = inv.lancamento_id ? lancamentos.find(l=>l.id===inv.lancamento_id) : null
+                      return (
                       <tr key={inv.id} className="border-b border-outline-variant hover:bg-surface-variant/20">
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{dataBR(inv.data)}</td>
                         <td className="px-3 py-2.5 font-semibold text-on-surface">{inv.descricao}</td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{inv.instituicao||'—'}</td>
+                        <td className="px-3 py-2.5 text-on-surface-variant text-xs">{lancVinc ? (lancVinc.conta || <span className="text-tertiary">sem conta</span>) : '—'}</td>
                         <td className="px-3 py-2.5">
                           <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${inv.tipo==='aporte' ? 'bg-primary-container/10 text-primary-container border-primary-container/20' : 'bg-error/10 text-error border-error/20'}`}>
                             {inv.tipo==='aporte'?'⬆️ Aporte':'⬇️ Resgate'}
@@ -1414,13 +1654,13 @@ export default function Financeiro() {
                         </td>
                         <td className="px-3 py-2.5 text-on-surface-variant text-xs">{inv.observacao||'—'}</td>
                         <td className={`px-3 py-2.5 font-bold whitespace-nowrap ${inv.tipo==='aporte'?'text-primary-container':'text-error'}`}>
-                          {inv.tipo==='aporte'?'-':'+' }{fmt(parseFloat(inv.valor||0))}
+                          {inv.tipo==='aporte'?'-':'+' }{fmt(num(inv.valor))}
                         </td>
                         <td className="px-3 py-2.5">
-                          <button className={btnDangerSmCls} onClick={()=>deletar('investimentos',inv.id).then(carregar)}>×</button>
+                          <button className={btnDangerSmCls} onClick={()=>excluirInvestimento(inv)}>×</button>
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
@@ -1496,7 +1736,7 @@ export default function Financeiro() {
                 </select>
               </div>
               <div><label className={labelCls}>Data *</label><input className={inputCls} type="date" value={fGasto.data} onChange={e=>setFGasto({...fGasto,data:e.target.value})} /></div>
-              <div><label className={labelCls}>Valor (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={fGasto.valor} onChange={e=>setFGasto({...fGasto,valor:e.target.value})} /></div>
+              <div><label className={labelCls}>Valor total (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={fGasto.valor} onChange={e=>setFGasto({...fGasto,valor:e.target.value})} /></div>
               <div><label className={labelCls}>Parcelas</label>
                 <select className={inputCls} value={fGasto.parcelas} onChange={e=>setFGasto({...fGasto,parcelas:e.target.value})}>
                   {[1,2,3,4,5,6,7,8,9,10,11,12].map(n=><option key={n} value={n}>{n}x</option>)}
@@ -1508,15 +1748,23 @@ export default function Financeiro() {
               <div><label className={labelCls}>Categoria</label>
                 <select className={inputCls} value={fGasto.categoria} onChange={e=>setFGasto({...fGasto,categoria:e.target.value})}>
                   <option value="">Selecione</option>
-                  {CAT_OUT.map(c=><option key={c} value={c}>{c}</option>)}
+                  {CAT_OUT.filter(c=>c!==CAT_FATURA&&c!==CAT_APORTE).map(c=><option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div><label className={labelCls}>Vincular à Obra</label>
-                <select className={inputCls} value={fGasto.obra_id} onChange={e=>setFGasto({...fGasto,obra_id:e.target.value})}>
+                <select className={inputCls} value={fGasto.obra_id} onChange={e=>setFGasto({...fGasto,obra_id:e.target.value,servico_id:''})}>
                   <option value="">Nenhuma</option>
                   {obras.map(o=><option key={o.id} value={o.id}>{o.codigo} — {o.nome}</option>)}
                 </select>
               </div>
+              {fGasto.obra_id && servicosObra.filter(s=>s.obra_id===fGasto.obra_id).length > 0 && (
+                <div className="sm:col-span-2"><label className={labelCls + ' text-primary'}>🔧 Serviço da Obra</label>
+                  <select className={inputCls} value={fGasto.servico_id} onChange={e=>setFGasto({...fGasto,servico_id:e.target.value})}>
+                    <option value="">Nenhum</option>
+                    {servicosObra.filter(s=>s.obra_id===fGasto.obra_id).map(s=><option key={s.id} value={s.id}>{s.nome}</option>)}
+                  </select>
+                </div>
+              )}
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
               <div><label className={labelCls}>Número da NF</label><input className={inputCls} placeholder="Ex: 000847" value={fGasto.nf_numero} onChange={e=>setFGasto({...fGasto,nf_numero:e.target.value})} /></div>
@@ -1527,7 +1775,7 @@ export default function Financeiro() {
             </div>
             <div className="flex gap-2 justify-end">
               <button className={btnSecondaryCls} onClick={()=>setModal('')}>Cancelar</button>
-              <button className={btnPrimaryCls} onClick={salvarGasto} disabled={salvando}>{salvando?'Salvando...':'Salvar Gasto'}</button>
+              <button className={btnPrimaryCls} onClick={salvarGasto} disabled={salvando} data-testid="salvar-gasto">{salvando?'Salvando...':'Salvar Gasto'}</button>
             </div>
           </div>
         </div>
@@ -1564,6 +1812,13 @@ export default function Financeiro() {
               </div>
             </div>
             <div className="mb-3.5">
+              <label className={labelCls}>{fInvest.tipo==='aporte' ? 'Conta de onde saiu *' : 'Conta para onde voltou *'}</label>
+              <select className={inputCls} value={fInvest.conta} onChange={e=>setFInvest({...fInvest,conta:e.target.value})} data-testid="invest-conta">
+                <option value="">Selecione</option>
+                {contas.map(c=><option key={c.id} value={c.nome}>{c.nome}</option>)}
+              </select>
+            </div>
+            <div className="mb-3.5">
               <label className={labelCls}>Descrição *</label>
               <input className={inputCls} placeholder="Ex: CDB Nubank, Poupança Itaú, Tesouro Direto..." value={fInvest.descricao} onChange={e=>setFInvest({...fInvest,descricao:e.target.value})} />
             </div>
@@ -1579,7 +1834,7 @@ export default function Financeiro() {
             </div>
             <div className="flex gap-2 justify-end">
               <button className={btnSecondaryCls} onClick={()=>setModal('')}>Cancelar</button>
-              <button className={fInvest.tipo==='aporte' ? btnPrimaryCls : 'bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer'} onClick={salvarInvestimento}>
+              <button className={fInvest.tipo==='aporte' ? btnPrimaryCls : 'bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer'} onClick={salvarInvestimento} data-testid="salvar-investimento">
                 {fInvest.tipo==='aporte' ? '⬆️ Registrar Aporte' : '⬇️ Registrar Resgate'}
               </button>
             </div>
@@ -1626,6 +1881,77 @@ export default function Financeiro() {
         </div>
       )}
 
+      {modal==='semconta' && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e=>e.target===e.currentTarget&&setModal('')}>
+          <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[680px] max-h-[92vh] overflow-y-auto">
+            <div className="text-base font-bold text-on-surface mb-1">🏦 Atribuir conta aos lançamentos pagos</div>
+            <div className="text-body-sm text-on-surface-variant mb-4">Escolha de qual conta cada valor saiu (ou em qual entrou). Depois disso, o saldo de cada conta passa a fechar com o Saldo Acumulado.</div>
+            <div className="flex flex-col gap-2 mb-5">
+              {P.semConta.map(l=>(
+                <div key={l.id} className="flex items-center justify-between gap-3 border border-outline-variant rounded-lg px-3 py-2.5" data-testid="item-sem-conta">
+                  <div className="min-w-0">
+                    <div className="text-sm font-semibold text-on-surface truncate">{l.descricao}</div>
+                    <div className="text-[11px] text-on-surface-variant">{dataBR(dataEfetiva(l))} · {l.categoria||'—'} {nomeObra(l.obra_id)?`· ${nomeObra(l.obra_id)}`:''}</div>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className={`font-bold ${l.tipo==='entrada'?'text-primary-container':'text-error'}`}>{l.tipo==='entrada'?'+':'-'}{fmt(num(l.valor))}</div>
+                    <select className={inputCls + ' !w-40 !py-1.5'} value={atribuicoes[l.id]||''} onChange={e=>setAtribuicoes({...atribuicoes,[l.id]:e.target.value})}>
+                      <option value="">— conta —</option>
+                      {contas.map(c=><option key={c.id} value={c.nome}>{c.nome}</option>)}
+                    </select>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button className={btnSecondaryCls} onClick={()=>setModal('')}>Cancelar</button>
+              <button className={btnPrimaryCls} onClick={salvarAtribuicoes} data-testid="salvar-atribuicoes">Salvar contas</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fFatura && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1100] p-4" onClick={e=>e.target===e.currentTarget&&setFFatura(null)}>
+          <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
+            <div className="text-base font-bold text-on-surface mb-1">💳 Pagar fatura — {fFatura.cartao.nome}</div>
+            <div className="text-body-sm text-on-surface-variant mb-4">Vencimento {dataBR(fFatura.fatura.vencimento)} · {fFatura.fatura.itensAbertos.length} compra(s) · <strong>{fmt(fFatura.fatura.aberto)}</strong></div>
+            <div className="flex gap-2 mb-4">
+              <button className={(fFatura.jaPaga ? btnPrimaryCls : btnSecondaryCls) + ' flex-1'} onClick={()=>setFFatura({...fFatura, jaPaga:true})}>Já paguei</button>
+              <button className={(!fFatura.jaPaga ? btnPrimaryCls : btnSecondaryCls) + ' flex-1'} onClick={()=>setFFatura({...fFatura, jaPaga:false})}>Programar para o vencimento</button>
+            </div>
+            {fFatura.jaPaga && (
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div><label className={labelCls}>Data do pagamento *</label><input type="date" className={inputCls} value={fFatura.data} onChange={e=>setFFatura({...fFatura,data:e.target.value})} /></div>
+                <div><label className={labelCls}>Conta *</label>
+                  <select className={inputCls} value={fFatura.conta} onChange={e=>setFFatura({...fFatura,conta:e.target.value})} data-testid="fatura-conta">
+                    <option value="">Selecione</option>
+                    {contas.map(c=><option key={c.id} value={c.nome}>{c.nome}</option>)}
+                  </select>
+                </div>
+              </div>
+            )}
+            {!fFatura.jaPaga && (
+              <div className="mb-4">
+                <label className={labelCls}>Conta que vai pagar (opcional agora)</label>
+                <select className={inputCls} value={fFatura.conta} onChange={e=>setFFatura({...fFatura,conta:e.target.value})}>
+                  <option value="">Definir ao pagar</option>
+                  {contas.map(c=><option key={c.id} value={c.nome}>{c.nome}</option>)}
+                </select>
+                <div className="text-[11px] text-tertiary mt-1">Fica como pendente em "A pagar" e na Agenda de Pagamentos até você marcar como pago.</div>
+              </div>
+            )}
+            <div className="text-[11px] text-on-surface-variant mb-4">A fatura vira <strong>uma saída</strong> na conta (categoria "Fatura de cartão"). As compras continuam contando no custo das obras.</div>
+            <div className="flex gap-2 justify-end">
+              <button className={btnSecondaryCls} onClick={()=>setFFatura(null)}>Cancelar</button>
+              <button className={btnPrimaryCls} onClick={confirmarFatura} data-testid="confirmar-fatura">{fFatura.jaPaga ? 'Registrar pagamento' : 'Programar'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modaisComuns}
+
       {wizardAberto && (
         <WizardLancamento
           wiz={wiz} setWiz={setWiz}
@@ -1647,16 +1973,21 @@ export default function Financeiro() {
 
 // Componente reutilizável do modal de lançamento
 function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, onSalvar, onCancel }: any) {
+  const categorias: string[] = fLanc.tipo==='entrada' ? CAT_IN : CAT_OUT
+  const trocarTipo = (tipo: string) => {
+    const lista = tipo==='entrada' ? CAT_IN : CAT_OUT
+    setFLanc({ ...fLanc, tipo, categoria: lista.includes(fLanc.categoria) ? fLanc.categoria : '' })
+  }
   return (
     <>
       <div className="flex gap-2 mb-4">
-        <button className={fLanc.tipo==='saida' ? btnPrimaryCls : btnSecondaryCls} onClick={()=>setFLanc({...fLanc,tipo:'saida'})}>💸 Saída</button>
-        <button className={fLanc.tipo==='entrada' ? 'bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold' : btnSecondaryCls} onClick={()=>setFLanc({...fLanc,tipo:'entrada'})}>💰 Entrada</button>
+        <button className={fLanc.tipo==='saida' ? btnPrimaryCls : btnSecondaryCls} onClick={()=>trocarTipo('saida')}>💸 Saída</button>
+        <button className={fLanc.tipo==='entrada' ? 'bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold' : btnSecondaryCls} onClick={()=>trocarTipo('entrada')}>💰 Entrada</button>
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3.5">
         <div><label className={labelCls}>Data *</label><input className={inputCls} type="date" value={fLanc.data} onChange={(e:any)=>{
           const novaData = e.target.value
-          const ehFutura = novaData > new Date().toISOString().slice(0,10)
+          const ehFutura = novaData > hojeISO()
           setFLanc(ehFutura ? {...fLanc, data:novaData, status:'pendente', data_vencimento:novaData} : {...fLanc, data:novaData})
         }} /></div>
         <div><label className={labelCls}>Valor (R$) *</label><input className={inputCls} type="number" placeholder="0,00" value={fLanc.valor} onChange={(e:any)=>setFLanc({...fLanc,valor:e.target.value})} /></div>
@@ -1666,7 +1997,7 @@ function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, o
         <div><label className={labelCls}>Categoria</label>
           <select className={inputCls} value={fLanc.categoria} onChange={(e:any)=>setFLanc({...fLanc,categoria:e.target.value})}>
             <option value="">Selecione</option>
-            {(fLanc.tipo==='entrada'?CAT_IN:CAT_OUT).map((c:string)=><option key={c} value={c}>{c}</option>)}
+            {categorias.map((c:string)=><option key={c} value={c}>{c}</option>)}
           </select>
         </div>
         <div><label className={labelCls}>Vincular à Obra</label>
@@ -1687,8 +2018,8 @@ function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, o
             <div className="text-[11px] text-on-surface-variant mt-1">Selecionar o serviço permite comparar o previsto com o realizado na aba de serviços da obra</div>
           </div>
         )}
-        <div><label className={labelCls}>Conta</label>
-          <select className={inputCls} value={fLanc.conta} onChange={(e:any)=>setFLanc({...fLanc,conta:e.target.value})}>
+        <div><label className={labelCls}>Conta {fLanc.status==='pago' ? '*' : ''}</label>
+          <select className={inputCls} value={fLanc.conta} onChange={(e:any)=>setFLanc({...fLanc,conta:e.target.value})} data-testid="lanc-conta">
             <option value="">Selecione</option>
             {contas.map((c:any)=><option key={c.id} value={c.nome}>{c.nome}</option>)}
           </select>
@@ -1710,6 +2041,13 @@ function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, o
         <input type="checkbox" checked={fLanc.recorrente} onChange={(e:any)=>setFLanc({...fLanc,recorrente:e.target.checked})} className="w-4 h-4 accent-primary cursor-pointer" />
         <span className="text-sm text-on-surface">🔁 Custo fixo (repete automaticamente todo mês — ex: energia, água, internet)</span>
       </label>
+      {fLanc.status==='pago' && (
+        <div className="mb-3.5">
+          <label className={labelCls}>Data do {fLanc.tipo==='entrada' ? 'recebimento' : 'pagamento'}</label>
+          <input className={inputCls} type="date" value={fLanc.data_pagamento || fLanc.data} onChange={(e:any)=>setFLanc({...fLanc,data_pagamento:e.target.value})} />
+          <div className="text-[11px] text-on-surface-variant mt-1">É esta data que posiciona o lançamento no mês e no saldo.</div>
+        </div>
+      )}
       {fLanc.status==='pendente' && (
         <div className="mb-3.5">
           <label className={labelCls}>📅 Data de Vencimento</label>
@@ -1727,7 +2065,7 @@ function ModalLancamento({ fLanc, setFLanc, contas, obras, servicos, salvando, o
       {fLanc.nf_arquivo && <div className="text-xs text-primary mb-3">📎 {(fLanc.nf_arquivo as File).name}</div>}
       <div className="flex gap-2 justify-end mt-2">
         <button className={btnSecondaryCls} onClick={onCancel}>Cancelar</button>
-        <button className={btnPrimaryCls} onClick={onSalvar} disabled={salvando}>{salvando?'Salvando...':'Salvar Lançamento'}</button>
+        <button className={btnPrimaryCls} onClick={onSalvar} disabled={salvando} data-testid="salvar-lancamento">{salvando?'Salvando...':'Salvar Lançamento'}</button>
       </div>
     </>
   )
@@ -1747,7 +2085,7 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
         {wiz.step !== 'tipo' && <button className={btnSecondaryCls} onClick={onVoltar}>← Voltar</button>}
         <button className={btnSecondaryCls} onClick={onCancelar}>Cancelar</button>
         {onProximo && <button className={btnPrimaryCls} onClick={onProximo} disabled={podeAvancar === false}>Próximo →</button>}
-        {onFinalizar && <button className={btnPrimaryCls} onClick={() => onFinalizar()} disabled={salvando}>{salvando ? 'Salvando...' : (finalizarLabel || 'Finalizar')}</button>}
+        {onFinalizar && <button className={btnPrimaryCls} onClick={() => onFinalizar()} disabled={salvando || podeAvancar === false}>{salvando ? 'Salvando...' : (finalizarLabel || 'Finalizar')}</button>}
       </div>
     )
   }
@@ -1791,7 +2129,7 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
               <div><label className={labelCls}>Categoria</label>
                 <select className={inputCls} value={wiz.categoria} onChange={e => setWiz({ ...wiz, categoria: e.target.value })}>
                   <option value="">Selecione</option>
-                  {CAT_OUT.map(c => <option key={c} value={c}>{c}</option>)}
+                  {CAT_OUT.filter(c => c !== CAT_FATURA).map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div><label className={labelCls}>Número da NF</label><input className={inputCls} placeholder="Ex: 000847" value={wiz.nf_numero} onChange={e => setWiz({ ...wiz, nf_numero: e.target.value })} /></div>
@@ -1806,7 +2144,7 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
               <input type="checkbox" checked={wiz.recorrente} onChange={e => setWiz({ ...wiz, recorrente: e.target.checked })} className="w-4 h-4 accent-primary cursor-pointer" />
               <span className="text-sm text-on-surface">🔁 Custo fixo (repete automaticamente todo mês — ex: energia, água, internet)</span>
             </label>
-            <Botoes onProximo={() => { if (!wiz.descricao || !wiz.valor) return alert('Preencha o valor e a descrição'); setWiz({ ...wiz, step: 's_destino' }) }} />
+            <Botoes onProximo={() => { if (!wiz.descricao || !(parseFloat(wiz.valor) > 0)) return alert('Preencha o valor (maior que zero) e a descrição'); setWiz({ ...wiz, step: 's_destino' }) }} />
           </>
         )}
 
@@ -1842,7 +2180,7 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
                   <option value="">— Selecione o serviço (opcional) —</option>
                   {servicosDaObra.map((s: any) => <option key={s.id} value={s.id}>{s.nome}</option>)}
                 </select>
-                <div className="text-[11px] text-on-surface-variant mt-1">Selecionar o serviço atualiza automaticamente o valor realizado dele</div>
+                <div className="text-[11px] text-on-surface-variant mt-1">O gasto passa a compor o valor realizado desse serviço na tela da obra</div>
               </div>
             )}
             <Botoes onProximo={() => { if (!wiz.obra_id) return alert('Selecione a obra'); setWiz({ ...wiz, step: 's_pagamento' }) }} />
@@ -1854,11 +2192,11 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
             <Titulo>Forma de pagamento</Titulo>
             <div className="mb-3.5">
               <label className={labelCls}>Conta de saída *</label>
-              <select className={inputCls} value={wiz.conta} onChange={e => setWiz({ ...wiz, conta: e.target.value })}>
+              <select className={inputCls} value={wiz.conta} onChange={e => setWiz({ ...wiz, conta: e.target.value })} data-testid="wiz-conta">
                 <option value="">Selecione a conta</option>
                 {contas.map((c: any) => <option key={c.id} value={c.nome}>{c.nome}</option>)}
               </select>
-              <div className="text-[11px] text-on-surface-variant mt-1">Necessária para o saldo de cada conta se atualizar sozinho</div>
+              <div className="text-[11px] text-on-surface-variant mt-1">Necessária para o saldo de cada conta se atualizar sozinho (não vale para cartão)</div>
             </div>
             <div className="flex flex-col gap-3">
               <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-primary bg-surface-container-low transition-all disabled:opacity-50" disabled={salvando || !wiz.conta} onClick={() => onFinalizarSaida({ forma_pagamento: 'a_vista' })}>
@@ -1871,7 +2209,7 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
               </button>
               <button className="text-left px-5 py-4 rounded-xl border-2 border-outline-variant hover:border-secondary bg-surface-container-low transition-all" onClick={() => setWiz({ ...wiz, forma_pagamento: 'cartao', step: 's_cartao' })}>
                 <div className="font-bold text-on-surface">💳 Cartão</div>
-                <div className="text-body-sm text-on-surface-variant">À vista ou parcelado — lança nas faturas do cartão</div>
+                <div className="text-body-sm text-on-surface-variant">À vista ou parcelado — lança nas faturas do cartão (o dinheiro sai da conta quando a fatura é paga)</div>
               </button>
             </div>
             <Botoes />
@@ -1879,17 +2217,17 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
         )}
 
         {wiz.step === 's_faturado' && (() => {
-          const venc = new Date(wiz.data + 'T00:00:00')
-          venc.setDate(venc.getDate() + parseInt(wiz.dias_prazo || '0'))
+          const prazo = Math.max(0, parseInt(wiz.dias_prazo || '0') || 0)
+          const venc = somarDiasISO(wiz.data, prazo)
           return (
             <>
               <Titulo>📅 Faturado — prazo para pagamento</Titulo>
               <div className="mb-3.5">
                 <label className={labelCls}>Prazo (dias) *</label>
-                <input className={inputCls} type="number" min="1" value={wiz.dias_prazo} onChange={e => setWiz({ ...wiz, dias_prazo: e.target.value })} />
+                <input className={inputCls} type="number" min="0" value={wiz.dias_prazo} onChange={e => setWiz({ ...wiz, dias_prazo: e.target.value })} />
               </div>
               <div className="bg-tertiary/10 border border-tertiary/30 rounded-lg px-3.5 py-2.5 text-tertiary text-sm mb-4">
-                📅 Data de pagamento: <strong>{venc.toLocaleDateString('pt-BR')}</strong>
+                📅 Data de pagamento: <strong>{dataBR(venc)}</strong>
               </div>
               <Botoes onFinalizar={onFinalizarSaida} finalizarLabel="Finalizar Lançamento" />
             </>
@@ -1898,8 +2236,9 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
 
         {wiz.step === 's_cartao' && (() => {
           const n = parseInt(wiz.parcelas || '1')
-          const valorTotal = parseFloat(wiz.valor || '0')
-          const valorParcela = n > 0 ? valorTotal / n : valorTotal
+          const valorTotal = arred2(wiz.valor || '0')
+          const partes = dividirParcelas(valorTotal, n)
+          const cartaoSel = cartoes.find((c: any) => c.id === wiz.cartao_id)
           return (
             <>
               <Titulo>💳 Pagamento no Cartão</Titulo>
@@ -1918,7 +2257,8 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
                 </div>
               </div>
               <div className="bg-secondary/10 border border-secondary/30 rounded-lg px-3.5 py-2.5 text-secondary text-sm mb-4">
-                💳 {n > 1 ? `${n}x de ${fmt(valorParcela)}` : `À vista: ${fmt(valorTotal)}`}
+                💳 {n > 1 ? `${n}x de ${fmt(partes[0])}${partes[n-1] !== partes[0] ? ` (última ${fmt(partes[n-1])})` : ''} = ${fmt(valorTotal)}` : `À vista: ${fmt(valorTotal)}`}
+                {cartaoSel && <div className="text-[11px] mt-1">1ª parcela na fatura que vence em {dataBR(vencimentoDaFatura(wiz.data, cartaoSel.dia_fechamento, cartaoSel.dia_vencimento))}</div>}
               </div>
               <Botoes onFinalizar={onFinalizarSaida} finalizarLabel="Finalizar Lançamento" podeAvancar={!!wiz.cartao_id} />
             </>
@@ -1958,12 +2298,12 @@ function WizardLancamento({ wiz, setWiz, obras, servicos, cartoes, contas, salva
               <div><label className={labelCls}>Categoria</label>
                 <select className={inputCls} value={wiz.categoria} onChange={e => setWiz({ ...wiz, categoria: e.target.value })}>
                   <option value="">Selecione</option>
-                  {CAT_IN.map(c => <option key={c} value={c}>{c}</option>)}
+                  {CAT_IN.filter(c => c !== CAT_RESGATE).map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
               <div><label className={labelCls}>Número da NF</label><input className={inputCls} placeholder="Ex: 000847" value={wiz.nf_numero} onChange={e => setWiz({ ...wiz, nf_numero: e.target.value })} /></div>
             </div>
-            <Botoes onProximo={() => { if (!wiz.descricao || !wiz.valor) return alert('Preencha o valor e a descrição'); setWiz({ ...wiz, step: 'e_obra' }) }} />
+            <Botoes onProximo={() => { if (!wiz.descricao || !(parseFloat(wiz.valor) > 0)) return alert('Preencha o valor (maior que zero) e a descrição'); setWiz({ ...wiz, step: 'e_obra' }) }} />
           </>
         )}
 

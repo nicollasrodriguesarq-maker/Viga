@@ -9,6 +9,20 @@
 -- Depois: só usuário logado E aprovado acessa; o papel anon não acessa nada.
 -- ════════════════════════════════════════════════════════════════════════════════════════
 
+-- Módulos do usuário: quem tem o módulo liberado no app do celular (modulos_app) também precisa acessar as tabelas dele.
+create or replace function public.has_module(m text) returns boolean
+language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from public.usuarios u
+    where u.id = auth.uid() and u.aprovado
+      and (u.role = 'admin'
+           or m = any (coalesce(u.modulos_permitidos, '{}'::text[]))
+           or m = any (coalesce(u.modulos_app, '{}'::text[])))
+  )
+$$;
+revoke execute on function public.has_module(text) from public, anon;
+grant execute on function public.has_module(text) to authenticated;
+
 -- 0. defesa em profundidade: o papel anon perde qualquer acesso direto às tabelas/funções
 revoke all on all tables in schema public from anon;
 revoke all on all sequences in schema public from anon;

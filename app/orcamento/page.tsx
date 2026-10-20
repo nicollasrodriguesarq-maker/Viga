@@ -95,7 +95,7 @@ function valoresProposta(item: any, embutirDesconto = false) {
     maoObra: parseFloat(item.preco_mao_obra || 0) * qtd * mult,
   }
 }
-const rotuloDesconto = (item: any) => (tipoDescontoItem(item) === 'percentual' ? fmtN(parseFloat(item.desconto_item_valor || 0)) + '%' : fmtN(pctDescontoItem(item)) + '%')
+const rotuloDesconto = (item: any) => (tipoDescontoItem(item) === 'percentual' ? parseFloat(item.desconto_item_valor || 0) : pctDescontoItem(item)).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + '%'
 
 // classes reutilizáveis
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -704,8 +704,8 @@ export default function Orcamento() {
     if (!detalhe) return
     const ambsOrc = ambientes.filter(a => a.orcamento_id === detalhe.id).sort((a, b) => a.ordem - b.ordem)
     const itensDoOrc = itens.filter(i => i.orcamento_id === detalhe.id)
-    const totalMat = itensDoOrc.reduce((a, i) => a + valoresProposta(i).material, 0)
-    const totalMao = itensDoOrc.reduce((a, i) => a + valoresProposta(i).maoObra, 0)
+    const totalMat = itensDoOrc.reduce((a, i) => a + valoresProposta(i, detalhe.mostrar_desc_itens === false).material, 0)
+    const totalMao = itensDoOrc.reduce((a, i) => a + valoresProposta(i, detalhe.mostrar_desc_itens === false).maoObra, 0)
     const totalGeral = itensDoOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
     const descontoPct = parseFloat(detalhe.desconto_percentual || 0)
     const desconto = totalGeral * descontoPct / 100

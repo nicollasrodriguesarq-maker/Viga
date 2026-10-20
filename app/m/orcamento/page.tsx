@@ -232,7 +232,7 @@ export default function OrcamentoMobile() {
       ['/proposta/marajoara-1.jpg', '/proposta/marajoara-2.jpg', '/proposta/marajoara-3.jpg', '/proposta/marajoara-4.jpg'], origin, cfg)
   }
 
-  const rotuloDesconto = (item: any) => (tipoDescontoItem(item) === 'percentual' ? fmtN(parseFloat(item.desconto_item_valor || 0)) + '%' : fmtN(pctDescontoItem(item)) + '%')
+  const rotuloDesconto = (item: any) => (tipoDescontoItem(item) === 'percentual' ? parseFloat(item.desconto_item_valor || 0) : pctDescontoItem(item)).toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + '%'
 
   function paginaInvestimentoInverso(itensOrc: any[], ambientesOrc: any[], codigo: string, cfg: any) {
     const mostrarDesc = detalhe.mostrar_desc_itens !== false

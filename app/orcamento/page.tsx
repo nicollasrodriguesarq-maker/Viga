@@ -4,7 +4,7 @@ import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
 import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
-import { rotuloRev, codigoBase, codigoComRev, compararRevisoes } from '../lib/revisoes'
+import { rotuloRev, codigoBase, codigoComRev, compararRevisoes, dataBRts } from '../lib/revisoes'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, type ValorClienteCrm } from '../lib/clienteCrm'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -1299,7 +1299,7 @@ export default function Orcamento() {
         )}
         {detalhe.revisao_de && (
           <div className="bg-tertiary/10 border border-tertiary/30 rounded-xl p-4 mb-lg flex items-center justify-between gap-3 flex-wrap" data-testid="banner-revisao-antiga">
-            <div className="text-sm text-tertiary"><strong>{rotuloRev(detalhe.revisao)} — revisão anterior (somente leitura).</strong> Substituída em {new Date(detalhe.created_at).toLocaleDateString('pt-BR')}{orcamentos.find(o => o.id === detalhe.revisao_de) ? ' pela ' + rotuloRev(orcamentos.find(o => o.id === detalhe.revisao_de)?.revisao) : ''}. Você pode gerar o PDF dela normalmente.</div>
+            <div className="text-sm text-tertiary"><strong>{rotuloRev(detalhe.revisao)} — revisão anterior (somente leitura).</strong> Substituída em {dataBRts(orcamentos.find(o => o.id === detalhe.revisao_de)?.revisao_data || detalhe.created_at)}{orcamentos.find(o => o.id === detalhe.revisao_de) ? ' pela ' + rotuloRev(orcamentos.find(o => o.id === detalhe.revisao_de)?.revisao) : ''}. Você pode gerar o PDF dela normalmente.</div>
             <button className={btnEditSmCls} onClick={() => { const v = orcamentos.find(o => o.id === detalhe.revisao_de); if (v) { setDetalhe(v); setAmbienteAtivo(null); setAbaDetalhe('revisoes') } }}>Ir para a revisão vigente →</button>
           </div>
         )}
@@ -1397,8 +1397,8 @@ export default function Orcamento() {
                       const ant = idx > 0 ? totalFinalDe(todas[idx - 1]) : null
                       const dif = ant != null ? tf - ant : null
                       const vig = r.id === vigente.id
-                      const ini = new Date(r.revisao_data || r.created_at).toLocaleDateString('pt-BR')
-                      const fim = vig ? 'hoje' : new Date(r.created_at).toLocaleDateString('pt-BR')
+                      const ini = dataBRts(r.revisao_data || r.created_at)
+                      const fim = vig ? 'hoje' : dataBRts(todas[idx + 1]?.revisao_data || r.created_at)
                       return (
                         <tr key={r.id} className={`border-b border-outline-variant ${r.id === detalhe.id ? 'bg-primary/5' : ''}`} data-testid="linha-revisao">
                           <td className="px-3 py-2.5 font-bold text-on-surface whitespace-nowrap">{rotuloRev(r.revisao)}{vig && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">VIGENTE</span>}</td>

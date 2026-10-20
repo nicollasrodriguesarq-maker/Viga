@@ -55,3 +55,10 @@ export function compararRevisoes(itensDe: any[], ambDe: any[], itensPara: any[],
   }
   return out
 }
+
+// Datas gravadas sem fuso no banco (created_at) são UTC; sem isto, à noite a data aparece um dia à frente.
+export function dataBRts(ts?: string | null): string {
+  if (!ts) return '—'
+  const iso = /[zZ]|[+-]\d\d:?\d\d$/.test(ts) ? ts : ts + 'Z'
+  return new Date(iso).toLocaleDateString('pt-BR')
+}

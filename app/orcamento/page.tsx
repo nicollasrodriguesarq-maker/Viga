@@ -5,6 +5,7 @@ import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
 import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
 import { rotuloRev, codigoBase, codigoComRev, compararRevisoes, dataBRts } from '../lib/revisoes'
+import { brutoItem, descontoItem, liquidoItem, custoItem, pctDescontoItem, fatorDesconto, tipoDescontoItem } from '../lib/orcamentoCalc'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, type ValorClienteCrm } from '../lib/clienteCrm'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -80,20 +81,21 @@ function ordenarPorCategoria(itensList: any[]) {
 function calcularValorUnitario(precoMaterial: number, precoMaoObra: number, lucroPct: number, impostoPct: number) {
   return (precoMaterial + precoMaoObra) * (1 + (lucroPct || 0) / 100) * (1 + (impostoPct || 0) / 100)
 }
+// Total do item JÁ com o desconto próprio do item (preço de tabela − desconto). Tudo (totais, obra, proposta) usa este valor.
 function calcularTotalItem(item: any) {
-  const valorUnit = calcularValorUnitario(parseFloat(item.preco_material || 0), parseFloat(item.preco_mao_obra || 0), parseFloat(item.lucro_percentual || 0), parseFloat(item.imposto_percentual || 0))
-  return valorUnit * parseFloat(item.quantidade || 1)
+  return liquidoItem(item)
 }
 // Para documentos voltados ao cliente: material e mão de obra já com lucro/imposto embutidos,
 // distribuídos proporcionalmente para que a soma bata exatamente com o total do item.
-function valoresProposta(item: any) {
+function valoresProposta(item: any, embutirDesconto = false) {
   const qtd = parseFloat(item.quantidade || 1)
-  const mult = (1 + (parseFloat(item.lucro_percentual || 0)) / 100) * (1 + (parseFloat(item.imposto_percentual || 0)) / 100)
+  const mult = (1 + (parseFloat(item.lucro_percentual || 0)) / 100) * (1 + (parseFloat(item.imposto_percentual || 0)) / 100) * (embutirDesconto ? fatorDesconto(item) : 1)
   return {
     material: parseFloat(item.preco_material || 0) * qtd * mult,
     maoObra: parseFloat(item.preco_mao_obra || 0) * qtd * mult,
   }
 }
+const rotuloDesconto = (item: any) => (tipoDescontoItem(item) === 'percentual' ? fmtN(parseFloat(item.desconto_item_valor || 0)) + '%' : fmtN(pctDescontoItem(item)) + '%')
 
 // classes reutilizáveis
 const inputCls = 'w-full bg-surface-container-low border border-outline-variant rounded-lg text-on-surface px-3.5 py-2.5 text-sm outline-none focus:border-primary transition-all placeholder:text-on-surface-variant/50'
@@ -146,6 +148,9 @@ export default function Orcamento() {
   const [regimeProposta, setRegimeProposta] = useState('seg_sex')
   const [observacaoProposta, setObservacaoProposta] = useState('')
   const [motivoRevisao, setMotivoRevisao] = useState('')
+  const [descTipo, setDescTipo] = useState<'percentual' | 'valor'>('percentual')
+  const [descValor, setDescValor] = useState('')
+  const [descMotivo, setDescMotivo] = useState('')
   const [criandoRev, setCriandoRev] = useState(false)
   const [cmp, setCmp] = useState<{ de: string; para: string }>({ de: '', para: '' })
 
@@ -353,8 +358,14 @@ export default function Orcamento() {
     const qtd = parseFloat(fItem.quantidade || '1')
     const lucro = parseFloat(fItem.lucro_percentual || '0')
     const imposto = parseFloat(fItem.imposto_percentual || '0')
-    const total = calcularValorUnitario(mat, mao, lucro, imposto) * qtd
+    const dVal = parseFloat(descValor.replace(',', '.') || '0') || 0
+    const itemCalc = { preco_material: mat, preco_mao_obra: mao, quantidade: qtd, lucro_percentual: lucro, imposto_percentual: imposto, desconto_item_tipo: descTipo, desconto_item_valor: dVal }
+    if (dVal < 0) return alert('O desconto não pode ser negativo')
+    if (descTipo === 'percentual' && dVal > 100) return alert('O desconto em % não pode passar de 100')
+    if (descTipo === 'valor' && dVal > brutoItem(itemCalc) + 0.005) return alert('O desconto em R$ não pode ser maior que o valor do item (' + fmt(brutoItem(itemCalc)) + ')')
+    const total = liquidoItem(itemCalc)
     const dados = {
+      desconto_item_tipo: descTipo, desconto_item_valor: dVal, desconto_item_motivo: dVal > 0 ? (descMotivo.trim() || null) : null,
       orcamento_id: detalhe.id,
       ambiente_id: ambienteAtivo.id,
       servico: fItem.servico,
@@ -395,6 +406,7 @@ export default function Orcamento() {
     setJanela(null); setEditItem(null)
     setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias' })
     setComposicao([]); setUsarComposicao(false)
+    setDescTipo('percentual'); setDescValor(''); setDescMotivo('')
     carregar()
   }
 
@@ -666,6 +678,7 @@ export default function Orcamento() {
     if (!ambienteAtivo) return alert('Selecione um ambiente primeiro')
     setFItem({ servico: item.nome, descricao: '', categoria: item.categoria || '', banco_item_id: item.id, quantidade: '1', unidade: item.unidade, preco_material: String(item.preco_material), preco_mao_obra: String(item.preco_mao_obra), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '', tempo_execucao_unidade: item.tempo_execucao_unidade || 'dias' })
     setComposicao([]); setUsarComposicao(false)
+    setDescTipo('percentual'); setDescValor(''); setDescMotivo('')
     setJanela('item')
   }
 
@@ -673,12 +686,14 @@ export default function Orcamento() {
     setFItem({ servico: '', descricao: '', categoria: '', banco_item_id: '', quantidade: '1', unidade: 'm²', preco_material: '', preco_mao_obra: '', lucro_percentual: '20', imposto_percentual: '0', tempo_execucao: '', tempo_execucao_unidade: 'dias' })
     setEditItem(null); setMostrarSugestoes(false)
     setComposicao([]); setUsarComposicao(false)
+    setDescTipo('percentual'); setDescValor(''); setDescMotivo('')
     setJanela('item')
   }
 
   async function abrirEditarItem(item: any) {
     setFItem({ servico: item.servico, descricao: item.descricao||'', categoria: item.categoria || '', banco_item_id: item.banco_item_id || '', quantidade: String(item.quantidade||1), unidade: item.unidade, preco_material: String(item.preco_material||0), preco_mao_obra: String(item.preco_mao_obra||0), lucro_percentual: String(item.lucro_percentual||0), imposto_percentual: String(item.imposto_percentual||0), tempo_execucao: item.tempo_execucao != null ? String(item.tempo_execucao) : '', tempo_execucao_unidade: item.tempo_execucao_unidade || 'dias' })
     setEditItem(item); setMostrarSugestoes(false)
+    setDescTipo(tipoDescontoItem(item)); setDescValor(parseFloat(item.desconto_item_valor || 0) > 0 ? String(item.desconto_item_valor) : ''); setDescMotivo(item.desconto_item_motivo || '')
     const comp = await buscar('orcamento_itens_composicao', '?orcamento_item_id=eq.' + item.id + '&order=created_at')
     setComposicao(comp)
     setUsarComposicao(comp.length > 0)
@@ -695,15 +710,18 @@ export default function Orcamento() {
     const descontoPct = parseFloat(detalhe.desconto_percentual || 0)
     const desconto = totalGeral * descontoPct / 100
     const totalFinal = totalGeral - desconto
+    const mostrarDesc = detalhe.mostrar_desc_itens !== false
+    const descItensTotal = itensDoOrc.reduce((a, i) => a + descontoItem(i), 0)
 
     const ambContent = ambsOrc.map(amb => {
       const itensAmb = ordenarPorCategoria(itens.filter(i => i.ambiente_id === amb.id))
       if (itensAmb.length === 0) return ''
-      const matAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).material, 0)
-      const maoAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).maoObra, 0)
+      const matAmb = itensAmb.reduce((a, i) => a + valoresProposta(i, !mostrarDesc).material, 0)
+      const maoAmb = itensAmb.reduce((a, i) => a + valoresProposta(i, !mostrarDesc).maoObra, 0)
       const totalAmb = itensAmb.reduce((a, i) => a + calcularTotalItem(i), 0)
       const rows = itensAmb.map((item, idx) => {
-        const { material: mat, maoObra: mao } = valoresProposta(item)
+        const { material: mat, maoObra: mao } = valoresProposta(item, !mostrarDesc)
+        const dI = descontoItem(item)
         const categoriaAtual = item.categoria || 'Outros'
         const categoriaAnterior = idx > 0 ? (itensAmb[idx - 1].categoria || 'Outros') : null
         const headerCategoria = categoriaAtual !== categoriaAnterior
@@ -714,8 +732,8 @@ export default function Orcamento() {
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center">${fmtN(parseFloat(item.quantidade||1))} ${item.unidade}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">${fmt(mat)}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">${fmt(mao)}</td>
-          <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(calcularTotalItem(item))}</td>
-        </tr>`
+          <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(dI > 0 && mostrarDesc ? brutoItem(item) : calcularTotalItem(item))}</td>
+        </tr>${dI > 0 && mostrarDesc ? `<tr><td colspan="4" style="padding:3px 10px 8px;text-align:right;color:#c0392b;font-size:12px;border-bottom:1px solid #eee">Desconto especial neste item (${rotuloDesconto(item)})</td><td style="padding:3px 10px 8px;text-align:right;color:#c0392b;font-weight:600;border-bottom:1px solid #eee">- ${fmt(dI)}</td></tr>` : ''}`
       }).join('')
       return `
         <div style="margin-bottom:24px">
@@ -781,6 +799,7 @@ export default function Orcamento() {
         <table style="width:100%;border-collapse:collapse">
           <tr><td style="padding:10px 16px">Total Material</td><td style="padding:10px 16px;text-align:right;font-weight:600">${fmt(totalMat)}</td></tr>
           <tr style="background:#f9f9f9"><td style="padding:10px 16px">Total Mão de Obra</td><td style="padding:10px 16px;text-align:right;font-weight:600">${fmt(totalMao)}</td></tr>
+          ${descItensTotal > 0 && mostrarDesc ? '<tr><td style="padding:10px 16px">Descontos especiais nos itens</td><td style="padding:10px 16px;text-align:right;color:#e74c3c;font-weight:600">- ' + fmt(descItensTotal) + '</td></tr>' : ''}
           ${desconto > 0 ? '<tr><td style="padding:10px 16px">Desconto (' + fmtN(descontoPct) + '%)</td><td style="padding:10px 16px;text-align:right;color:#e74c3c;font-weight:600">- ' + fmt(desconto) + '</td></tr>' : ''}
           <tr style="background:#1B3A5C;color:white">
             <td style="padding:14px 16px;font-size:16px;font-weight:700">TOTAL GERAL</td>
@@ -931,6 +950,7 @@ export default function Orcamento() {
   // demais para uma única página A4 paisagem simplesmente continuam na próxima, em vez de
   // serem cortados. break-inside:avoid em cada linha evita que uma linha seja partida ao meio.
   function paginaInvestimentoInverso(itensOrc: any[], ambientesOrc: any[], codigo: string, cfg: any) {
+    const mostrarDesc = detalhe.mostrar_desc_itens !== false
     // Agrupa primeiro por ambiente (ordem cadastrada) e, dentro de cada ambiente, por
     // categoria — antes só agrupava por categoria, misturando itens de cômodos diferentes
     // sob o mesmo cabeçalho (ex.: "Demolição de piso cerâmico" de 5 ambientes diferentes,
@@ -948,6 +968,8 @@ export default function Orcamento() {
       const headerAmbiente = `<tr style="break-inside:avoid"><td colspan="5" style="padding:10px 16px;background:#1A1A1A;border-top:2px solid #fff;color:#fff;font-weight:700;font-size:12px;letter-spacing:0.08em;text-transform:uppercase">🏠 ${grupo.nome}</td></tr>`
       let categoriaAnterior: string | null = null
       const itensHtml = grupo.itens.map(item => {
+        const dI = descontoItem(item)
+        const qtdI = parseFloat(item.quantidade || 1) || 1
         const categoriaAtual = item.categoria || 'Outros'
         const headerCategoria = categoriaAtual !== categoriaAnterior
           ? `<tr style="break-inside:avoid"><td colspan="5" style="padding:8px 16px;background:#F5F4F1;color:#1A1A1A;font-weight:700;font-size:11px;letter-spacing:0.05em;text-transform:uppercase">${categoriaAtual}</td></tr>`
@@ -958,13 +980,19 @@ export default function Orcamento() {
         <td style="padding:12px 16px;border-bottom:1px solid #333;color:#eee">${item.servico}${item.descricao ? `<br/><span style="color:#999;font-size:11px">${item.descricao}</span>` : ''}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${item.unidade}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${fmtN(parseFloat(item.quantidade || 1))}</td>
-        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;color:#ccc">${fmt(calcularValorUnitario(parseFloat(item.preco_material||0), parseFloat(item.preco_mao_obra||0), parseFloat(item.lucro_percentual||0), parseFloat(item.imposto_percentual||0)))}</td>
-        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;font-weight:700;color:#fff">${fmt(calcularTotalItem(item))}</td>
-      </tr>`
+        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;color:#ccc">${fmt(dI > 0 && !mostrarDesc ? calcularTotalItem(item) / qtdI : calcularValorUnitario(parseFloat(item.preco_material||0), parseFloat(item.preco_mao_obra||0), parseFloat(item.lucro_percentual||0), parseFloat(item.imposto_percentual||0)))}</td>
+        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;font-weight:700;color:#fff">${fmt(dI > 0 && mostrarDesc ? brutoItem(item) : calcularTotalItem(item))}</td>
+      </tr>${dI > 0 && mostrarDesc ? `<tr style="break-inside:avoid"><td colspan="4" style="padding:4px 16px 10px;border-bottom:1px solid #333;text-align:right;color:#f4a09a;font-size:11px">Desconto especial neste item (${rotuloDesconto(item)})</td><td style="padding:4px 16px 10px;border-bottom:1px solid #333;text-align:right;color:#f4a09a;font-weight:700">- ${fmt(dI)}</td></tr>` : ''}`
       }).join('')
       return headerAmbiente + itensHtml
     }).join('')
     const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
+    const descGlobalPct = parseFloat(detalhe.desconto_percentual || 0) || 0
+    const descGlobal = totalGeral * descGlobalPct / 100
+    const totalFinalProposta = totalGeral - descGlobal
+    const linhasResumo = [
+      descGlobal > 0 ? `<div style="display:flex;justify-content:space-between;gap:40px;font-size:13px;color:#ccc;margin-bottom:4px"><span>Subtotal</span><span>${fmt(totalGeral)}</span></div><div style="display:flex;justify-content:space-between;gap:40px;font-size:13px;color:#f4a09a;margin-bottom:8px"><span>Desconto (${fmtN(descGlobalPct)}%)</span><span>- ${fmt(descGlobal)}</span></div>` : '',
+    ].join('')
     return `
     <div class="page-flow" style="background:#1A1A1A;color:#fff;padding:36px 40px">
       <div style="display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em;border-bottom:1px solid #333;padding-bottom:14px;margin-bottom:22px">
@@ -983,10 +1011,11 @@ export default function Orcamento() {
         </tr></thead>
         <tbody>${rows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:#999">Nenhum item cadastrado ainda.</td></tr>`}</tbody>
       </table>
-      <div style="display:flex;justify-content:flex-end;margin-top:18px;break-inside:avoid">
+      <div style="display:flex;flex-direction:column;align-items:flex-end;margin-top:18px;break-inside:avoid">
+        ${linhasResumo}
         <div style="background:#fff;color:#1A1A1A;padding:14px 28px;display:flex;align-items:center;gap:18px">
           <span style="font-size:12px;letter-spacing:0.1em;color:#666">TOTAL GERAL</span>
-          <span style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:22px">${fmt(totalGeral)}</span>
+          <span style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:22px">${fmt(totalFinalProposta)}</span>
         </div>
       </div>
     </div>`
@@ -1275,6 +1304,7 @@ export default function Orcamento() {
     const descontoPct = parseFloat(detalhe.desconto_percentual || 0)
     const desconto = totalGeral * descontoPct / 100
     const totalFinal = totalGeral - desconto
+    const descItens = itensOrc.reduce((a, i) => a + descontoItem(i), 0)
     const bancoBusca = bancoItens.filter(b => !buscaBanco || b.nome.toLowerCase().includes(buscaBanco.toLowerCase()))
     const podeEditar = podeEditarOrcamento(detalhe)
     const souCriadorOuAdmin = souAdmin || detalhe.criado_por === meuId
@@ -1348,11 +1378,12 @@ export default function Orcamento() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-lg">
+        <div className={`grid grid-cols-2 sm:grid-cols-3 ${descItens > 0 ? 'lg:grid-cols-6' : 'lg:grid-cols-5'} gap-3 mb-lg`} data-testid="cards-totais">
           {[
             ['Total Material', fmt(totalMat), 'text-primary'],
             ['Total Mão de Obra', fmt(totalMao), 'text-secondary'],
             ['Subtotal', fmt(totalGeral), 'text-tertiary'],
+            ...(descItens > 0 ? [['Desc. nos itens', '−' + fmt(descItens), 'text-error']] : []),
             ['Desconto', fmt(desconto), 'text-error'],
             ['TOTAL FINAL', fmt(totalFinal), 'text-primary-container'],
           ].map(([l, v, c]) => (
@@ -1501,7 +1532,11 @@ export default function Orcamento() {
                                           <td className="px-2.5 py-2.5 text-on-surface-variant text-xs">{item.unidade}</td>
                                           <td className="px-2.5 py-2.5 text-primary font-semibold">{fmt(mat)}</td>
                                           <td className="px-2.5 py-2.5 text-secondary font-semibold">{fmt(mao)}</td>
-                                          <td className="px-2.5 py-2.5 font-bold text-tertiary">{fmt(calcularTotalItem(item))}</td>
+                                          <td className="px-2.5 py-2.5 font-bold text-tertiary">
+                                            {descontoItem(item) > 0 && <div className="text-[10px] font-normal text-on-surface-variant line-through" data-testid="item-bruto">{fmt(brutoItem(item))}</div>}
+                                            {fmt(calcularTotalItem(item))}
+                                            {descontoItem(item) > 0 && <div className="text-[10px] font-semibold text-error" title={item.desconto_item_motivo || ''} data-testid="item-desconto">−{rotuloDesconto(item)} ({fmt(descontoItem(item))})</div>}
+                                          </td>
                                           <td className="px-2.5 py-2.5">
                                             {podeEditar && (
                                               <div className="flex gap-1">
@@ -1639,6 +1674,11 @@ export default function Orcamento() {
               <label className={labelCls}>Forma de Pagamento</label>
               <textarea className={inputCls + ' min-h-[70px] resize-y disabled:opacity-50'} disabled={!podeEditar} placeholder="Ex: 40% na assinatura do contrato, 30% no meio da obra, 30% na entrega." value={detalhe.condicao_pagamento || ''} onChange={e => setDetalhe({ ...detalhe, condicao_pagamento: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { condicao_pagamento: detalhe.condicao_pagamento })} />
             </div>
+            <label className="flex items-start gap-2 mb-3.5 cursor-pointer select-none">
+              <input type="checkbox" className="w-4 h-4 accent-primary cursor-pointer mt-0.5" disabled={!podeEditar} checked={detalhe.mostrar_desc_itens !== false} data-testid="chk-mostrar-desc"
+                onChange={async e => { const v = e.target.checked; const ok = await editar('orcamentos', detalhe.id, { mostrar_desc_itens: v }); if (ok) setDetalhe({ ...detalhe, mostrar_desc_itens: v }) }} />
+              <span className="text-sm text-on-surface">Mostrar o desconto de cada item na proposta<span className="block text-[11px] text-on-surface-variant">Marcado: a proposta exibe o preço de tabela e o desconto especial de cada item. Desmarcado: exibe só o valor final do item, já com o desconto.</span></span>
+            </label>
             <div className="mb-5">
               <label className={labelCls}>Observações (aparece na proposta)</label>
               <textarea className={inputCls + ' min-h-[80px] resize-y disabled:opacity-50'} disabled={!podeEditar} value={detalhe.observacao || ''} onChange={e => setDetalhe({ ...detalhe, observacao: e.target.value })} onBlur={() => editar('orcamentos', detalhe.id, { observacao: detalhe.observacao })} placeholder="Ex: Serviço com garantia de 1 ano. Materiais de primeira linha." />
@@ -1851,8 +1891,31 @@ export default function Orcamento() {
                   <input className={inputCls} type="number" placeholder="0" value={fItem.imposto_percentual} onChange={e => setFItem({ ...fItem, imposto_percentual: e.target.value })} />
                 </div>
               </div>
+              <div className="bg-surface-container-low border border-outline-variant rounded-lg p-3.5 mb-4" data-testid="bloco-desconto-item">
+                <div className="text-[11px] font-bold text-tertiary uppercase tracking-wide mb-1">🏷️ Desconto neste item</div>
+                <div className="text-[11px] text-on-surface-variant mb-2.5">Vale só para este item neste orçamento. O preço do item na matriz de preços (Banco de Itens) <strong>não é alterado</strong>.</div>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <label className={labelCls}>Tipo</label>
+                    <select className={inputCls} value={descTipo} onChange={e => setDescTipo(e.target.value as 'percentual' | 'valor')} data-testid="desc-item-tipo">
+                      <option value="percentual">Em %</option>
+                      <option value="valor">Em R$</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelCls}>{descTipo === 'percentual' ? 'Desconto (%)' : 'Desconto (R$)'}</label>
+                    <input className={inputCls} type="number" step="0.01" min="0" placeholder="0" value={descValor} onChange={e => setDescValor(e.target.value)} data-testid="desc-item-valor" />
+                  </div>
+                  <div>
+                    <label className={labelCls}>Motivo (interno)</label>
+                    <input className={inputCls} placeholder="Ex: condição especial" value={descMotivo} onChange={e => setDescMotivo(e.target.value)} data-testid="desc-item-motivo" />
+                  </div>
+                </div>
+              </div>
               {(() => {
                 const matPreview = usarComposicao ? somaComposicao() : parseFloat(fItem.preco_material || '0')
+                const prevItem = { preco_material: matPreview, preco_mao_obra: parseFloat(fItem.preco_mao_obra || '0'), quantidade: parseFloat(fItem.quantidade || '1'), lucro_percentual: parseFloat(fItem.lucro_percentual || '0'), imposto_percentual: parseFloat(fItem.imposto_percentual || '0'), desconto_item_tipo: descTipo, desconto_item_valor: parseFloat(descValor || '0') || 0 }
+                const dPrev = descontoItem(prevItem), bPrev = brutoItem(prevItem), lPrev = liquidoItem(prevItem), cPrev = custoItem(prevItem)
                 return (fItem.quantidade && (matPreview || fItem.preco_mao_obra)) ? (
                   <div className="bg-surface-container-low rounded-lg p-3.5 mb-4">
                     <div className="text-[11px] text-on-surface-variant mb-2">PREVIEW DO TOTAL</div>
@@ -1860,8 +1923,12 @@ export default function Orcamento() {
                       <div><div className="text-[10px] text-on-surface-variant">MATERIAL</div><div className="font-bold text-primary">{fmt(matPreview * parseFloat(fItem.quantidade||'1'))}</div></div>
                       <div><div className="text-[10px] text-on-surface-variant">MÃO DE OBRA</div><div className="font-bold text-secondary">{fmt(parseFloat(fItem.preco_mao_obra||'0') * parseFloat(fItem.quantidade||'1'))}</div></div>
                       <div><div className="text-[10px] text-on-surface-variant">VALOR UNITÁRIO</div><div className="font-bold text-on-surface">{fmt(calcularValorUnitario(matPreview, parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')))}</div></div>
-                      <div><div className="text-[10px] text-on-surface-variant">TOTAL</div><div className="font-black text-tertiary text-base">{fmt(calcularValorUnitario(matPreview, parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')) * parseFloat(fItem.quantidade||'1'))}</div></div>
+                      {dPrev > 0 && <div><div className="text-[10px] text-on-surface-variant">PREÇO DE TABELA</div><div className="font-bold text-on-surface-variant line-through">{fmt(bPrev)}</div></div>}
+                      {dPrev > 0 && <div><div className="text-[10px] text-on-surface-variant">DESCONTO</div><div className="font-bold text-error" data-testid="prev-desconto">−{fmt(dPrev)}</div></div>}
+                      <div><div className="text-[10px] text-on-surface-variant">TOTAL</div><div className="font-black text-tertiary text-base" data-testid="prev-total">{dPrev > 0 ? fmt(lPrev) : fmt(calcularValorUnitario(matPreview, parseFloat(fItem.preco_mao_obra||'0'), parseFloat(fItem.lucro_percentual||'0'), parseFloat(fItem.imposto_percentual||'0')) * parseFloat(fItem.quantidade||'1'))}</div></div>
                     </div>
+                    {dPrev > 0 && lPrev < cPrev - 0.005 && <div className="text-[12px] text-error font-semibold mt-2.5" data-testid="aviso-abaixo-custo">⚠️ Com este desconto o item fica abaixo do custo (material + mão de obra = {fmt(cPrev)}).</div>}
+                    {dPrev > 0 && lPrev >= cPrev - 0.005 && <div className="text-[11px] text-on-surface-variant mt-2.5">Sobra sobre o custo direto (material + mão de obra {fmt(cPrev)}): <strong className="text-on-surface">{fmt(lPrev - cPrev)}</strong> para lucro e imposto.</div>}
                   </div>
                 ) : null
               })()}

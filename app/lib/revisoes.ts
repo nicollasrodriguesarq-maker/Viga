@@ -34,7 +34,7 @@ export function compararRevisoes(itensDe: any[], ambDe: any[], itensPara: any[],
   }
   const A = indexar(itensDe, ambDe)
   const Bm = indexar(itensPara, ambPara)
-  const campos: [string, string][] = [['quantidade', 'Quantidade'], ['unidade', 'Unidade'], ['preco_material', 'Material (unit.)'], ['preco_mao_obra', 'Mão de obra (unit.)'], ['lucro_percentual', 'Lucro %'], ['imposto_percentual', 'Imposto %'], ['total_item', 'Total do item']]
+  const campos: [string, string][] = [['quantidade', 'Quantidade'], ['unidade', 'Unidade'], ['preco_material', 'Material (unit.)'], ['preco_mao_obra', 'Mão de obra (unit.)'], ['lucro_percentual', 'Lucro %'], ['imposto_percentual', 'Imposto %'], ['desconto_item_tipo', 'Tipo do desconto no item'], ['desconto_item_valor', 'Desconto no item'], ['total_item', 'Total do item']]
   const out: ResultadoDiff = {
     adicionados: [], removidos: [], alterados: [],
     totalDe: r2(itensDe.reduce((a, i) => a + totalItem(i), 0)),
@@ -44,9 +44,10 @@ export function compararRevisoes(itensDe: any[], ambDe: any[], itensPara: any[],
     const a = A.get(k)
     const base = { chave: k, ambiente: b.ambiente, servico: b.item.servico, descricao: b.item.descricao || '' }
     if (!a) { out.adicionados.push({ ...base, para: b.item }); continue }
-    const iguais = (c: string, x: any, y: any) => c === 'unidade' ? String(x ?? '') === String(y ?? '') : Math.abs(num(x) - num(y)) < 0.005
+    const iguais = (c: string, x: any, y: any) => (c === 'unidade' || c === 'desconto_item_tipo') ? String(x ?? '') === String(y ?? '') : Math.abs(num(x) - num(y)) < 0.005
     const mudancas = campos
       .filter(([c]) => !iguais(c, a.item[c], b.item[c]))
+      .filter(([c]) => !(c === 'desconto_item_tipo' && num(a.item.desconto_item_valor) === 0 && num(b.item.desconto_item_valor) === 0))
       .map(([c, rot]) => ({ campo: rot, de: a.item[c], para: b.item[c] }))
     if (mudancas.length) out.alterados.push({ ...base, de: a.item, para: b.item, mudancas })
   }

@@ -5,6 +5,7 @@ import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
 import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
 import { CLIENTE_CRM_VAZIO, leadDoLevantamento, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../lib/clienteCrm'
+import { liquidoItem } from '../lib/orcamentoCalc'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -399,9 +400,9 @@ export default function Levantamento() {
   }
 
   // ── Sincronia automática Levantamento → Orçamento ────────────
+  // total do item do orçamento já com o desconto próprio do item (o desconto vive no orçamento e a sincronia não o apaga)
   function calcularTotalItemOrc(item: any) {
-    const valorUnit = (parseFloat(item.preco_material||0) + parseFloat(item.preco_mao_obra||0)) * (1 + parseFloat(item.lucro_percentual||0)/100) * (1 + parseFloat(item.imposto_percentual||0)/100)
-    return valorUnit * parseFloat(item.quantidade||1)
+    return liquidoItem(item)
   }
   async function atualizarTotaisOrcamento(orcId: string) {
     const todosItens = await buscar('orcamento_itens', '?orcamento_id=eq.' + orcId)
@@ -467,8 +468,8 @@ export default function Levantamento() {
       banco_item_id: item.banco_item_id || null,
       levantamento_item_id: item.id,
     }
-    const totalItem = calcularTotalItemOrc(dadosOI)
     const existentesItem = await buscar('orcamento_itens', `?levantamento_item_id=eq.${item.id}`)
+    const totalItem = calcularTotalItemOrc({ ...dadosOI, desconto_item_tipo: existentesItem[0]?.desconto_item_tipo, desconto_item_valor: existentesItem[0]?.desconto_item_valor })
     if (existentesItem[0]) { await editar('orcamento_itens', existentesItem[0].id, { ...dadosOI, total_item: totalItem }) }
     else { await criar('orcamento_itens', { ...dadosOI, total_item: totalItem }) }
     await atualizarTotaisOrcamento(orcId)

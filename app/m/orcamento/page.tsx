@@ -3,6 +3,7 @@ import { useEffect, useState, Fragment } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 import { rotuloRev, codigoComRev } from '../../lib/revisoes'
+import { brutoItem, descontoItem, liquidoItem, pctDescontoItem, fatorDesconto, tipoDescontoItem } from '../../lib/orcamentoCalc'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -29,13 +30,13 @@ function ordenarPorCategoria(itensList: any[]) {
 function calcularValorUnitario(precoMaterial: number, precoMaoObra: number, lucroPct: number, impostoPct: number) {
   return (precoMaterial + precoMaoObra) * (1 + (lucroPct || 0) / 100) * (1 + (impostoPct || 0) / 100)
 }
+// Total do item já com o desconto próprio do item.
 function calcularTotalItem(item: any) {
-  const valorUnit = calcularValorUnitario(parseFloat(item.preco_material || 0), parseFloat(item.preco_mao_obra || 0), parseFloat(item.lucro_percentual || 0), parseFloat(item.imposto_percentual || 0))
-  return valorUnit * parseFloat(item.quantidade || 1)
+  return liquidoItem(item)
 }
-function valoresProposta(item: any) {
+function valoresProposta(item: any, embutirDesconto = false) {
   const qtd = parseFloat(item.quantidade || 1)
-  const mult = (1 + (parseFloat(item.lucro_percentual || 0)) / 100) * (1 + (parseFloat(item.imposto_percentual || 0)) / 100)
+  const mult = (1 + (parseFloat(item.lucro_percentual || 0)) / 100) * (1 + (parseFloat(item.imposto_percentual || 0)) / 100) * (embutirDesconto ? fatorDesconto(item) : 1)
   return { material: parseFloat(item.preco_material || 0) * qtd * mult, maoObra: parseFloat(item.preco_mao_obra || 0) * qtd * mult }
 }
 
@@ -231,7 +232,10 @@ export default function OrcamentoMobile() {
       ['/proposta/marajoara-1.jpg', '/proposta/marajoara-2.jpg', '/proposta/marajoara-3.jpg', '/proposta/marajoara-4.jpg'], origin, cfg)
   }
 
+  const rotuloDesconto = (item: any) => (tipoDescontoItem(item) === 'percentual' ? fmtN(parseFloat(item.desconto_item_valor || 0)) + '%' : fmtN(pctDescontoItem(item)) + '%')
+
   function paginaInvestimentoInverso(itensOrc: any[], ambientesOrc: any[], codigo: string, cfg: any) {
+    const mostrarDesc = detalhe.mostrar_desc_itens !== false
     const ambientesOrdenados = [...ambientesOrc].sort((a, b) => (a.ordem ?? 0) - (b.ordem ?? 0))
     const idsAmbientesValidos = new Set(ambientesOrc.map(a => a.id))
     const semAmbiente = itensOrc.filter(i => !i.ambiente_id || !idsAmbientesValidos.has(i.ambiente_id))
@@ -243,6 +247,8 @@ export default function OrcamentoMobile() {
       const headerAmbiente = `<tr style="break-inside:avoid"><td colspan="5" style="padding:10px 16px;background:#1A1A1A;border-top:2px solid #fff;color:#fff;font-weight:700;font-size:12px;letter-spacing:0.08em;text-transform:uppercase">🏠 ${grupo.nome}</td></tr>`
       let categoriaAnterior: string | null = null
       const itensHtml = grupo.itens.map(item => {
+        const dI = descontoItem(item)
+        const qtdI = parseFloat(item.quantidade || 1) || 1
         const categoriaAtual = item.categoria || 'Outros'
         const headerCategoria = categoriaAtual !== categoriaAnterior
           ? `<tr style="break-inside:avoid"><td colspan="5" style="padding:8px 16px;background:#F5F4F1;color:#1A1A1A;font-weight:700;font-size:11px;letter-spacing:0.05em;text-transform:uppercase">${categoriaAtual}</td></tr>`
@@ -253,13 +259,17 @@ export default function OrcamentoMobile() {
         <td style="padding:12px 16px;border-bottom:1px solid #333;color:#eee">${item.servico}${item.descricao ? `<br/><span style="color:#999;font-size:11px">${item.descricao}</span>` : ''}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${item.unidade}</td>
         <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:center;color:#ccc">${fmtN(parseFloat(item.quantidade || 1))}</td>
-        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;color:#ccc">${fmt(calcularValorUnitario(parseFloat(item.preco_material||0), parseFloat(item.preco_mao_obra||0), parseFloat(item.lucro_percentual||0), parseFloat(item.imposto_percentual||0)))}</td>
-        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;font-weight:700;color:#fff">${fmt(calcularTotalItem(item))}</td>
-      </tr>`
+        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;color:#ccc">${fmt(dI > 0 && !mostrarDesc ? calcularTotalItem(item) / qtdI : calcularValorUnitario(parseFloat(item.preco_material||0), parseFloat(item.preco_mao_obra||0), parseFloat(item.lucro_percentual||0), parseFloat(item.imposto_percentual||0)))}</td>
+        <td style="padding:12px 16px;border-bottom:1px solid #333;text-align:right;font-weight:700;color:#fff">${fmt(dI > 0 && mostrarDesc ? brutoItem(item) : calcularTotalItem(item))}</td>
+      </tr>${dI > 0 && mostrarDesc ? `<tr style="break-inside:avoid"><td colspan="4" style="padding:4px 16px 10px;border-bottom:1px solid #333;text-align:right;color:#f4a09a;font-size:11px">Desconto especial neste item (${rotuloDesconto(item)})</td><td style="padding:4px 16px 10px;border-bottom:1px solid #333;text-align:right;color:#f4a09a;font-weight:700">- ${fmt(dI)}</td></tr>` : ''}`
       }).join('')
       return headerAmbiente + itensHtml
     }).join('')
     const totalGeral = itensOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
+    const descGlobalPct = parseFloat(detalhe.desconto_percentual || 0) || 0
+    const descGlobal = totalGeral * descGlobalPct / 100
+    const totalFinalProposta = totalGeral - descGlobal
+    const linhasResumo = descGlobal > 0 ? `<div style="display:flex;justify-content:space-between;gap:40px;font-size:13px;color:#ccc;margin-bottom:4px"><span>Subtotal</span><span>${fmt(totalGeral)}</span></div><div style="display:flex;justify-content:space-between;gap:40px;font-size:13px;color:#f4a09a;margin-bottom:8px"><span>Desconto (${fmtN(descGlobalPct)}%)</span><span>- ${fmt(descGlobal)}</span></div>` : ''
     return `
     <div class="page-flow" style="background:#1A1A1A;color:#fff;padding:36px 40px">
       <div style="display:flex;justify-content:space-between;font-weight:700;letter-spacing:0.05em;border-bottom:1px solid #333;padding-bottom:14px;margin-bottom:22px">
@@ -278,10 +288,11 @@ export default function OrcamentoMobile() {
         </tr></thead>
         <tbody>${rows || `<tr><td colspan="5" style="padding:24px;text-align:center;color:#999">Nenhum item cadastrado ainda.</td></tr>`}</tbody>
       </table>
-      <div style="display:flex;justify-content:flex-end;margin-top:18px;break-inside:avoid">
+      <div style="display:flex;flex-direction:column;align-items:flex-end;margin-top:18px;break-inside:avoid">
+        ${linhasResumo}
         <div style="background:#fff;color:#1A1A1A;padding:14px 28px;display:flex;align-items:center;gap:18px">
           <span style="font-size:12px;letter-spacing:0.1em;color:#666">TOTAL GERAL</span>
-          <span style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:22px">${fmt(totalGeral)}</span>
+          <span style="font-family:Cambria,Georgia,serif;font-weight:700;font-size:22px">${fmt(totalFinalProposta)}</span>
         </div>
       </div>
     </div>`
@@ -430,21 +441,24 @@ export default function OrcamentoMobile() {
   function gerarPDF(orc: any) {
     const ambsOrc = ambientes.filter(a => a.orcamento_id === orc.id).sort((a, b) => a.ordem - b.ordem)
     const itensDoOrc = itens.filter(i => i.orcamento_id === orc.id)
-    const totalMat = itensDoOrc.reduce((a, i) => a + valoresProposta(i).material, 0)
-    const totalMao = itensDoOrc.reduce((a, i) => a + valoresProposta(i).maoObra, 0)
+    const totalMat = itensDoOrc.reduce((a, i) => a + valoresProposta(i, orc.mostrar_desc_itens === false).material, 0)
+    const totalMao = itensDoOrc.reduce((a, i) => a + valoresProposta(i, orc.mostrar_desc_itens === false).maoObra, 0)
     const totalGeral = itensDoOrc.reduce((a, i) => a + calcularTotalItem(i), 0)
     const descontoPct = parseFloat(orc.desconto_percentual || 0)
     const desconto = totalGeral * descontoPct / 100
     const totalFinal = totalGeral - desconto
+    const mostrarDesc = orc.mostrar_desc_itens !== false
+    const descItensTotal = itensDoOrc.reduce((a, i) => a + descontoItem(i), 0)
 
     const ambContent = ambsOrc.map(amb => {
       const itensAmb = ordenarPorCategoria(itens.filter(i => i.ambiente_id === amb.id))
       if (itensAmb.length === 0) return ''
-      const matAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).material, 0)
-      const maoAmb = itensAmb.reduce((a, i) => a + valoresProposta(i).maoObra, 0)
+      const matAmb = itensAmb.reduce((a, i) => a + valoresProposta(i, !mostrarDesc).material, 0)
+      const maoAmb = itensAmb.reduce((a, i) => a + valoresProposta(i, !mostrarDesc).maoObra, 0)
       const totalAmb = itensAmb.reduce((a, i) => a + calcularTotalItem(i), 0)
       const rows = itensAmb.map((item, idx) => {
-        const { material: mat, maoObra: mao } = valoresProposta(item)
+        const { material: mat, maoObra: mao } = valoresProposta(item, !mostrarDesc)
+        const dI = descontoItem(item)
         const categoriaAtual = item.categoria || 'Outros'
         const categoriaAnterior = idx > 0 ? (itensAmb[idx - 1].categoria || 'Outros') : null
         const headerCategoria = categoriaAtual !== categoriaAnterior
@@ -455,8 +469,8 @@ export default function OrcamentoMobile() {
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:center">${fmtN(parseFloat(item.quantidade || 1))} ${item.unidade}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">${fmt(mat)}</td>
           <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right">${fmt(mao)}</td>
-          <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(calcularTotalItem(item))}</td>
-        </tr>`
+          <td style="padding:8px 10px;border-bottom:1px solid #eee;text-align:right;font-weight:600">${fmt(dI > 0 && mostrarDesc ? brutoItem(item) : calcularTotalItem(item))}</td>
+        </tr>${dI > 0 && mostrarDesc ? `<tr><td colspan="4" style="padding:3px 10px 8px;text-align:right;color:#c0392b;font-size:12px;border-bottom:1px solid #eee">Desconto especial neste item (${rotuloDesconto(item)})</td><td style="padding:3px 10px 8px;text-align:right;color:#c0392b;font-weight:600;border-bottom:1px solid #eee">- ${fmt(dI)}</td></tr>` : ''}`
       }).join('')
       return `
         <div style="margin-bottom:24px">
@@ -515,6 +529,7 @@ export default function OrcamentoMobile() {
         <table style="width:100%;border-collapse:collapse">
           <tr><td style="padding:10px 16px">Total Material</td><td style="padding:10px 16px;text-align:right;font-weight:600">${fmt(totalMat)}</td></tr>
           <tr style="background:#f9f9f9"><td style="padding:10px 16px">Total Mão de Obra</td><td style="padding:10px 16px;text-align:right;font-weight:600">${fmt(totalMao)}</td></tr>
+          ${descItensTotal > 0 && mostrarDesc ? '<tr><td style="padding:10px 16px">Descontos especiais nos itens</td><td style="padding:10px 16px;text-align:right;color:#e74c3c;font-weight:600">- ' + fmt(descItensTotal) + '</td></tr>' : ''}
           ${desconto > 0 ? '<tr><td style="padding:10px 16px">Desconto (' + fmtN(descontoPct) + '%)</td><td style="padding:10px 16px;text-align:right;color:#e74c3c;font-weight:600">- ' + fmt(desconto) + '</td></tr>' : ''}
           <tr style="background:#1B3A5C;color:white">
             <td style="padding:14px 16px;font-size:16px;font-weight:700">TOTAL GERAL</td>
@@ -641,7 +656,7 @@ export default function OrcamentoMobile() {
                             {item.descricao && <div className="text-[11px] text-on-surface-variant">{item.descricao}</div>}
                             <div className="flex justify-between text-[11px] mt-1">
                               <span className="text-on-surface-variant">{fmtN(parseFloat(item.quantidade || 1))} {item.unidade}</span>
-                              <span className="font-bold text-primary">{fmt(calcularTotalItem(item))}</span>
+                              <span className="font-bold text-primary">{descontoItem(item) > 0 && <span className="text-[10px] font-normal text-on-surface-variant line-through mr-1.5">{fmt(brutoItem(item))}</span>}{fmt(calcularTotalItem(item))}{descontoItem(item) > 0 && <span className="text-[10px] font-semibold text-error ml-1.5">−{rotuloDesconto(item)}</span>}</span>
                             </div>
                           </div>
                         </Fragment>

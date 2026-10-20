@@ -144,7 +144,7 @@ export default function CRM() {
       buscar('crm_leads', '?order=created_at.desc'),
       buscar('clientes', '?order=nome.asc'),
       buscar('usuarios', '?select=id,nome,email,role&order=nome'),
-      buscar('orcamentos', '?select=id,codigo,cliente_nome,total_geral,condicao_pagamento,validade_dias,crm_lead_id&order=created_at.desc'),
+      buscar('orcamentos', '?select=id,codigo,cliente_nome,total_geral,condicao_pagamento,validade_dias,crm_lead_id&revisao_de=is.null&order=created_at.desc'),
       buscar('levantamentos', '?select=id,codigo,nome,cliente,cliente_nome&order=created_at.desc'),
       buscar('cliente_contatos', '?order=principal.desc,nome.asc'),
     ])

@@ -159,10 +159,10 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
 
   // ── Orçamentos enviados com validade vencida ──
   if (temAcessoModulo(perm, 'orcamento')) {
-    let orcs = await get('orcamentos', '?status=eq.enviado&select=id,codigo,cliente_nome,created_at,validade_dias,criado_por')
+    let orcs = await get('orcamentos', '?status=eq.enviado&revisao_de=is.null&select=id,codigo,cliente_nome,created_at,revisao_data,validade_dias,criado_por')
     if (!ehAdmin) orcs = orcs.filter((o: any) => !o.criado_por || o.criado_por === meuId)
     for (const o of orcs) {
-      const envio = dataLocalISO(new Date(o.created_at))
+      const envio = dataLocalISO(new Date(o.revisao_data || o.created_at))
       const validade = somarDias(envio, Number(o.validade_dias) || 30)
       if (validade >= hoje) continue
       const dias = diasEntre(validade, hoje)

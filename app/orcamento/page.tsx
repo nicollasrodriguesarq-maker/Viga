@@ -4,6 +4,7 @@ import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
 import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
+import { rotuloRev, codigoBase, codigoComRev, compararRevisoes } from '../lib/revisoes'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, type ValorClienteCrm } from '../lib/clienteCrm'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -24,6 +25,24 @@ async function editar(tabela: string, id: string, dados: object): Promise<boolea
 }
 async function remover(tabela: string, id: string) {
   try { await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'DELETE', headers: H }) } catch {}
+}
+
+// Gravações que NÃO engolem erro — usadas na criação de revisões, que precisa ser tudo-ou-nada.
+async function gravar(tabela: string, dados: object): Promise<any> {
+  const r = await fetch(BASE + '/' + tabela, { method: 'POST', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(dados) })
+  const d = await r.json().catch(() => null)
+  if (!r.ok) throw new Error(d?.message || ('erro ' + r.status))
+  return Array.isArray(d) ? d[0] : d
+}
+async function gravarVarios(tabela: string, dados: object[]): Promise<any[]> {
+  const r = await fetch(BASE + '/' + tabela, { method: 'POST', headers: { ...H, 'Prefer': 'return=representation' }, body: JSON.stringify(dados) })
+  const d = await r.json().catch(() => null)
+  if (!r.ok || !Array.isArray(d)) throw new Error(d?.message || ('erro ' + r.status))
+  return d
+}
+async function gravarEdicao(tabela: string, id: string, dados: object) {
+  const r = await fetch(BASE + '/' + tabela + '?id=eq.' + id, { method: 'PATCH', headers: H, body: JSON.stringify(dados) })
+  if (!r.ok) { const d = await r.json().catch(() => null); throw new Error(d?.message || ('erro ' + r.status)) }
 }
 
 const STATUS_ORC: Record<string, string> = {
@@ -126,6 +145,9 @@ export default function Orcamento() {
   const [fTransformar, setFTransformar] = useState({ data_inicio: '', dias_trabalho: 'seg_sex', periodo_trabalho: 'comercial' })
   const [regimeProposta, setRegimeProposta] = useState('seg_sex')
   const [observacaoProposta, setObservacaoProposta] = useState('')
+  const [motivoRevisao, setMotivoRevisao] = useState('')
+  const [criandoRev, setCriandoRev] = useState(false)
+  const [cmp, setCmp] = useState<{ de: string; para: string }>({ de: '', para: '' })
 
   useEffect(() => {
     if (!localStorage.getItem('viga_token')) { window.location.href = '/'; return }
@@ -239,6 +261,7 @@ export default function Orcamento() {
     return solicitacoes.filter(s => s.orcamento_id === orcId)
   }
   function podeEditarOrcamento(orc: any) {
+    if (orc.revisao_de) return false // revisão anterior: só leitura
     if (!meuId || souAdmin || orc.criado_por == null || orc.criado_por === meuId) return true
     return solicitacoesDoOrcamento(orc.id).some(s => s.solicitante_id === meuId && s.status === 'aprovado')
   }
@@ -259,8 +282,66 @@ export default function Orcamento() {
     await editar('orcamento_solicitacoes', id, { status, respondido_em: new Date().toISOString() })
     carregar()
   }
+  // ── Revisões (REV00, REV01...) ────────────────────────────────
+  function revisoesAnteriores(orcId: string) {
+    return orcamentos.filter(o => o.revisao_de === orcId).sort((a, b) => (a.revisao || 0) - (b.revisao || 0))
+  }
+  function totalFinalDe(orc: any) {
+    const soma = itens.filter(i => i.orcamento_id === orc.id).reduce((a, i) => a + calcularTotalItem(i), 0)
+    return soma - soma * (parseFloat(orc.desconto_percentual || 0) || 0) / 100
+  }
+  // Guarda o estado atual como cópia somente-leitura (REVnn) e abre a próxima revisão para edição.
+  async function criarRevisao() {
+    if (!detalhe || criandoRev) return
+    const motivo = motivoRevisao.trim()
+    if (!motivo) return alert('Descreva o que vai mudar nesta revisão (ex.: "Cliente pediu troca do piso da sala")')
+    setCriandoRev(true)
+    let snapId: string | null = null
+    try {
+      const [orcRows, ambs, its] = await Promise.all([
+        buscar('orcamentos', '?id=eq.' + detalhe.id),
+        buscar('orcamento_ambientes', '?orcamento_id=eq.' + detalhe.id + '&order=ordem'),
+        buscar('orcamento_itens', '?orcamento_id=eq.' + detalhe.id + '&order=created_at'),
+      ])
+      const orc = orcRows[0]
+      if (!orc) throw new Error('Orçamento não encontrado')
+      const comps = its.length ? await buscar('orcamento_itens_composicao', '?orcamento_item_id=in.(' + its.map((i: any) => i.id).join(',') + ')&order=created_at') : []
+      const { id: _id, created_at: _criado, ...resto } = orc
+      const atual = Number(orc.revisao) || 0
+      const snap = await gravar('orcamentos', {
+        ...resto, codigo: codigoBase(orc.codigo) + '-' + rotuloRev(atual), revisao: atual, revisao_de: orc.id,
+        revisao_data: orc.revisao_data || orc.created_at, levantamento_id: null, obra_id: null, crm_lead_id: null,
+      })
+      snapId = snap.id
+      const mapaAmb = new Map<string, string>()
+      for (const a of ambs) {
+        const n = await gravar('orcamento_ambientes', { orcamento_id: snap.id, nome: a.nome, ordem: a.ordem, levantamento_ambiente_id: null })
+        mapaAmb.set(a.id, n.id)
+      }
+      const novos = its.length ? await gravarVarios('orcamento_itens', its.map(({ id: _i, created_at: _c, ...r }: any) => ({
+        ...r, orcamento_id: snap.id, ambiente_id: r.ambiente_id ? (mapaAmb.get(r.ambiente_id) || null) : null, banco_item_id: null, levantamento_item_id: null,
+      }))) : []
+      if (comps.length) {
+        const mapaItem = new Map<string, string>(its.map((i: any, idx: number) => [i.id, novos[idx].id]))
+        await gravarVarios('orcamento_itens_composicao', comps.map(({ id: _i, created_at: _c, ...r }: any) => ({ ...r, orcamento_item_id: mapaItem.get(r.orcamento_item_id) })))
+      }
+      // a proposta vigente passa a ser a próxima revisão, de volta a rascunho (precisa ser reenviada)
+      await gravarEdicao('orcamentos', orc.id, { revisao: atual + 1, revisao_motivo: motivo, revisao_data: new Date().toISOString(), status: 'rascunho' })
+      snapId = null
+      setJanela(null); setMotivoRevisao('')
+      const [o, a, it] = await Promise.all([buscar('orcamentos', '?order=created_at.desc'), buscar('orcamento_ambientes', '?order=ordem'), buscar('orcamento_itens', '?order=created_at')])
+      setOrcamentos(o); setAmbientes(a); setItens(it)
+      const novo = o.find((x: any) => x.id === orc.id)
+      if (novo) { setDetalhe(novo); setAmbienteAtivo(null); setAbaDetalhe('revisoes') }
+    } catch (e: any) {
+      if (snapId) await remover('orcamentos', snapId) // desfaz a cópia incompleta
+      alert('Não foi possível criar a revisão: ' + (e?.message || 'tente novamente') + '. Nada foi alterado na proposta.')
+    } finally { setCriandoRev(false) }
+  }
+
   async function excluirOrcamento(orc: any) {
-    if (!confirm(`Excluir o orçamento ${orc.codigo} (${orc.cliente_nome})? Esta ação não pode ser desfeita.`)) return
+    const nRevs = revisoesAnteriores(orc.id).length
+    if (!confirm(`Excluir o orçamento ${orc.codigo} (${orc.cliente_nome})${nRevs > 0 ? ' e as ' + nRevs + ' revisão(ões) anterior(es)' : ''}? Esta ação não pode ser desfeita.`)) return
     await remover('orcamentos', orc.id)
     carregar()
   }
@@ -663,7 +744,7 @@ export default function Orcamento() {
     }).join('')
 
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-    <title>Proposta ${detalhe.codigo} — Inverso</title>
+    <title>Proposta ${codigoComRev(detalhe)} — Inverso</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family: Arial, sans-serif; color: #333; font-size: 13px; }
@@ -677,7 +758,7 @@ export default function Orcamento() {
           <div style="font-size:12px;color:#666;margin-top:2px">Construção e Reforma</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:20px;font-weight:700;color:#1B3A5C">${detalhe.codigo}</div>
+          <div style="font-size:20px;font-weight:700;color:#1B3A5C">${codigoComRev(detalhe)}</div>
           <div style="font-size:12px;color:#666;margin-top:4px">Data: ${new Date().toLocaleDateString('pt-BR')}</div>
           <div style="font-size:12px;color:#666">Validade: ${detalhe.validade_dias || 30} dias</div>
         </div>
@@ -739,7 +820,7 @@ export default function Orcamento() {
   // Fontes Cambria/Calibri (nativas do Windows, sem depender de web font) e
   // paleta extraída do material de marketing da própria Inverso.
   // ════════════════════════════════════════════════════════════════════
-  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string, responsavel?: string | null) {
+  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string, responsavel?: string | null, revisao?: string | null) {
     return `
     <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
       <div style="width:55%;padding:60px 56px;display:flex;flex-direction:column;justify-content:center">
@@ -752,6 +833,7 @@ export default function Orcamento() {
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">CLIENTE</td><td style="font-weight:700;padding:5px 0">${cliente}</td></tr>
           ${responsavel ? `<tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">A/C</td><td style="font-weight:700;padding:5px 0">${responsavel}</td></tr>` : ''}
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">LOCAL</td><td style="font-weight:700;padding:5px 0">${local || '—'}</td></tr>
+          ${revisao ? `<tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">REVISÃO</td><td style="font-weight:700;padding:5px 0">${revisao}</td></tr>` : ''}
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">DATA</td><td style="font-weight:700;padding:5px 0">${dataStr}</td></tr>
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">VALIDADE</td><td style="font-weight:700;padding:5px 0">${validadeDias} dias</td></tr>
         </table>
@@ -1038,21 +1120,22 @@ export default function Orcamento() {
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =
-      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin, detalhe.contato_nome) +
+      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin, detalhe.contato_nome, rotuloRev(detalhe.revisao)) +
       paginaHistoriaInversa(cfg) +
       paginaDivisorPortfolio(cfg) +
       paginasPortfolioInverso(origin, cfg) +
       paginasLev +
-      paginaInvestimentoInverso(itensDoOrc, ambientesDoOrc, detalhe.codigo, cfg) +
+      paginaInvestimentoInverso(itensDoOrc, ambientesDoOrc, codigoComRev(detalhe), cfg) +
       paginaCondicoesInverso(prazoDias, detalhe.condicao_pagamento, parseInt(detalhe.validade_dias || '30'), cfg, observacaoProposta) +
       paginaFechamentoInverso(cfg)
 
-    const html = envolverPropostaInversa(`Proposta ${detalhe.codigo} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
+    const html = envolverPropostaInversa(`Proposta ${codigoComRev(detalhe)} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
     const win = window.open('', '_blank')
     if (win) { win.document.write(html); win.document.close() }
   }
 
-  const lista = orcamentos.filter(o =>
+  const vigentes = orcamentos.filter(o => !o.revisao_de)
+  const lista = vigentes.filter(o =>
     (filtro === 'todos' || o.status === filtro) &&
     (filtroExecucao === 'todos' || (o.tipo_execucao || 'obra') === filtroExecucao) &&
     (!busca || [o.cliente_nome, o.codigo, o.endereco].some(v => v?.toLowerCase().includes(busca.toLowerCase())))
@@ -1214,11 +1297,18 @@ export default function Orcamento() {
             ))}
           </div>
         )}
+        {detalhe.revisao_de && (
+          <div className="bg-tertiary/10 border border-tertiary/30 rounded-xl p-4 mb-lg flex items-center justify-between gap-3 flex-wrap" data-testid="banner-revisao-antiga">
+            <div className="text-sm text-tertiary"><strong>{rotuloRev(detalhe.revisao)} — revisão anterior (somente leitura).</strong> Substituída em {new Date(detalhe.created_at).toLocaleDateString('pt-BR')}{orcamentos.find(o => o.id === detalhe.revisao_de) ? ' pela ' + rotuloRev(orcamentos.find(o => o.id === detalhe.revisao_de)?.revisao) : ''}. Você pode gerar o PDF dela normalmente.</div>
+            <button className={btnEditSmCls} onClick={() => { const v = orcamentos.find(o => o.id === detalhe.revisao_de); if (v) { setDetalhe(v); setAmbienteAtivo(null); setAbaDetalhe('revisoes') } }}>Ir para a revisão vigente →</button>
+          </div>
+        )}
         <div className="flex items-start justify-between gap-4 flex-wrap mb-lg">
           <div>
             <button onClick={() => { setDetalhe(null); setAmbienteAtivo(null) }} className={btnSecondaryCls + ' mb-3'}>← Voltar</button>
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-body-sm text-on-surface-variant font-semibold">{detalhe.codigo}</span>
+              <span className="text-body-sm text-on-surface-variant font-semibold">{codigoBase(detalhe.codigo)}</span>
+              <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full border ${detalhe.revisao_de ? 'bg-tertiary/10 text-tertiary border-tertiary/20' : 'bg-secondary/10 text-secondary border-secondary/20'}`} data-testid="rev-atual">{rotuloRev(detalhe.revisao)}{detalhe.revisao_de ? ' · anterior' : ''}</span>
               <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${EXECUCAO_BADGE[detalhe.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[detalhe.tipo_execucao || 'obra']}</span>
               <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_BADGE[detalhe.status] || STATUS_BADGE.rascunho}`}>{STATUS_ORC[detalhe.status] || detalhe.status}</span>
               {!podeEditar && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20">🔒 Somente leitura</span>}
@@ -1229,7 +1319,7 @@ export default function Orcamento() {
               onSalvar={async (cid, nome) => { const ok = await editar('orcamentos', detalhe.id, { contato_id: cid, contato_nome: nome }); if (!ok) return alert('Não foi possível salvar o responsável. Tente novamente.'); setDetalhe({ ...detalhe, contato_id: cid, contato_nome: nome }) }} />
           </div>
           <div className="flex gap-2 flex-wrap items-start">
-            {podeEditar ? (
+            {detalhe.revisao_de ? null : podeEditar ? (
               <select value={detalhe.status}
                 onChange={async e => {
                   const novoStatus = e.target.value
@@ -1245,6 +1335,7 @@ export default function Orcamento() {
             ) : (
               <span className="text-xs text-on-surface-variant px-3 py-2">Solicitação enviada, aguardando aprovação</span>
             )}
+            {podeEditar && !detalhe.revisao_de && <button className="bg-surface-container-high border border-secondary/40 text-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:bg-secondary/10 transition-all cursor-pointer" onClick={() => { setMotivoRevisao(''); setJanela('revisao') }} data-testid="btn-nova-revisao">📑 Nova revisão (REV{String((Number(detalhe.revisao) || 0) + 1).padStart(2, '0')})</button>}
             <button className="bg-primary-container text-on-primary-container rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={gerarPDF}>🖨️ Gerar Proposta PDF</button>
             <button className="bg-secondary text-on-secondary rounded-lg px-4 py-2.5 text-sm font-bold hover:opacity-90 transition-all cursor-pointer" onClick={abrirRegimeProposta}>📄 Gerar Proposta Completa</button>
             {detalhe.status === 'aprovado' && podeEditar && (
@@ -1276,7 +1367,56 @@ export default function Orcamento() {
           <button className={abaDetalhe === 'itens' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe('itens')}>📋 Itens por Ambiente</button>
           <button className={abaDetalhe === 'banco' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe('banco')}>📦 Banco de Itens</button>
           <button className={abaDetalhe === 'config' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe('config')}>⚙️ Configurações</button>
+          <button className={abaDetalhe === 'revisoes' ? tabActiveCls : tabInactiveCls} onClick={() => setAbaDetalhe('revisoes')} data-testid="aba-revisoes">🕘 Revisões{(revisoesAnteriores(detalhe.revisao_de || detalhe.id).length > 0) ? ' (' + (revisoesAnteriores(detalhe.revisao_de || detalhe.id).length + 1) + ')' : ''}</button>
         </div>
+
+        {abaDetalhe === 'revisoes' && (() => {
+          const vigente = detalhe.revisao_de ? orcamentos.find(o => o.id === detalhe.revisao_de) : detalhe
+          if (!vigente) return null
+          const todas = [...revisoesAnteriores(vigente.id), vigente]
+          return (
+            <div className={sectionCls} data-testid="painel-revisoes">
+              <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
+                <div>
+                  <div className="text-sm font-bold text-on-surface">🕘 Histórico de revisões — {codigoBase(vigente.codigo)}</div>
+                  <div className="text-body-sm text-on-surface-variant">Cada revisão guarda a proposta como estava. A vigente (a última) é a que você edita e envia.</div>
+                </div>
+                <div className="flex gap-2">
+                  {todas.length > 1 && <button className={btnSecondaryCls} onClick={() => { setCmp({ de: todas[todas.length - 2].id, para: vigente.id }); setJanela('comparar') }} data-testid="btn-comparar">⇄ Comparar revisões</button>}
+                  {podeEditar && !detalhe.revisao_de && <button className={btnPrimaryCls} onClick={() => { setMotivoRevisao(''); setJanela('revisao') }}>📑 Nova revisão</button>}
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead><tr className="border-b border-outline-variant">
+                    {['Revisão', 'Período', 'Status', 'Total final', 'Variação', 'O que mudou', ''].map(h => <th key={h} className="text-left px-3 py-2 text-[11px] text-on-surface-variant uppercase bg-surface-container-high whitespace-nowrap">{h}</th>)}
+                  </tr></thead>
+                  <tbody>
+                    {todas.map((r, idx) => {
+                      const tf = totalFinalDe(r)
+                      const ant = idx > 0 ? totalFinalDe(todas[idx - 1]) : null
+                      const dif = ant != null ? tf - ant : null
+                      const vig = r.id === vigente.id
+                      const ini = new Date(r.revisao_data || r.created_at).toLocaleDateString('pt-BR')
+                      const fim = vig ? 'hoje' : new Date(r.created_at).toLocaleDateString('pt-BR')
+                      return (
+                        <tr key={r.id} className={`border-b border-outline-variant ${r.id === detalhe.id ? 'bg-primary/5' : ''}`} data-testid="linha-revisao">
+                          <td className="px-3 py-2.5 font-bold text-on-surface whitespace-nowrap">{rotuloRev(r.revisao)}{vig && <span className="ml-2 text-[10px] font-bold px-2 py-0.5 rounded-full bg-primary/15 text-primary">VIGENTE</span>}</td>
+                          <td className="px-3 py-2.5 text-on-surface-variant text-xs whitespace-nowrap">{ini} → {fim}</td>
+                          <td className="px-3 py-2.5"><span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_BADGE[r.status] || STATUS_BADGE.rascunho}`}>{STATUS_ORC[r.status] || r.status}</span></td>
+                          <td className="px-3 py-2.5 font-bold text-primary-container whitespace-nowrap">{fmt(tf)}</td>
+                          <td className={`px-3 py-2.5 text-xs font-semibold whitespace-nowrap ${dif == null ? 'text-on-surface-variant' : dif > 0.005 ? 'text-error' : dif < -0.005 ? 'text-primary-container' : 'text-on-surface-variant'}`}>{dif == null ? '—' : (dif > 0 ? '+' : '') + fmt(dif)}</td>
+                          <td className="px-3 py-2.5 text-on-surface-variant text-xs max-w-[320px]">{r.revisao > 0 || r.revisao_motivo ? (r.revisao_motivo || '—') : 'Proposta inicial'}</td>
+                          <td className="px-3 py-2.5">{r.id === detalhe.id ? <span className="text-[11px] text-on-surface-variant">aberta</span> : <button className={btnEditSmCls} onClick={() => { setDetalhe(r); setAmbienteAtivo(null); setAbaDetalhe('revisoes') }}>Abrir</button>}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        })()}
 
         {abaDetalhe === 'itens' && (
           <div className={sectionCls}>
@@ -1507,6 +1647,72 @@ export default function Orcamento() {
             <button className="w-full bg-secondary text-on-secondary rounded-lg py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer mt-2" onClick={abrirRegimeProposta}>📄 Gerar Proposta Completa</button>
           </div>
         )}
+
+        {janela === 'revisao' && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[520px]" data-testid="modal-revisao">
+              <div className="text-base font-bold text-on-surface mb-1">📑 Nova revisão — {rotuloRev((Number(detalhe.revisao) || 0) + 1)}</div>
+              <div className="text-body-sm text-on-surface-variant mb-4">A proposta como está agora fica guardada como <strong>{rotuloRev(detalhe.revisao)}</strong> (somente leitura, com PDF). Você continua editando a <strong>{rotuloRev((Number(detalhe.revisao) || 0) + 1)}</strong>, que volta para "Rascunho" até ser reenviada.</div>
+              {detalhe.obra_id && <div className="bg-tertiary/10 border border-tertiary/30 rounded-lg px-3.5 py-2.5 text-tertiary text-[12px] mb-4">Esta proposta já virou obra. A nova revisão <strong>não altera</strong> a obra existente.</div>}
+              <label className={labelCls}>O que vai mudar? *</label>
+              <textarea className={inputCls + ' min-h-[90px] resize-y'} placeholder="Ex.: Cliente pediu troca do porcelanato da sala e retirada do item de pintura externa" value={motivoRevisao} onChange={e => setMotivoRevisao(e.target.value)} data-testid="motivo-revisao" autoFocus />
+              <div className="flex gap-2 justify-end mt-5">
+                <button className={btnSecondaryCls} onClick={() => setJanela(null)}>Cancelar</button>
+                <button className={btnPrimaryCls} onClick={criarRevisao} disabled={criandoRev} data-testid="confirmar-revisao">{criandoRev ? 'Criando...' : 'Criar revisão'}</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {janela === 'comparar' && (() => {
+          const vigente = detalhe.revisao_de ? orcamentos.find(o => o.id === detalhe.revisao_de) : detalhe
+          const todas = vigente ? [...revisoesAnteriores(vigente.id), vigente] : []
+          const rDe = todas.find(r => r.id === cmp.de), rPara = todas.find(r => r.id === cmp.para)
+          const dif = rDe && rPara ? compararRevisoes(itens.filter(i => i.orcamento_id === rDe.id), ambientes.filter(a => a.orcamento_id === rDe.id), itens.filter(i => i.orcamento_id === rPara.id), ambientes.filter(a => a.orcamento_id === rPara.id)) : null
+          const tDe = rDe ? totalFinalDe(rDe) : 0, tPara = rPara ? totalFinalDe(rPara) : 0
+          const nome = (i: any) => (i.servico || '') + (i.descricao ? ' — ' + i.descricao : '')
+          return (
+            <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
+              <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[760px] max-h-[92vh] overflow-y-auto" data-testid="modal-comparar">
+                <div className="text-base font-bold text-on-surface mb-4">⇄ Comparar revisões</div>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                  <div><label className={labelCls}>De</label>
+                    <select className={inputCls} value={cmp.de} onChange={e => setCmp({ ...cmp, de: e.target.value })}>{todas.map(r => <option key={r.id} value={r.id}>{rotuloRev(r.revisao)}{r.id === vigente?.id ? ' (vigente)' : ''}</option>)}</select></div>
+                  <div><label className={labelCls}>Para</label>
+                    <select className={inputCls} value={cmp.para} onChange={e => setCmp({ ...cmp, para: e.target.value })}>{todas.map(r => <option key={r.id} value={r.id}>{rotuloRev(r.revisao)}{r.id === vigente?.id ? ' (vigente)' : ''}</option>)}</select></div>
+                </div>
+                {dif && rDe && rPara && (
+                  <>
+                    <div className="grid grid-cols-3 gap-3 mb-4">
+                      <div className="bg-surface-container-high rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">{rotuloRev(rDe.revisao)}</div><div className="font-bold text-on-surface">{fmt(tDe)}</div></div>
+                      <div className="bg-surface-container-high rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">{rotuloRev(rPara.revisao)}</div><div className="font-bold text-on-surface">{fmt(tPara)}</div></div>
+                      <div className="bg-surface-container-high rounded-lg p-3"><div className="text-[10px] text-on-surface-variant uppercase">Diferença</div><div className={`font-bold ${tPara - tDe > 0.005 ? 'text-error' : tPara - tDe < -0.005 ? 'text-primary-container' : 'text-on-surface'}`} data-testid="cmp-diferenca">{(tPara - tDe > 0 ? '+' : '') + fmt(tPara - tDe)}</div></div>
+                    </div>
+                    {dif.adicionados.length + dif.removidos.length + dif.alterados.length === 0 && <div className="text-center py-6 text-on-surface-variant text-sm">Nenhuma diferença nos itens entre essas revisões.</div>}
+                    {dif.adicionados.length > 0 && (
+                      <div className="mb-4" data-testid="cmp-adicionados"><div className="text-sm font-bold text-primary-container mb-2">➕ Itens adicionados ({dif.adicionados.length})</div>
+                        {dif.adicionados.map(d => <div key={d.chave} className="flex justify-between text-sm py-1.5 border-b border-outline-variant/40"><span className="text-on-surface">{nome(d.para)} <span className="text-[11px] text-on-surface-variant">· {d.ambiente}</span></span><span className="font-semibold text-primary-container">+{fmt(parseFloat(d.para.total_item || 0))}</span></div>)}</div>
+                    )}
+                    {dif.removidos.length > 0 && (
+                      <div className="mb-4" data-testid="cmp-removidos"><div className="text-sm font-bold text-error mb-2">➖ Itens removidos ({dif.removidos.length})</div>
+                        {dif.removidos.map(d => <div key={d.chave} className="flex justify-between text-sm py-1.5 border-b border-outline-variant/40"><span className="text-on-surface">{nome(d.de)} <span className="text-[11px] text-on-surface-variant">· {d.ambiente}</span></span><span className="font-semibold text-error">-{fmt(parseFloat(d.de.total_item || 0))}</span></div>)}</div>
+                    )}
+                    {dif.alterados.length > 0 && (
+                      <div className="mb-2" data-testid="cmp-alterados"><div className="text-sm font-bold text-tertiary mb-2">✏️ Itens alterados ({dif.alterados.length})</div>
+                        {dif.alterados.map(d => (
+                          <div key={d.chave} className="py-2 border-b border-outline-variant/40">
+                            <div className="text-sm text-on-surface">{nome(d.para)} <span className="text-[11px] text-on-surface-variant">· {d.ambiente}</span></div>
+                            <div className="text-[12px] text-on-surface-variant mt-0.5">{d.mudancas!.map(m => m.campo + ': ' + (m.campo.includes('Total') || m.campo.includes('unit') ? fmt(parseFloat(m.de || 0)) + ' → ' + fmt(parseFloat(m.para || 0)) : (m.de ?? '—') + ' → ' + (m.para ?? '—'))).join(' · ')}</div>
+                          </div>
+                        ))}</div>
+                    )}
+                  </>
+                )}
+                <div className="flex justify-end mt-5"><button className={btnSecondaryCls} onClick={() => setJanela(null)}>Fechar</button></div>
+              </div>
+            </div>
+          )
+        })()}
 
         {janela === 'item' && (() => {
           const sugestoesFiltradas = fItem.servico.trim().length > 0 && !fItem.banco_item_id
@@ -1865,10 +2071,10 @@ export default function Orcamento() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-lg">
         {[
-          ['Total', orcamentos.length, 'text-primary'],
-          ['Rascunho', orcamentos.filter(o => o.status === 'rascunho').length, 'text-on-surface-variant'],
-          ['Enviados', orcamentos.filter(o => o.status === 'enviado').length, 'text-secondary'],
-          ['Aprovados', orcamentos.filter(o => o.status === 'aprovado').length, 'text-primary-container'],
+          ['Total', vigentes.length, 'text-primary'],
+          ['Rascunho', vigentes.filter(o => o.status === 'rascunho').length, 'text-on-surface-variant'],
+          ['Enviados', vigentes.filter(o => o.status === 'enviado').length, 'text-secondary'],
+          ['Aprovados', vigentes.filter(o => o.status === 'aprovado').length, 'text-primary-container'],
         ].map(([l, v, c]) => (
           <div key={l as string} className={cardCls}>
             <div className="text-[11px] text-on-surface-variant uppercase tracking-widest mb-2">{l}</div>
@@ -1880,8 +2086,8 @@ export default function Orcamento() {
       {lista.length === 0 ? (
         <div className={sectionCls + ' text-center py-16'}>
           <div className="text-5xl mb-4">💼</div>
-          <div className="text-base font-bold text-on-surface mb-4">{orcamentos.length === 0 ? 'Nenhum orçamento ainda' : 'Nenhum resultado'}</div>
-          {orcamentos.length === 0 && <button className={btnPrimaryCls} onClick={() => setJanela('orcamento')}>+ Criar primeiro orçamento</button>}
+          <div className="text-base font-bold text-on-surface mb-4">{vigentes.length === 0 ? 'Nenhum orçamento ainda' : 'Nenhum resultado'}</div>
+          {vigentes.length === 0 && <button className={btnPrimaryCls} onClick={() => setJanela('orcamento')}>+ Criar primeiro orçamento</button>}
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-lg">
@@ -1896,6 +2102,7 @@ export default function Orcamento() {
                   <div>
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="text-body-sm text-on-surface-variant font-semibold">{orc.codigo}</span>
+                      {(orc.revisao || 0) > 0 && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full border bg-secondary/10 text-secondary border-secondary/20" title={orc.revisao_motivo || ''}>{rotuloRev(orc.revisao)}</span>}
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${EXECUCAO_BADGE[orc.tipo_execucao || 'obra']}`}>{EXECUCAO_NOME[orc.tipo_execucao || 'obra']}</span>
                       <span className={`text-[11px] font-semibold px-2.5 py-1 rounded-full border ${STATUS_BADGE[orc.status] || STATUS_BADGE.rascunho}`}>{STATUS_ORC[orc.status] || orc.status}</span>
                       {!podeEditarOrcamento(orc) && <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-on-surface-variant/10 text-on-surface-variant border-on-surface-variant/20">🔒</span>}

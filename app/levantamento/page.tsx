@@ -217,7 +217,7 @@ export default function Levantamento() {
       buscar('levantamento_solicitacoes', '?order=created_at.desc'),
       buscar('banco_itens', '?order=nome'),
       buscar('levantamento_arquivos', '?order=created_at.desc'),
-      buscar('orcamentos', '?select=id,codigo,cliente_nome,levantamento_id,obra_id&order=created_at.desc'),
+      buscar('orcamentos', '?select=id,codigo,cliente_nome,levantamento_id,obra_id&revisao_de=is.null&order=created_at.desc'),
     ])
     setLevantamentos(l); setAmbientes(a); setItens(it); setObras(o); setSolicitacoes(s); setBancoItens(b); setArquivos(arq); setOrcamentos(orc)
     setLoading(false)
@@ -415,7 +415,7 @@ export default function Levantamento() {
     const existentes = await buscar('orcamentos', `?levantamento_id=eq.${detalhe.id}&limit=1`)
     if (existentes[0]) return existentes[0].id
     const ano = new Date().getFullYear()
-    const orcLista = await buscar('orcamentos', '?order=created_at.desc&limit=200')
+    const orcLista = await buscar('orcamentos', '?revisao_de=is.null&order=created_at.desc&limit=200')
     const n = orcLista.filter((o: any) => o.codigo?.startsWith('ORC-' + ano)).length + 1
     const codigo = 'ORC-' + ano + '-' + String(n).padStart(3, '0')
     const leadCrm = await leadDoLevantamento(detalhe.id)

@@ -2,6 +2,7 @@
 import { useEffect, useState, Fragment } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
+import { rotuloRev, codigoComRev } from '../../lib/revisoes'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -123,7 +124,7 @@ export default function OrcamentoMobile() {
   }
 
   // ═══ Proposta Completa (Inverso) — mesmo padrão visual de app/orcamento/page.tsx ═══
-  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string, responsavel?: string | null) {
+  function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string, responsavel?: string | null, revisao?: string | null) {
     return `
     <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
       <div style="width:55%;padding:60px 56px;display:flex;flex-direction:column;justify-content:center">
@@ -136,6 +137,7 @@ export default function OrcamentoMobile() {
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">CLIENTE</td><td style="font-weight:700;padding:5px 0">${cliente}</td></tr>
           ${responsavel ? `<tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">A/C</td><td style="font-weight:700;padding:5px 0">${responsavel}</td></tr>` : ''}
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">LOCAL</td><td style="font-weight:700;padding:5px 0">${local || '—'}</td></tr>
+          ${revisao ? `<tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">REVISÃO</td><td style="font-weight:700;padding:5px 0">${revisao}</td></tr>` : ''}
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">DATA</td><td style="font-weight:700;padding:5px 0">${dataStr}</td></tr>
           <tr><td style="color:#999;letter-spacing:0.1em;padding:5px 24px 5px 0;vertical-align:top">VALIDADE</td><td style="font-weight:700;padding:5px 0">${validadeDias} dias</td></tr>
         </table>
@@ -404,21 +406,22 @@ export default function OrcamentoMobile() {
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =
-      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin, detalhe.contato_nome) +
+      paginaCapaInversa(obraNome || detalhe.cliente_nome, detalhe.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', detalhe.cliente_nome, detalhe.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(detalhe.validade_dias || '30'), cfg, origin, detalhe.contato_nome, rotuloRev(detalhe.revisao)) +
       paginaHistoriaInversa(cfg) +
       paginaDivisorPortfolio(cfg) +
       paginasPortfolioInverso(origin, cfg) +
       paginasLev +
-      paginaInvestimentoInverso(itensDoOrc, ambientesDoOrc, detalhe.codigo, cfg) +
+      paginaInvestimentoInverso(itensDoOrc, ambientesDoOrc, codigoComRev(detalhe), cfg) +
       paginaCondicoesInverso(prazoDias, detalhe.condicao_pagamento, parseInt(detalhe.validade_dias || '30'), cfg, observacaoProposta) +
       paginaFechamentoInverso(cfg)
 
-    const html = envolverPropostaInversa(`Proposta ${detalhe.codigo} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
+    const html = envolverPropostaInversa(`Proposta ${codigoComRev(detalhe)} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
     const win = window.open('', '_blank')
     if (win) { win.document.write(html); win.document.close() }
   }
 
   const filtrados = orcamentos.filter(o => {
+    if (o.revisao_de) return false // revisões anteriores só no desktop
     if (filtro !== 'todos' && o.status !== filtro) return false
     if (!busca) return true
     return [o.cliente_nome, o.codigo, o.endereco].some(v => v?.toLowerCase().includes(busca.toLowerCase()))
@@ -482,7 +485,7 @@ export default function OrcamentoMobile() {
     }).join('')
 
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
-    <title>Proposta ${orc.codigo} — Inverso</title>
+    <title>Proposta ${codigoComRev(orc)} — Inverso</title>
     <style>
       * { margin:0; padding:0; box-sizing:border-box; }
       body { font-family: Arial, sans-serif; color: #333; font-size: 13px; }
@@ -496,7 +499,7 @@ export default function OrcamentoMobile() {
           <div style="font-size:12px;color:#666;margin-top:2px">Construção e Reforma</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:20px;font-weight:700;color:#1B3A5C">${orc.codigo}</div>
+          <div style="font-size:20px;font-weight:700;color:#1B3A5C">${codigoComRev(orc)}</div>
           <div style="font-size:12px;color:#666;margin-top:4px">Data: ${new Date().toLocaleDateString('pt-BR')}</div>
           <div style="font-size:12px;color:#666">Validade: ${orc.validade_dias || 30} dias</div>
         </div>
@@ -551,7 +554,7 @@ export default function OrcamentoMobile() {
     const totalFinal = totalGeral - desconto
 
     return (
-      <MobileShell title={detalhe.codigo}>
+      <MobileShell title={codigoComRev(detalhe)}>
         <div className="p-4 flex flex-col gap-4 pb-8">
           <button className="text-primary text-sm font-semibold text-left" onClick={() => { setDetalhe(null); setAmbienteAberto(null) }}>← Voltar à lista</button>
           <div>
@@ -675,7 +678,7 @@ export default function OrcamentoMobile() {
             <div className="flex justify-between items-start gap-2">
               <div className="min-w-0">
                 <div className="font-bold text-on-surface text-sm truncate">{o.cliente_nome}</div>
-                <div className="text-[11px] text-on-surface-variant truncate">{o.codigo}{o.endereco ? ' · ' + o.endereco : ''}</div>
+                <div className="text-[11px] text-on-surface-variant truncate">{o.codigo}{(o.revisao || 0) > 0 ? ' · ' + rotuloRev(o.revisao) : ''}{o.endereco ? ' · ' + o.endereco : ''}</div>
               </div>
               <span className="text-[10px] font-semibold text-on-surface-variant uppercase shrink-0">{STATUS_ORC[o.status] || o.status}</span>
             </div>

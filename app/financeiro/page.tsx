@@ -344,6 +344,7 @@ export default function Financeiro() {
   const [fPagamento, setFPagamento] = useState<{ lanc: any; data: string; conta: string } | null>(null)
   const [fFatura, setFFatura] = useState<{ cartao: any; fatura: any; conta: string; jaPaga: boolean; data: string } | null>(null)
   const [atribuicoes, setAtribuicoes] = useState<Record<string, string>>({})
+  const [fSerie, setFSerie] = useState<any>(null) // custo fixo (recorrente) que o usuário quer excluir
 
   useEffect(() => {
     const token = localStorage.getItem('viga_token')
@@ -532,7 +533,25 @@ export default function Financeiro() {
   }
 
   // ── exclusões (sempre com confirmação, sem deixar registro solto) ──────────────────────────────
+  // Custo fixo (recorrente) é regerado todo mês enquanto a série existir — por isso excluir só "este" não adianta (voltava
+  // sozinho). Aqui o usuário escolhe: encerrar a série a partir deste mês, ou apagar a série inteira.
+  async function excluirSerie(l: any, modo: 'daqui' | 'toda') {
+    const grupo = lancamentos.filter(x => x.recorrente_grupo === l.recorrente_grupo)
+    const alvo = modo === 'toda' ? grupo : grupo.filter(x => (x.data || '') >= (l.data || ''))
+    try {
+      for (const x of alvo) {
+        const meds = await get('medicoes', `?lancamento_id=eq.${x.id}&select=id`)
+        for (const m of meds) await atualizar('medicoes', m.id, { lancamento_id: null, data_pagamento_programada: null })
+        await deletar('lancamentos', x.id)
+      }
+      // os anteriores ficam como histórico, mas deixam de gerar novos meses
+      if (modo === 'daqui') for (const x of grupo.filter(y => (y.data || '') < (l.data || ''))) await atualizar('lancamentos', x.id, { recorrente: false })
+      setFSerie(null)
+      await carregar()
+    } catch (e: any) { alert('Não foi possível excluir: ' + e.message) }
+  }
   async function excluirLancamento(l: any) {
+    if (l.recorrente && l.recorrente_grupo) { setFSerie(l); return }
     const extras: string[] = []
     if (l.categoria === CAT_FATURA) extras.push('As compras dessa fatura voltam para "em aberto" no cartão.')
     if (l.categoria === 'Medição de obra') extras.push('Se for o pagamento de uma medição, a medição ficará sem pagamento programado.')
@@ -887,6 +906,30 @@ export default function Financeiro() {
 
   const modaisComuns = (
     <>
+      {fSerie && (() => {
+        const grupo = lancamentos.filter(x => x.recorrente_grupo === fSerie.recorrente_grupo)
+        const daqui = grupo.filter(x => (x.data || '') >= (fSerie.data || ''))
+        const pagosToda = grupo.filter(x => x.status === 'pago').length
+        return (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1100] p-4" onClick={e=>e.target===e.currentTarget&&setFSerie(null)} data-testid="modal-serie">
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[500px]">
+              <div className="text-base font-bold text-on-surface mb-1">🔁 Excluir custo fixo</div>
+              <div className="text-body-sm text-on-surface-variant mb-4"><strong>{fSerie.descricao}</strong> se repete todo mês. Se for excluído só este mês, o sistema cria de novo no próximo carregamento — por isso escolha o que fazer com a série:</div>
+              <div className="flex flex-col gap-2.5 mb-5">
+                <button className="text-left px-4 py-3 rounded-xl border-2 border-outline-variant hover:border-primary bg-surface-container-low transition-all" onClick={()=>excluirSerie(fSerie,'daqui')} data-testid="serie-daqui">
+                  <div className="font-bold text-on-surface text-sm">Encerrar a partir deste mês</div>
+                  <div className="text-[12px] text-on-surface-variant">Apaga este e os próximos ({daqui.length} lançamento(s)). Os meses anteriores ficam no histórico e deixam de se repetir.</div>
+                </button>
+                <button className="text-left px-4 py-3 rounded-xl border-2 border-outline-variant hover:border-error bg-surface-container-low transition-all" onClick={()=>{ if (confirm(`Apagar a série inteira (${grupo.length} lançamento(s), ${pagosToda} já pago(s))? Esta ação não pode ser desfeita.`)) excluirSerie(fSerie,'toda') }} data-testid="serie-toda">
+                  <div className="font-bold text-error text-sm">Excluir a série inteira</div>
+                  <div className="text-[12px] text-on-surface-variant">Apaga todos os {grupo.length} lançamento(s) deste custo fixo, inclusive os já pagos.</div>
+                </button>
+              </div>
+              <div className="flex justify-end"><button className={btnSecondaryCls} onClick={()=>setFSerie(null)}>Cancelar</button></div>
+            </div>
+          </div>
+        )
+      })()}
       {fPagamento && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1100] p-4" onClick={e=>e.target===e.currentTarget&&setFPagamento(null)}>
           <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[460px]">

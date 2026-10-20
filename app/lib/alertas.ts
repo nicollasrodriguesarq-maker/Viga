@@ -19,7 +19,7 @@ const H = { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Be
 
 export const EVENTO_DADOS_ALTERADOS = 'viga:dados-alterados'
 
-export type CategoriaAlerta = 'followup' | 'proposta' | 'orcamento_vencido' | 'obra' | 'etapa' | 'pagar' | 'receber' | 'solicitacao'
+export type CategoriaAlerta = 'followup' | 'proposta' | 'orcamento_vencido' | 'obra' | 'etapa' | 'pagar' | 'receber' | 'solicitacao' | 'convite'
 
 export interface AlertaItem {
   id: string
@@ -40,8 +40,9 @@ export const META_ALERTA: Record<CategoriaAlerta, { icone: string; nome: string;
   pagar: { icone: '💸', nome: 'Contas a pagar', texto: 'text-error', fundo: 'bg-error/10', borda: 'border-error/30' },
   receber: { icone: '💰', nome: 'A receber vencido', texto: 'text-tertiary', fundo: 'bg-tertiary/10', borda: 'border-tertiary/30' },
   solicitacao: { icone: '🔐', nome: 'Pedidos de acesso', texto: 'text-primary', fundo: 'bg-primary/10', borda: 'border-primary/30' },
+  convite: { icone: '📨', nome: 'Convites de reunião', texto: 'text-secondary', fundo: 'bg-secondary/10', borda: 'border-secondary/30' },
 }
-export const ORDEM_CATEGORIAS: CategoriaAlerta[] = ['obra', 'etapa', 'pagar', 'orcamento_vencido', 'followup', 'proposta', 'receber', 'solicitacao']
+export const ORDEM_CATEGORIAS: CategoriaAlerta[] = ['convite', 'obra', 'etapa', 'pagar', 'orcamento_vencido', 'followup', 'proposta', 'receber', 'solicitacao']
 
 async function get(tabela: string, query = ''): Promise<any[]> {
   try {
@@ -167,6 +168,20 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
       if (validade >= hoje) continue
       const dias = diasEntre(validade, hoje)
       alertas.push({ id: 'orc-' + o.id, categoria: 'orcamento_vencido', titulo: `${o.codigo || ''} — ${o.cliente_nome || ''}`.trim(), descricao: `Validade de ${o.validade_dias || 30} dias venceu há ${dias} ${plural(dias, 'dia', 'dias')} — defina como aprovado, reprovado ou expirado`, href: '/orcamento', peso: dias })
+    }
+  }
+
+  // ── Convites de reunião sem resposta (somem ao aceitar/recusar ou depois que a data passa) ──
+  if (perm && meuId && temAcessoModulo(perm, 'agenda')) {
+    const convites = await get('agenda_participantes', `?usuario_id=eq.${meuId}&status=eq.pendente&select=compromisso_id`)
+    if (convites.length > 0) {
+      const comps = await get('agenda_compromissos', `?id=in.(${convites.map((c: any) => c.compromisso_id).join(',')})&data=gte.${hoje}&select=id,titulo,data,hora_inicio,usuario_id,criado_por`)
+      const donos = comps.length ? await get('usuarios', `?id=in.(${[...new Set(comps.map((c: any) => c.criado_por || c.usuario_id).filter(Boolean))].join(',')})&select=id,nome,email`) : []
+      for (const c of comps) {
+        const org: any = donos.find((u: any) => u.id === (c.criado_por || c.usuario_id))
+        const dias = diasEntre(hoje, c.data)
+        alertas.push({ id: 'convite-' + c.id, categoria: 'convite', titulo: `Convite: ${c.titulo}`, descricao: `${dataBR(c.data)}${c.hora_inicio ? ' às ' + c.hora_inicio.slice(0, 5) : ''} — de ${org?.nome || (org?.email || 'alguém').split('@')[0]} · aceite ou recuse na Agenda`, href: '/agenda', peso: Math.max(0, 30 - dias) })
+      }
     }
   }
 

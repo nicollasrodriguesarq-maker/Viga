@@ -49,7 +49,17 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
     }
   }
 
-  const compromissos = await buscar('agenda_compromissos', `?usuario_id=in.(${visiveis.join(',')})&order=data.asc`)
+  const proprios = await buscar('agenda_compromissos', `?usuario_id=in.(${visiveis.join(',')})&order=data.asc`)
+  // reuniões para as quais as pessoas do feed foram convidadas (e não recusaram) também entram
+  const convites = await buscar('agenda_participantes', `?usuario_id=in.(${visiveis.join(',')})&status=neq.recusado&select=compromisso_id`)
+  const jaTem = new Set(proprios.map((c: any) => c.id))
+  const extraIds = Array.from(new Set(convites.map((c: any) => c.compromisso_id).filter((id: string) => !jaTem.has(id))))
+  const extras = extraIds.length ? await buscar('agenda_compromissos', `?id=in.(${extraIds.join(',')})&order=data.asc`) : []
+  const compromissos = [...proprios, ...extras]
+  const todasPartes = compromissos.length ? await buscar('agenda_participantes', `?compromisso_id=in.(${compromissos.map((c: any) => c.id).join(',')})&select=compromisso_id,usuario_id,status`) : []
+  const idsPessoas = Array.from(new Set(todasPartes.map((p: any) => p.usuario_id)))
+  const pessoas = idsPessoas.length ? await buscar('usuarios', `?id=in.(${idsPessoas.join(',')})&select=id,nome,email`) : []
+  const nomeDe = (id: string) => { const u: any = pessoas.find((x: any) => x.id === id); return u ? (u.nome || String(u.email || '').split('@')[0]) : 'Convidado' }
 
   const agora = new Date().toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
 
@@ -79,7 +89,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ token: s
       `SUMMARY:${escaparTexto(c.titulo || 'Compromisso')}`,
     ]
     if (c.endereco) linhas.push(`LOCATION:${escaparTexto(c.endereco)}`)
-    if (c.descricao) linhas.push(`DESCRIPTION:${escaparTexto(c.descricao)}`)
+    const partes = todasPartes.filter((p: any) => p.compromisso_id === c.id)
+    const textoDescricao = [
+      c.descricao,
+      partes.length ? 'Participantes: ' + partes.map((p: any) => nomeDe(p.usuario_id) + (p.status === 'aceito' ? ' (confirmou)' : p.status === 'pendente' ? ' (aguardando)' : '')).join(', ') : '',
+      c.link_reuniao ? 'Link da reunião: ' + c.link_reuniao : '',
+    ].filter(Boolean).join('\n')
+    if (textoDescricao) linhas.push(`DESCRIPTION:${escaparTexto(textoDescricao)}`)
+    if (c.link_reuniao && /^https?:\/\//i.test(c.link_reuniao)) linhas.push(`URL:${c.link_reuniao}`)
     linhas.push('END:VEVENT')
     return linhas.join('\r\n')
   })

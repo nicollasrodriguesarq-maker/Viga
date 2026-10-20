@@ -2,6 +2,9 @@
 import { useEffect, useState } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp, obterUsuariosVisiveis } from '../../lib/permissoes'
+import { hojeISO } from '../../lib/datas'
+import { carregarCompromissos, carregarTodosCompromissos, gravarCompromisso, excluirCompromissoDb, salvarParticipantes, responderConvite, type StatusConvite } from '../../lib/agendaParticipantes'
+import { CampoParticipantes, AvisoConflitos, ListaParticipantes, BotoesConvite, BotaoEntrarReuniao } from '../../components/ParticipantesCompromisso'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -86,7 +89,7 @@ const labelCls = 'text-[11px] text-on-surface-variant font-semibold uppercase tr
 const btnPrimaryCls = 'bg-primary text-on-primary rounded-lg px-4 py-3 text-sm font-bold hover:opacity-90 transition-all cursor-pointer w-full'
 const btnSecondaryCls = 'bg-surface-container-low border border-outline-variant text-on-surface-variant rounded-lg px-4 py-3 text-sm cursor-pointer'
 
-const FORM_VAZIO = { titulo: '', descricao: '', endereco: '', data: '', hora_inicio: '', hora_fim: '', alerta_minutos_antes: '', usuario_id: '' }
+const FORM_VAZIO = { titulo: '', descricao: '', endereco: '', data: '', hora_inicio: '', hora_fim: '', alerta_minutos_antes: '', usuario_id: '', link_reuniao: '' }
 
 export default function AgendaMobile() {
   const [compromissos, setCompromissos] = useState<any[]>([])
@@ -105,6 +108,8 @@ export default function AgendaMobile() {
   const [feedToken, setFeedToken] = useState('')
   const [mostrarSync, setMostrarSync] = useState(false)
   const [copiado, setCopiado] = useState(false)
+  const [fParticipantes, setFParticipantes] = useState<string[]>([])
+  const [salvando, setSalvando] = useState(false)
 
   const souGestor = souAdmin || souGerenteTime
 
@@ -118,10 +123,8 @@ export default function AgendaMobile() {
       setSouGerenteTime(perm.role === 'gerente_time')
       const vis = await obterUsuariosVisiveis(perm)
       setVisiveis(vis)
-      if (perm.role !== 'usuario') {
-        const u = await buscar('usuarios', '?select=id,nome,email&order=nome')
-        setUsuarios(u)
-      }
+      const u = await buscar('usuarios', '?select=id,nome,email&order=nome')
+      setUsuarios(u)
       // o token do feed é segredo de cada usuário: só sai pela função meu_feed_token() (a coluna não é legível pela API)
       try {
         const rt = await fetch(BASE + '/rpc/meu_feed_token', { method: 'POST', headers: H, body: '{}' })
@@ -134,24 +137,21 @@ export default function AgendaMobile() {
   useEffect(() => { if (meuId) carregar() }, [alvoAgenda, meuId])
 
   async function carregar() {
-    let filtro = ''
-    if (!souGestor) {
-      filtro = '&usuario_id=eq.' + meuId
-    } else if (alvoAgenda === 'equipe') {
-      filtro = visiveis.length > 0 ? '&usuario_id=in.(' + visiveis.join(',') + ')' : ''
-    } else if (alvoAgenda) {
-      filtro = '&usuario_id=eq.' + alvoAgenda
-    } else {
-      filtro = '&usuario_id=eq.' + meuId
-    }
-    const c = await buscar('agenda_compromissos', '?order=data.asc,hora_inicio.asc' + filtro)
+    // agenda da pessoa = o que é dela + os compromissos para os quais foi convidada
+    let donos: string[]
+    if (!souGestor) donos = [meuId]
+    else if (alvoAgenda === 'equipe') donos = visiveis
+    else if (alvoAgenda) donos = [alvoAgenda]
+    else donos = [meuId]
+    const c = donos.length > 0 ? await carregarCompromissos(donos) : await carregarTodosCompromissos()
     setCompromissos(c)
   }
 
   function abrirNovo() {
     setEditando(null)
     const usuarioPadrao = souGestor && alvoAgenda && alvoAgenda !== 'equipe' ? alvoAgenda : meuId
-    setFComp({ ...FORM_VAZIO, data: new Date().toISOString().slice(0, 10), usuario_id: usuarioPadrao })
+    setFComp({ ...FORM_VAZIO, data: hojeISO(), usuario_id: usuarioPadrao })
+    setFParticipantes([])
     setTela('novoCompromisso')
   }
   function abrirEditar(c: any) {
@@ -160,15 +160,23 @@ export default function AgendaMobile() {
       titulo: c.titulo || '', descricao: c.descricao || '', endereco: c.endereco || '',
       data: c.data || '', hora_inicio: c.hora_inicio || '', hora_fim: c.hora_fim || '',
       alerta_minutos_antes: c.alerta_minutos_antes != null ? String(c.alerta_minutos_antes) : '',
-      usuario_id: c.usuario_id || meuId,
+      usuario_id: c.usuario_id || meuId, link_reuniao: c.link_reuniao || '',
     })
+    setFParticipantes((c.participantes || []).map((p: any) => p.usuario_id))
     setTela('novoCompromisso')
   }
 
+  function podeEditar(c: any) { return souGestor || c.usuario_id === meuId || c.criado_por === meuId }
+  function nomeDe(id: string) { const u = usuarios.find(x => x.id === id); return u ? (u.nome || (u.email || '').split('@')[0]) : 'alguém' }
+  const recusei = (c: any) => (c.participantes || []).some((p: any) => p.usuario_id === meuId && p.status === 'recusado')
+
   async function salvarCompromisso() {
+    if (salvando) return
     if (!fComp.titulo.trim()) return alert('Preencha o título')
     if (!fComp.data) return alert('Selecione a data')
-    const dados = {
+    if (fComp.hora_inicio && fComp.hora_fim && fComp.hora_fim < fComp.hora_inicio) return alert('O horário de fim precisa ser depois do início')
+    const dono = (souGestor && fComp.usuario_id) || meuId || null
+    const dados: any = {
       titulo: fComp.titulo.trim(),
       descricao: fComp.descricao.trim(),
       endereco: fComp.endereco.trim(),
@@ -176,19 +184,32 @@ export default function AgendaMobile() {
       hora_inicio: fComp.hora_inicio || null,
       hora_fim: fComp.hora_fim || null,
       alerta_minutos_antes: fComp.alerta_minutos_antes ? parseInt(fComp.alerta_minutos_antes) : null,
-      criado_por: meuId || null,
-      usuario_id: (souGestor && fComp.usuario_id) || meuId || null,
+      link_reuniao: fComp.link_reuniao.trim() || null,
+      usuario_id: dono,
     }
-    if (editando) { await editar('agenda_compromissos', editando.id, dados) }
-    else { await criar('agenda_compromissos', dados) }
-    setTela(null); setEditando(null); setFComp(FORM_VAZIO)
-    await carregar()
+    if (!editando) dados.criado_por = meuId || null
+    setSalvando(true)
+    try {
+      const salvo = await gravarCompromisso(editando ? editando.id : null, dados)
+      const id = editando ? editando.id : salvo?.id
+      if (!id) throw new Error('o banco não confirmou a gravação')
+      const hh = (v: any) => (v || '').slice(0, 5)
+      const remarcado = !!editando && (editando.data !== dados.data || hh(editando.hora_inicio) !== hh(dados.hora_inicio) || hh(editando.hora_fim) !== hh(dados.hora_fim))
+      await salvarParticipantes(id, fParticipantes, dono || '', remarcado)
+      setTela(null); setEditando(null); setFComp(FORM_VAZIO); setFParticipantes([])
+      await carregar()
+    } catch (e: any) {
+      alert('Não foi possível salvar o compromisso: ' + (e?.message || 'tente novamente'))
+    } finally { setSalvando(false) }
   }
 
   async function excluirCompromisso(id: string) {
-    if (!confirm('Excluir este compromisso?')) return
-    await remover('agenda_compromissos', id)
-    await carregar()
+    if (!confirm('Excluir este compromisso? Os convidados também deixam de vê-lo.')) return
+    try { await excluirCompromissoDb(id); await carregar() } catch (e: any) { alert('Não foi possível excluir: ' + e.message) }
+  }
+
+  async function responder(compromissoId: string, status: StatusConvite) {
+    try { await responderConvite(compromissoId, meuId, status); await carregar() } catch (e: any) { alert('Não foi possível responder ao convite: ' + e.message) }
   }
 
   const { inicio: janelaInicio, fim: janelaFim } = janelaDatas(visualizacao, dataRef)
@@ -201,7 +222,7 @@ export default function AgendaMobile() {
     return [c.titulo, c.descricao, c.endereco].some(v => v?.toLowerCase().includes(termo))
   })
 
-  const hojeStr = new Date().toISOString().slice(0, 10)
+  const hojeStr = hojeISO()
   const filtradosBusca = compromissos.filter(c => {
     if (!busca) return true
     const termo = busca.toLowerCase()
@@ -262,13 +283,22 @@ export default function AgendaMobile() {
             </div>
           </div>
           <div>
+            <label className={labelCls}>Participantes</label>
+            <CampoParticipantes usuarios={usuarios} donoId={(souGestor && fComp.usuario_id) || meuId} valor={fParticipantes} onChange={setFParticipantes} />
+          </div>
+          <AvisoConflitos usuarios={usuarios} ids={[(souGestor && fComp.usuario_id) || meuId, ...fParticipantes].filter(Boolean)} data={fComp.data} ini={fComp.hora_inicio} fim={fComp.hora_fim} ignorarId={editando?.id} />
+          <div>
+            <label className={labelCls}>Link da reunião (Meet, Teams, Zoom...)</label>
+            <input className={inputCls} placeholder="https://meet.google.com/..." value={fComp.link_reuniao} onChange={e => setFComp({ ...fComp, link_reuniao: e.target.value })} />
+          </div>
+          <div>
             <label className={labelCls}>Alerta</label>
             <select className={inputCls} value={fComp.alerta_minutos_antes} onChange={e => setFComp({ ...fComp, alerta_minutos_antes: e.target.value })}>
               {ALERTA_OPCOES.map(a => <option key={a.valor} value={a.valor}>{a.label}</option>)}
             </select>
           </div>
           <div className="flex flex-col gap-2 mt-2">
-            <button className={btnPrimaryCls} onClick={salvarCompromisso}>{editando ? 'Salvar Alterações' : 'Adicionar Compromisso'}</button>
+            <button className={btnPrimaryCls} onClick={salvarCompromisso} disabled={salvando}>{salvando ? 'Salvando...' : editando ? 'Salvar Alterações' : 'Adicionar Compromisso'}</button>
             <button className={btnSecondaryCls} onClick={() => { setTela(null); setEditando(null); setFComp(FORM_VAZIO) }}>Cancelar</button>
           </div>
         </div>
@@ -365,11 +395,17 @@ export default function AgendaMobile() {
                           <div className="font-bold text-on-surface text-sm">{c.titulo}</div>
                           {c.endereco && <div className="text-[11px] text-on-surface-variant mt-0.5">📍 {c.endereco}</div>}
                           {c.descricao && <div className="text-[11px] text-on-surface-variant mt-1">{c.descricao}</div>}
+                          {c._convidado && <div className="text-[11px] text-secondary mt-1">📨 Convidado por {nomeDe(c.criado_por || c.usuario_id)}</div>}
+                          <ListaParticipantes participantes={c.participantes} usuarios={usuarios} meuId={meuId} />
+                          <BotaoEntrarReuniao link={c.link_reuniao} />
+                          <BotoesConvite comp={c} meuId={meuId} onResponder={responder} compacto />
                         </div>
-                        <div className="flex gap-1.5 shrink-0">
-                          <button className="text-primary text-xs font-semibold" onClick={() => abrirEditar(c)}>✏️</button>
-                          <button className="text-error text-xs font-semibold" onClick={() => excluirCompromisso(c.id)}>×</button>
-                        </div>
+                        {podeEditar(c) && (
+                          <div className="flex gap-1.5 shrink-0">
+                            <button className="text-primary text-xs font-semibold" onClick={() => abrirEditar(c)}>✏️</button>
+                            <button className="text-error text-xs font-semibold" onClick={() => excluirCompromisso(c.id)}>×</button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -391,9 +427,9 @@ export default function AgendaMobile() {
                   </div>
                   <div className="flex flex-col gap-1">
                     {itensDia.map(c => (
-                      <div key={c.id} className="bg-surface-container-low border border-outline-variant rounded-lg px-1.5 py-1 cursor-pointer" onClick={() => abrirEditar(c)}>
+                      <div key={c.id} className={`bg-surface-container-low border rounded-lg px-1.5 py-1 cursor-pointer ${(c.participantes || []).some((p: any) => p.usuario_id === meuId && p.status === 'pendente') ? 'border-dashed border-secondary' : 'border-outline-variant'} ${recusei(c) ? 'opacity-40 line-through' : ''}`} onClick={() => { if (podeEditar(c)) abrirEditar(c); else { setVisualizacao('dia'); setDataRef(new Date(c.data + 'T00:00:00')) } }}>
                         {c.hora_inicio && <div className="text-[9px] font-bold text-primary">{c.hora_inicio.slice(0, 5)}</div>}
-                        <div className="text-[10px] text-on-surface truncate">{c.titulo}</div>
+                        <div className="text-[10px] text-on-surface truncate">{(c.participantes || []).length > 0 || c._convidado ? '👥 ' : ''}{c.titulo}</div>
                       </div>
                     ))}
                   </div>

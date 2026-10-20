@@ -5,6 +5,7 @@ import MobileShell from './components/MobileShell'
 import PainelAlertas from '../components/PainelAlertas'
 import { obterMinhasPermissoesApp, obterUsuariosVisiveis } from '../lib/permissoes'
 import { hojeISO } from '../lib/datas'
+import { convitesDoDia } from '../lib/agendaParticipantes'
 import { calcularPeriodo } from '../lib/financeiroCalc'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -69,11 +70,12 @@ export default function DashboardMobile() {
     const hojeStr = hojeISO()
     const mesAtual = hojeStr.slice(0, 7)
     const filtroCompromissos = perm?.role === 'admin' ? '' : '&usuario_id=in.(' + visiveis.join(',') + ')'
-    const [obras, lancamentos, compromissos, atribuicoes] = await Promise.all([
+    const [obras, lancamentos, compromissos, atribuicoes, convites] = await Promise.all([
       get('obras', '?order=created_at.desc'),
       get('lancamentos', '?order=data.desc'),
       get('agenda_compromissos', '?data=eq.' + hojeStr + filtroCompromissos + '&order=hora_inicio.asc'),
       !ehGestor && perm ? get('obra_atribuicoes', '?usuario_id=eq.' + perm.id + '&select=obra_id') : Promise.resolve([]),
+      perm?.id ? convitesDoDia(perm.id, hojeStr) : Promise.resolve([]), // reuniões para as quais fui convidado
     ])
     const obrasVisiveis = ehGestor ? obras : (() => {
       const idsAtribuidos = new Set(atribuicoes.map((a: any) => a.obra_id))
@@ -81,7 +83,8 @@ export default function DashboardMobile() {
     })()
     setObrasAtivas(obrasVisiveis.filter((o: any) => o.status === 'em_execucao').length)
     setObrasRecentes(obrasVisiveis.slice(0, 4))
-    setCompromissosHoje(compromissos)
+    const unidos = [...compromissos, ...convites.filter((c: any) => !compromissos.some((x: any) => x.id === c.id))].sort((a: any, b: any) => (a.hora_inicio || '') < (b.hora_inicio || '') ? -1 : 1)
+    setCompromissosHoje(unidos)
     // Obra de Gerenciamento: a saída paga ao fornecedor é dinheiro do cliente, não da
     // Inverso, e não deve aparecer como "a pagar" da empresa (mesma regra do Financeiro).
     // Mesmo motor de cálculo do Financeiro: recebido no mês = entradas PAGAS no mês (fora aportes/resgates).

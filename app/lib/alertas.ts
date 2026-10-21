@@ -19,7 +19,7 @@ const H = { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Be
 
 export const EVENTO_DADOS_ALTERADOS = 'viga:dados-alterados'
 
-export type CategoriaAlerta = 'followup' | 'proposta' | 'orcamento_vencido' | 'obra' | 'etapa' | 'pagar' | 'receber' | 'solicitacao' | 'convite'
+export type CategoriaAlerta = 'followup' | 'proposta' | 'orcamento_vencido' | 'obra' | 'etapa' | 'pagar' | 'receber' | 'solicitacao' | 'convite' | 'prospeccao'
 
 export interface AlertaItem {
   id: string
@@ -41,8 +41,9 @@ export const META_ALERTA: Record<CategoriaAlerta, { icone: string; nome: string;
   receber: { icone: '💰', nome: 'A receber vencido', texto: 'text-tertiary', fundo: 'bg-tertiary/10', borda: 'border-tertiary/30' },
   solicitacao: { icone: '🔐', nome: 'Pedidos de acesso', texto: 'text-primary', fundo: 'bg-primary/10', borda: 'border-primary/30' },
   convite: { icone: '📨', nome: 'Convites de reunião', texto: 'text-secondary', fundo: 'bg-secondary/10', borda: 'border-secondary/30' },
+  prospeccao: { icone: '🎯', nome: 'Prospecção do dia', texto: 'text-primary', fundo: 'bg-primary/10', borda: 'border-primary/30' },
 }
-export const ORDEM_CATEGORIAS: CategoriaAlerta[] = ['convite', 'obra', 'etapa', 'pagar', 'orcamento_vencido', 'followup', 'proposta', 'receber', 'solicitacao']
+export const ORDEM_CATEGORIAS: CategoriaAlerta[] = ['convite', 'obra', 'etapa', 'pagar', 'orcamento_vencido', 'followup', 'proposta', 'receber', 'prospeccao', 'solicitacao']
 
 async function get(tabela: string, query = ''): Promise<any[]> {
   try {
@@ -168,6 +169,17 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
       if (validade >= hoje) continue
       const dias = diasEntre(validade, hoje)
       alertas.push({ id: 'orc-' + o.id, categoria: 'orcamento_vencido', titulo: `${o.codigo || ''} — ${o.cliente_nome || ''}`.trim(), descricao: `Validade de ${o.validade_dias || 30} dias venceu há ${dias} ${plural(dias, 'dia', 'dias')} — defina como aprovado, reprovado ou expirado`, href: '/orcamento', peso: dias })
+    }
+  }
+
+  // ── Prospecção: contatos da fila de hoje ainda sem abordagem e follow-ups que venceram (somem ao abordar/descartar) ──
+  if (perm && temAcessoModulo(perm, 'crm')) {
+    const pend = await get('crm_prospectos', `?or=(and(fila_data.eq.${hoje},status.eq.novo),and(status.eq.abordado,proximo_contato.lte.${hoje}))&select=id,status,fila_data`)
+    const novos = pend.filter((p: any) => p.status === 'novo').length
+    const follow = pend.filter((p: any) => p.status === 'abordado').length
+    if (novos + follow > 0) {
+      const partes = [novos > 0 ? `${novos} ${plural(novos, 'contato novo', 'contatos novos')}` : '', follow > 0 ? `${follow} ${plural(follow, 'follow-up', 'follow-ups')}` : ''].filter(Boolean).join(' e ')
+      alertas.push({ id: 'prospeccao-dia', categoria: 'prospeccao', titulo: 'Fila de prospecção de hoje', descricao: `${partes} para abordar`, href: '/crm?aba=prospeccao', peso: follow })
     }
   }
 

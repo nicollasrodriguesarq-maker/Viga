@@ -36,7 +36,7 @@ export interface ValorClienteCrm {
   contatoEmail: string
 }
 
-export const CANAIS_CRM = ['Indicação', 'Google Meu Negócio', 'Instagram', 'Site', 'Outro']
+export const CANAIS_CRM = ['Indicação', 'Google Meu Negócio', 'Instagram', 'Site', 'Prospecção ativa', 'Outro']
 export const CLIENTE_CRM_VAZIO: ValorClienteCrm = {
   modo: 'novo', clienteId: '', leadId: '', telefone: '', email: '', canal: 'Indicação', canalOutro: '',
   tipoCliente: 'pessoa', cnpj: '', contatoId: '', novoContato: false, contatoNome: '', contatoCargo: '', contatoTelefone: '', contatoEmail: '',

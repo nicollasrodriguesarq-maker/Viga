@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo } from 'react'
 import Layout from '../components/Layout'
 import { sincronizarLeadsComClientes, criarContatoDoCliente, encontrarClienteDuplicado } from '../lib/clienteCrm'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
+import Prospeccao from './Prospeccao'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -60,7 +61,7 @@ const ETAPA_BADGE: Record<string, string> = {
   pos_venda: 'bg-primary/10 text-primary border-primary/20',
 }
 // Canais confirmados com o usuário (o card de exemplo no Trello só trazia "Indicação") + "Outro" livre.
-const CANAL_OPCOES = ['Indicação', 'Google Meu Negócio', 'Instagram', 'Site', 'Outro']
+const CANAL_OPCOES = ['Indicação', 'Google Meu Negócio', 'Instagram', 'Site', 'Prospecção ativa', 'Outro']
 const TIPO_LEAD_NOME: Record<string, string> = { novo: 'Novo', carteira: 'Carteira' }
 const ATIVIDADE_NOME: Record<string, string> = {
   ligacao: '📞 Ligação', email: '✉️ E-mail', reuniao: '🤝 Reunião', visita: '📍 Visita', nota: '📝 Nota', mudanca_etapa: '🔀 Mudança de etapa',
@@ -106,7 +107,7 @@ export default function CRM() {
   const [levantamentos, setLevantamentos] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [userEmail, setUserEmail] = useState('')
-  const [abaTopo, setAbaTopo] = useState<'pipeline' | 'clientes'>('pipeline')
+  const [abaTopo, setAbaTopo] = useState<'pipeline' | 'clientes' | 'prospeccao'>('pipeline')
 
   const [busca, setBusca] = useState('')
   const [filtroCanal, setFiltroCanal] = useState('todos')
@@ -132,6 +133,7 @@ export default function CRM() {
   useEffect(() => {
     if (!localStorage.getItem('viga_token')) { window.location.href = '/'; return }
     setUserEmail(localStorage.getItem('viga_email') || '')
+    if (new URLSearchParams(window.location.search).get('aba') === 'prospeccao') setAbaTopo('prospeccao')
     obterMinhasPermissoes().then(perm => {
       if (!temAcessoModulo(perm, 'crm')) { window.location.href = '/'; return }
     })
@@ -560,7 +562,7 @@ export default function CRM() {
       searchSlot={
         <div className="relative w-full group">
           <span className="absolute left-4 top-1/2 -translate-y-1/2 material-symbols-outlined text-outline group-focus-within:text-primary transition-colors">search</span>
-          <input type="text" value={busca} onChange={e => setBusca(e.target.value)} placeholder={abaTopo === 'pipeline' ? 'Buscar por nome, telefone, e-mail...' : 'Buscar cliente por nome, telefone, e-mail...'}
+          <input type="text" value={busca} onChange={e => setBusca(e.target.value)} placeholder={abaTopo === 'pipeline' ? 'Buscar por nome, telefone, e-mail...' : abaTopo === 'prospeccao' ? 'Buscar na prospecção...' : 'Buscar cliente por nome, telefone, e-mail...'}
             className="w-full bg-surface-container-low border border-outline-variant rounded-full pl-12 pr-4 py-2 text-body-md focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-all" />
         </div>
       }
@@ -570,7 +572,7 @@ export default function CRM() {
             <span className="material-symbols-outlined text-[20px]">add_circle</span>
             Novo Lead
           </button>
-        ) : (
+        ) : abaTopo === 'prospeccao' ? undefined : (
           <button onClick={abrirNovoCliente} className="flex items-center gap-2 px-4 py-2 bg-primary text-on-primary rounded-xl hover:opacity-90 transition-all font-label-md text-label-md shadow-lg shadow-primary/20">
             <span className="material-symbols-outlined text-[20px]">add_circle</span>
             Novo Cliente
@@ -584,10 +586,10 @@ export default function CRM() {
           <p className="text-body-md text-on-surface-variant">Funil comercial da Inverso — do lead novo ao pós-venda.</p>
         </div>
         <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant">
-          {(['pipeline', 'clientes'] as const).map(a => (
+          {(['pipeline', 'clientes', 'prospeccao'] as const).map(a => (
             <button key={a} onClick={() => setAbaTopo(a)}
               className={`px-3.5 py-2 rounded-lg text-label-md transition-colors ${abaTopo === a ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}>
-              {a === 'pipeline' ? '🔀 Pipeline' : '🤝 Clientes'}
+              {a === 'pipeline' ? '🔀 Pipeline' : a === 'clientes' ? '🤝 Clientes' : '🎯 Prospecção'}
             </button>
           ))}
         </div>
@@ -663,6 +665,10 @@ export default function CRM() {
             </div>
           )}
         </>
+      )}
+
+      {abaTopo === 'prospeccao' && (
+        <Prospeccao usuarios={usuarios} meuId={usuarios.find((u: any) => (u.email || '').toLowerCase() === userEmail.toLowerCase())?.id || ''} busca={busca} onLeadCriado={async () => { const [l, c] = await Promise.all([buscar('crm_leads', '?order=created_at.desc'), buscar('clientes', '?order=nome.asc')]); setLeads(l); setClientes(c) }} />
       )}
 
       {abaTopo === 'clientes' && (

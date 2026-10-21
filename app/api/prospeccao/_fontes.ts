@@ -217,7 +217,7 @@ export function montarRequisicaoGoogle(textQuery: string) {
         'Content-Type': 'application/json',
         'X-Goog-Api-Key': process.env.GOOGLE_PLACES_API_KEY || '',
         // pedir só o necessário: telefone e site são campos pagos do nível "Enterprise" (1.000 buscas grátis/mês)
-        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.businessStatus,places.rating,places.userRatingCount,places.primaryType',
+        'X-Goog-FieldMask': 'places.id,places.displayName,places.formattedAddress,places.nationalPhoneNumber,places.websiteUri,places.googleMapsUri,places.businessStatus,places.primaryType',
       },
       body: JSON.stringify({ textQuery, languageCode: 'pt-BR', regionCode: 'BR', pageSize: 20 }),
     } as RequestInit,
@@ -253,7 +253,7 @@ export async function fonteGoogle(cfg: Config, conhecidos: Conhecidos): Promise<
         nome: p.displayName?.text || '', segmento: combo.segmento, fonte: 'google', fonte_ref: p.id, telefone: p.nationalPhoneNumber, site: p.websiteUri || null,
         endereco: p.formattedAddress || null, bairro: combo.bairro, cidade: 'São Paulo', uf: 'SP',
         gatilho: `Encontrada no Google Maps: ${combo.q} (${combo.bairro})`, link_origem: p.googleMapsUri || null,
-        detalhes: { avaliacao: p.rating, avaliacoes: p.userRatingCount, tipo: p.primaryType },
+        detalhes: { tipo: p.primaryType },
       })
     }
     cursor = (cursor + 1) % combos.length

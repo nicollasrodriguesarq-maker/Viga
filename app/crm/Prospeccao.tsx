@@ -354,7 +354,7 @@ export default function Prospeccao({ usuarios, meuId, onLeadCriado, busca }: { u
             <div className="flex items-center gap-2 flex-wrap mb-1">
               <span className="text-[11px] font-semibold px-2.5 py-1 rounded-full border bg-primary/10 text-primary border-primary/20">{seg.icone} {seg.nome.split(' (')[0]}</span>
               <span className="text-[11px] text-on-surface-variant">{FONTES[p.fonte]?.icone} {FONTES[p.fonte]?.nome || p.fonte}</span>
-              {followup && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-tertiary/15 text-tertiary border border-tertiary/30">Follow-up #{p.tentativas}</span>}
+              {followup && p.status === 'abordado' && <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-tertiary/15 text-tertiary border border-tertiary/30">Follow-up #{p.tentativas}</span>}
               {esperando && <span className="text-[11px] font-semibold text-on-surface-variant">⏳ aguardando — próximo contato {dataBR(p.proximo_contato)}</span>}
               {p.status === 'lead' && <span className="text-[11px] font-bold text-primary-container">✅ virou lead</span>}
               {p.status === 'descartado' && <span className="text-[11px] text-error">descartado: {p.motivo_descarte}</span>}
@@ -379,6 +379,12 @@ export default function Prospeccao({ usuarios, meuId, onLeadCriado, busca }: { u
           </div>
         </div>
 
+        {concluido && ['abordado', 'novo'].includes(p.status) && (
+          <div className="mt-2 flex gap-2 flex-wrap">
+            <button className={btnSmCls} onClick={() => setModal({ tipo: 'resposta', p })} data-testid="btn-respondeu-feito">💬 Respondeu</button>
+            <button className={btnDangerSmCls} onClick={() => { setMotivo(MOTIVOS_DESCARTE[0]); setModal({ tipo: 'descartar', p }) }}>✕ Descartar</button>
+          </div>
+        )}
         {!concluido && (
           <div className="mt-3 pt-3 border-t border-outline-variant/60">
             {!edital && abrindoMsg[p.id] && (
@@ -709,6 +715,8 @@ export default function Prospeccao({ usuarios, meuId, onLeadCriado, busca }: { u
             <div className="text-[11px] font-bold text-on-surface-variant uppercase tracking-widest mb-1.5">Histórico</div>
             <div className="mb-4 max-h-40 overflow-y-auto">{atividades.length === 0 ? <div className="text-[12px] text-on-surface-variant">Nenhuma interação registrada.</div> : atividades.map(a => <div key={a.id} className="text-[12px] py-1 border-b border-outline-variant/40"><span className="text-on-surface-variant">{new Date(a.created_at + (/[zZ]|[+-]\d\d:?\d\d$/.test(a.created_at) ? '' : 'Z')).toLocaleString('pt-BR')}</span> · {a.descricao}</div>)}</div>
             <div className="flex gap-2 justify-end flex-wrap">
+              {['novo', 'abordado', 'frio'].includes(modal.p.status) && modal.p.tipo_abordagem !== 'edital' && <button className={btnSmCls} onClick={() => setModal({ tipo: 'resposta', p: modal.p })}>💬 Respondeu</button>}
+              {!['lead', 'descartado'].includes(modal.p.status) && <button className={btnDangerSmCls} onClick={() => { setMotivo(MOTIVOS_DESCARTE[0]); setModal({ tipo: 'descartar', p: modal.p }) }}>✕ Descartar</button>}
               {modal.p.fila_data !== hoje && modal.p.status !== 'lead' && <button className={btnSmCls} onClick={() => { puxarParaHoje(modal.p); setModal(null) }}>+ fila de hoje</button>}
               <button className={btnSecondaryCls} onClick={() => setModal(null)}>Fechar</button>
             </div>

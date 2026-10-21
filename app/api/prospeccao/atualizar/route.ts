@@ -26,7 +26,7 @@ async function executar(req: Request, forcar: boolean) {
   }
 
   await encerrarEditaisVencidos()
-  const fila = await gerarFila(await carregarConfig())
+  const fila = await gerarFila(await carregarConfig(), true)
   return Response.json({ ok: true, origem: a.origem, fontes, fila })
 }
 

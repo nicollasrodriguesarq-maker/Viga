@@ -97,6 +97,8 @@ export async function registrarCandidatos(lista: Candidato[], cfg: Config, conhe
       gatilho: c.gatilho || null, gatilho_data: c.gatilho_data || null, prazo: c.prazo || null, valor_estimado: c.valor_estimado ?? null,
       link_origem: c.link_origem || null, detalhes: c.detalhes || null, observacao: c.observacao || null,
     }
+    // contato sem nenhuma forma de abordagem não serve (edital sempre tem o link)
+    if (!edital && !tel && !email && !c.site && !c.instagram) { resumo.baixa_aderencia++; continue }
     const s = calcularScore(registro, cfg, hoje)
     if (s.score < scoreMinimoGravar) { resumo.baixa_aderencia++; continue }
     registro.score = s.score; registro.score_detalhe = s.detalhe
@@ -264,21 +266,11 @@ export async function fonteGoogle(cfg: Config, conhecidos: Conhecidos): Promise<
 }
 
 // ── Fila do dia: follow-ups vencidos + melhores prospectos novos ─────────────────────
-export async function gerarFila(cfg: Config): Promise<{ gerada: boolean; followups: number; novos: number }> {
-  const hoje = hojeBR()
-  // trava: só uma execução por dia gera a fila (duas pessoas abrindo a tela juntas não duplicam)
-  const trava = await sb(`crm_prospeccao_config?id=eq.1&or=(ultima_fila.is.null,ultima_fila.neq.${hoje})`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ ultima_fila: hoje }) })
-  const ganhou = trava.ok ? await trava.json() : []
-  if (!Array.isArray(ganhou) || ganhou.length === 0) return { gerada: false, followups: 0, novos: 0 }
-
-  // quem estava "frio" há tempo suficiente volta a ser novo
-  await sb(`crm_prospectos?status=eq.frio&proximo_contato=lte.${hoje}`, { method: 'PATCH', body: JSON.stringify({ status: 'novo', tentativas: 0, proximo_contato: null, updated_at: new Date().toISOString() }) })
-  await encerrarEditaisVencidos()
-
-  const follow = await sbJson<any[]>(`crm_prospectos?status=eq.abordado&proximo_contato=lte.${hoje}&select=id&order=proximo_contato.asc,score.desc&limit=8`)
-  const vagas = Math.max(2, (cfg.meta_diaria || 5) - follow.length)
-  const candidatos = await sbJson<any[]>(`crm_prospectos?status=eq.novo&score=gte.${cfg.score_minimo ?? 55}&select=id,tipo_abordagem,score&order=score.desc,created_at.desc&limit=60`)
-  const maxEditais = Math.ceil(vagas * 0.4)
+// Escolhe os melhores contatos novos (no máximo 40% editais) para ocupar `vagas` lugares; ignora quem já está na fila de hoje.
+async function escolherNovos(cfg: Config, vagas: number, hoje: string) {
+  if (vagas <= 0) return []
+  const candidatos = await sbJson<any[]>(`crm_prospectos?status=eq.novo&score=gte.${cfg.score_minimo ?? 55}&or=(fila_data.is.null,fila_data.neq.${hoje})&select=id,tipo_abordagem,score&order=score.desc,created_at.desc,id.asc&limit=60`)
+  const maxEditais = Math.ceil((cfg.meta_diaria || 5) * 0.4)
   const escolhidos: any[] = []
   let editais = 0
   for (const c of candidatos) {
@@ -290,6 +282,30 @@ export async function gerarFila(cfg: Config): Promise<{ gerada: boolean; followu
     if (escolhidos.length >= vagas) break
     if (!escolhidos.includes(c)) escolhidos.push(c)
   }
+  return escolhidos
+}
+
+export async function gerarFila(cfg: Config, completar = false): Promise<{ gerada: boolean; followups: number; novos: number }> {
+  const hoje = hojeBR()
+  // trava: só uma execução por dia faz a montagem inicial (duas pessoas abrindo a tela juntas não duplicam)
+  const trava = await sb(`crm_prospeccao_config?id=eq.1&or=(ultima_fila.is.null,ultima_fila.neq.${hoje})`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ ultima_fila: hoje }) })
+  const ganhou = trava.ok ? await trava.json() : []
+  if (!Array.isArray(ganhou) || ganhou.length === 0) {
+    // quem perdeu a corrida não mexe na fila (o vencedor ainda está montando); só a busca de novos contatos completa vagas
+    if (!completar) return { gerada: false, followups: 0, novos: 0 }
+    // a fila de hoje já foi montada: se chegaram contatos depois (nova busca) e ainda há vaga, completa — é idempotente
+    const naFila = await sbJson<any[]>(`crm_prospectos?fila_data=eq.${hoje}&select=id&limit=200`)
+    const extras = await escolherNovos(cfg, (cfg.meta_diaria || 5) - naFila.length, hoje)
+    if (extras.length) await sb(`crm_prospectos?id=in.(${extras.map(x => x.id).join(',')})`, { method: 'PATCH', body: JSON.stringify({ fila_data: hoje, updated_at: new Date().toISOString() }) })
+    return { gerada: false, followups: 0, novos: extras.length }
+  }
+
+  // quem estava "frio" há tempo suficiente volta a ser novo
+  await sb(`crm_prospectos?status=eq.frio&proximo_contato=lte.${hoje}`, { method: 'PATCH', body: JSON.stringify({ status: 'novo', tentativas: 0, proximo_contato: null, updated_at: new Date().toISOString() }) })
+  await encerrarEditaisVencidos()
+
+  const follow = await sbJson<any[]>(`crm_prospectos?status=eq.abordado&proximo_contato=lte.${hoje}&select=id&order=proximo_contato.asc,score.desc&limit=8`)
+  const escolhidos = await escolherNovos(cfg, Math.max(2, (cfg.meta_diaria || 5) - follow.length), hoje)
   const ids = [...follow, ...escolhidos].map(x => x.id)
   if (ids.length) {
     await sb(`crm_prospectos?id=in.(${ids.join(',')})`, { method: 'PATCH', body: JSON.stringify({ fila_data: hoje, updated_at: new Date().toISOString() }) })

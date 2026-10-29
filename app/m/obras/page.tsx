@@ -456,12 +456,15 @@ export default function ObrasMobile() {
     const nomeEmpresa = cfg.nome_empresa || 'VIGA'
     const nomeGrupo = grupo.tipo === 'cliente' ? (obra?.cliente || 'Cliente') : (grupo.fornecedor || 'Fornecedor')
 
-    let pagoGrupo = 0, totalLiquidoGeral = 0, contadorMedicao = 0
+    let pagoGrupo = 0, totalLiquidoGeral = 0, contadorMedicao = 0, haAbatidas = false
     const linhasHtml = grupo.medicoes.map((med) => {
-      const { totalLiquido } = totalsMedicao(med)
+      const { totalLiquido, totalPeriodo } = totalsMedicao(med)
       totalLiquidoGeral += totalLiquido
       const lanc = med.lancamento_id ? lancs.find((l: any) => l.id === med.lancamento_id) : null
-      const statusPag = !lanc ? 'Rascunho' : lanc.status === 'pago' ? 'Pago' : 'Programado'
+      // medição inteira abatida do adiantamento: o valor já foi pago no adiantamento, então consta como Pago
+      const abatida = med.valor_adiantamento == null && totalLiquido <= 0.005 && totalPeriodo > 0
+      if (abatida) haAbatidas = true
+      const statusPag = abatida ? 'Pago' : !lanc ? 'Rascunho' : lanc.status === 'pago' ? 'Pago' : 'Programado'
       const corStatus = statusPag === 'Pago' ? '#6ee9e0' : statusPag === 'Programado' ? '#ffcbac' : '#869391'
       if (lanc?.status === 'pago') pagoGrupo += totalLiquido
       const isAdiantamento = med.valor_adiantamento != null
@@ -469,7 +472,7 @@ export default function ObrasMobile() {
       return `
       <tr>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${rotulo} <span style="color:#869391">· ${med.numero}</span>${isAdiantamento && med.observacao ? ` <span style="color:#869391">— ${med.observacao}</span>` : ''}</td>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${new Date(med.data).toLocaleDateString('pt-BR')}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center">${dataBR(med.data)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;font-weight:700;color:#6ee9e0">${moeda(totalLiquido)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:center;font-weight:700;color:${corStatus}">${statusPag}</td>
       </tr>`
@@ -504,7 +507,7 @@ export default function ObrasMobile() {
         <td style="padding:6px 8px;border-bottom:1px solid #3d4948;text-align:right;color:#ffb4ab">${moeda(l.valorFalta)}</td>
       </tr>`
     }).join('')
-    const mapaCabecalhoMedicoes = mapa.medicoesReais.map((med, i) => `<th colspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase;border-left:1px solid #3d4948">Medição ${i + 1}<br/><span style="font-weight:400;text-transform:none">${new Date(med.data).toLocaleDateString('pt-BR')}</span></th>`).join('')
+    const mapaCabecalhoMedicoes = mapa.medicoesReais.map((med, i) => `<th colspan="2" style="padding:6px 8px;text-align:center;font-size:9px;color:#869391;text-transform:uppercase;border-left:1px solid #3d4948">Medição ${i + 1}<br/><span style="font-weight:400;text-transform:none">${dataBR(med.data)}</span></th>`).join('')
     const mapaSubcabecalhoMedicoes = mapa.medicoesReais.map(() => `<th style="padding:4px 8px;text-align:center;font-size:9px;color:#869391;border-left:1px solid #3d4948">%</th><th style="padding:4px 8px;text-align:center;font-size:9px;color:#869391">R$</th>`).join('')
     const mapaRodapeMedicoes = mapa.totaisPorMedicao.map(v => `
         <td style="padding:8px;border-left:1px solid #3d4948;text-align:center;font-size:9px;color:#869391">${mapa.totalBase > 0 ? ((v / mapa.totalBase) * 100).toFixed(0) : '0'}%</td>
@@ -648,6 +651,7 @@ export default function ObrasMobile() {
           </tr>
         </tfoot>
       </table>
+      ${haAbatidas ? `<p style="color:#869391;font-size:10px;margin:-10px 0 18px">Medições com valor líquido R$ 0,00 foram integralmente abatidas do adiantamento já pago e constam como pagas.</p>` : ''}
 
       <h2 style="font-size:16px;font-weight:700;color:#6ee9e0;text-transform:uppercase;margin-bottom:4px">Mapa Geral de Medição</h2>
       <p style="color:#bcc9c7;font-size:11px;margin-bottom:12px">Escopo completo × cada medição × acumulado × saldo, item a item</p>
@@ -1003,7 +1007,7 @@ export default function ObrasMobile() {
         </div>
         <div style="background:#1b2027;border:1px solid #3d4948;border-radius:12px;padding:16px">
           <span style="font-size:10px;color:#869391;text-transform:uppercase">Período Previsto</span>
-          <p style="font-size:15px;font-weight:700;margin-top:4px">${obra.data_inicio ? new Date(obra.data_inicio).toLocaleDateString('pt-BR') : '—'} — ${obra.data_previsao ? new Date(obra.data_previsao).toLocaleDateString('pt-BR') : '—'}</p>
+          <p style="font-size:15px;font-weight:700;margin-top:4px">${obra.data_inicio ? dataBR(obra.data_inicio) : '—'} — ${obra.data_previsao ? dataBR(obra.data_previsao) : '—'}</p>
         </div>
       </div>
       ${obra.data_inicio && obra.data_previsao ? htmlGantt(new Date(obra.data_inicio + 'T00:00:00'), new Date(obra.data_previsao + 'T00:00:00'), linhas.map(l => ({ nome: l.nome, fornecedor: l.fornecedor, inicioPrevisto: l.et.data_inicio_prevista, fimPrevisto: l.et.data_fim_prevista, status: statusVisualEtapa(l.et, hojeStr) }))) : ''}
@@ -1162,7 +1166,7 @@ export default function ObrasMobile() {
 
     const movimentosHtml = movimentos.map(m => `
       <tr>
-        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:12px">${new Date(m.data).toLocaleDateString('pt-BR')}</td>
+        <td style="padding:8px 10px;border-bottom:1px solid #3d4948;font-family:'JetBrains Mono',monospace;font-size:12px">${dataBR(m.data)}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948">${m.descricao || ''}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;color:#bcc9c7;font-size:12px">${m.categoria || '—'}</td>
         <td style="padding:8px 10px;border-bottom:1px solid #3d4948;text-align:right;color:${m.tipo === 'entrada' ? '#6ee9e0' : '#ffb4ab'}">${m.tipo === 'entrada' ? '+' : '-'}${moeda(m.valor)}</td>
@@ -1227,7 +1231,7 @@ export default function ObrasMobile() {
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Projeto</span><span style="font-size:14px;font-weight:600">${obra.nome}</span></div>
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cliente</span><span style="font-size:14px;font-weight:600">${obra.cliente}${obra.contato_nome ? ' <span style="font-weight:400;color:#bcc9c7;font-size:12px">(A/C ' + obra.contato_nome + ')</span>' : ''}</span></div>
             <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Localização</span><span style="font-size:14px;font-weight:600">${obra.endereco || '—'}</span></div>
-            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cronograma</span><span style="font-size:14px;font-weight:600">${obra.data_inicio ? new Date(obra.data_inicio).toLocaleDateString('pt-BR') : '—'} — ${obra.data_previsao ? new Date(obra.data_previsao).toLocaleDateString('pt-BR') : '—'}</span></div>
+            <div><span style="font-size:9px;color:#869391;text-transform:uppercase;display:block">Cronograma</span><span style="font-size:14px;font-weight:600">${obra.data_inicio ? dataBR(obra.data_inicio) : '—'} — ${obra.data_previsao ? dataBR(obra.data_previsao) : '—'}</span></div>
           </div>
         </div>
         <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center">

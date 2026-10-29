@@ -19,7 +19,7 @@ const H = { 'Content-Type': 'application/json', apikey: ANON, Authorization: 'Be
 
 export const EVENTO_DADOS_ALTERADOS = 'viga:dados-alterados'
 
-export type CategoriaAlerta = 'followup' | 'proposta' | 'orcamento_vencido' | 'obra' | 'etapa' | 'pagar' | 'receber' | 'solicitacao' | 'convite' | 'prospeccao'
+export type CategoriaAlerta = 'followup' | 'proposta' | 'orcamento_vencido' | 'obra' | 'etapa' | 'pagar' | 'receber' | 'solicitacao' | 'convite' | 'prospeccao' | 'atividade_atrasada' | 'atividade_vencendo'
 
 export interface AlertaItem {
   id: string
@@ -41,9 +41,11 @@ export const META_ALERTA: Record<CategoriaAlerta, { icone: string; nome: string;
   receber: { icone: '💰', nome: 'A receber vencido', texto: 'text-tertiary', fundo: 'bg-tertiary/10', borda: 'border-tertiary/30' },
   solicitacao: { icone: '🔐', nome: 'Pedidos de acesso', texto: 'text-primary', fundo: 'bg-primary/10', borda: 'border-primary/30' },
   convite: { icone: '📨', nome: 'Convites de reunião', texto: 'text-secondary', fundo: 'bg-secondary/10', borda: 'border-secondary/30' },
+  atividade_atrasada: { icone: '⏰', nome: 'Atividades atrasadas', texto: 'text-error', fundo: 'bg-error/10', borda: 'border-error/30' },
+  atividade_vencendo: { icone: '🔔', nome: 'Atividades perto do prazo', texto: 'text-tertiary', fundo: 'bg-tertiary/10', borda: 'border-tertiary/30' },
   prospeccao: { icone: '🎯', nome: 'Prospecção do dia', texto: 'text-primary', fundo: 'bg-primary/10', borda: 'border-primary/30' },
 }
-export const ORDEM_CATEGORIAS: CategoriaAlerta[] = ['convite', 'obra', 'etapa', 'pagar', 'orcamento_vencido', 'followup', 'proposta', 'receber', 'prospeccao', 'solicitacao']
+export const ORDEM_CATEGORIAS: CategoriaAlerta[] = ['convite', 'atividade_atrasada', 'obra', 'etapa', 'pagar', 'atividade_vencendo', 'orcamento_vencido', 'followup', 'proposta', 'receber', 'prospeccao', 'solicitacao']
 
 async function get(tabela: string, query = ''): Promise<any[]> {
   try {
@@ -181,6 +183,25 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
       const partes = [novos > 0 ? `${novos} ${plural(novos, 'contato novo', 'contatos novos')}` : '', follow > 0 ? `${follow} ${plural(follow, 'follow-up', 'follow-ups')}` : ''].filter(Boolean).join(' e ')
       alertas.push({ id: 'prospeccao-dia', categoria: 'prospeccao', titulo: 'Fila de prospecção de hoje', descricao: `${partes} para abordar`, href: '/crm?aba=prospeccao', peso: follow })
     }
+  }
+
+  // ── Atividades da equipe em que sou responsável: atrasadas e perto do prazo (somem ao concluir minha parte) ──
+  if (perm && meuId) {
+    try {
+      const minhas = await get('equipe_atividade_responsaveis', `?usuario_id=eq.${meuId}&status=neq.concluida&select=atividade_id,status`)
+      if (minhas.length > 0) {
+        const ativs = await get('equipe_atividades', `?id=in.(${minhas.map((m: any) => m.atividade_id).join(',')})&select=id,titulo,tipo,data_inicio,data_fim,alerta_dias`)
+        for (const a of ativs) {
+          const faltam = diasEntre(hoje, a.data_fim)
+          if (faltam < 0) {
+            const dias = -faltam
+            alertas.push({ id: 'atv-atraso-' + a.id, categoria: 'atividade_atrasada', titulo: a.titulo, descricao: `${a.tipo} · prazo era ${dataBR(a.data_fim)} — atrasada há ${dias} ${plural(dias, 'dia', 'dias')}`, href: '/#atividades', peso: dias })
+          } else if (faltam <= (a.alerta_dias ?? 1)) {
+            alertas.push({ id: 'atv-prazo-' + a.id, categoria: 'atividade_vencendo', titulo: a.titulo, descricao: `${a.tipo} · ${faltam === 0 ? 'vence hoje' : faltam === 1 ? `vence amanhã (${dataBR(a.data_fim)})` : `vence em ${faltam} dias (${dataBR(a.data_fim)})`}`, href: '/#atividades', peso: 30 - faltam })
+          }
+        }
+      }
+    } catch {}
   }
 
   // ── Convites de reunião sem resposta (somem ao aceitar/recusar ou depois que a data passa) ──

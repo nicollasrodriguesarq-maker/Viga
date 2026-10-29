@@ -1,7 +1,8 @@
 'use client'
 import { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
-import { obterMinhasPermissoes } from '../lib/permissoes'
+import { obterMinhasPermissoes, obterUsuariosVisiveis, type Permissoes } from '../lib/permissoes'
+import PainelAtividadesEquipe from '../components/PainelAtividadesEquipe'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -48,12 +49,18 @@ export default function Equipes() {
   const [janela, setJanela] = useState<'time' | null>(null)
   const [fTime, setFTime] = useState(FTIME_VAZIO)
   const [editandoTime, setEditandoTime] = useState<any>(null)
+  const [perm, setPerm] = useState<Permissoes | null>(null)
+  const [visiveis, setVisiveis] = useState<string[] | null>(null)
+  const [aba, setAba] = useState<'atividades' | 'times'>('atividades')
 
   useEffect(() => {
     if (!localStorage.getItem('viga_token')) { window.location.href = '/'; return }
     setUserEmail(localStorage.getItem('viga_email') || '')
-    obterMinhasPermissoes().then(perm => {
-      if (perm?.role !== 'admin') { window.location.href = '/'; return }
+    obterMinhasPermissoes().then(async p => {
+      // admin e gerente de time usam a página; o cadastro de times continua só do admin
+      if (p?.role !== 'admin' && p?.role !== 'gerente_time') { window.location.href = '/'; return }
+      setPerm(p)
+      setVisiveis(p.role === 'admin' ? null : await obterUsuariosVisiveis(p))
     })
     carregar()
   }, [])
@@ -69,12 +76,14 @@ export default function Equipes() {
     setLoading(true)
     const [t, u] = await Promise.all([
       get('times', '?order=nome'),
-      get('usuarios', '?select=id,nome,email,role,time_id&order=nome'),
+      get('usuarios', '?select=id,nome,email,role,time_id&aprovado=eq.true&order=nome'),
     ])
     setTimes(t); setUsuarios(u)
     setLoading(false)
   }
 
+  const souAdmin = perm?.role === 'admin'
+  const selecionaveis = usuarios.filter(u => visiveis === null || visiveis.includes(u.id))
   const gerentes = usuarios.filter(u => u.role === 'gerente_time')
   const tecnicos = usuarios.filter(u => u.role === 'usuario')
 
@@ -114,13 +123,28 @@ export default function Equipes() {
 
   return (
     <Layout userEmail={userEmail} onLogout={sair} headerTitle="Equipes & Times">
-      <div className="flex justify-between items-center mb-lg">
+      <div className="flex justify-between items-center mb-lg flex-wrap gap-3">
         <div>
           <h1 className="text-headline-md font-headline text-on-surface">Equipes & Times</h1>
-          <p className="text-body-sm text-on-surface-variant">Organize os times e quem é o gerente de cada um</p>
+          <p className="text-body-sm text-on-surface-variant">Atividades da equipe e organização dos times</p>
         </div>
-        <button className={btnPrimaryCls} onClick={abrirNovoTime}>+ Novo Time</button>
+        <div className="flex gap-3 items-center">
+          {souAdmin && (
+            <div className="flex gap-1 p-1 bg-surface-container rounded-xl border border-outline-variant">
+              {([['atividades', '📋 Atividades'], ['times', '👥 Times']] as const).map(([k, rot]) => (
+                <button key={k} onClick={() => setAba(k)} data-testid={`aba-${k}`} className={`px-3.5 py-2 rounded-lg text-sm transition-colors cursor-pointer ${aba === k ? 'bg-primary/20 text-primary font-bold' : 'text-on-surface-variant hover:bg-surface-variant'}`}>{rot}</button>
+              ))}
+            </div>
+          )}
+          {souAdmin && aba === 'times' && <button className={btnPrimaryCls} onClick={abrirNovoTime}>+ Novo Time</button>}
+        </div>
       </div>
+
+      {(aba === 'atividades' || !souAdmin) && perm && (
+        <PainelAtividadesEquipe usuarios={usuarios} selecionaveis={selecionaveis} visiveis={visiveis} meuId={perm.id} />
+      )}
+
+      {souAdmin && aba === 'times' && (<>
 
       <div className={sectionCls}>
         <div className="text-sm font-bold text-on-surface mb-4">👥 Times</div>
@@ -180,6 +204,8 @@ export default function Equipes() {
           </div>
         )}
       </div>
+
+      </>)}
 
       {janela === 'time' && (
         <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>

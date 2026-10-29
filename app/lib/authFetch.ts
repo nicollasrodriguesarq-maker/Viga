@@ -11,7 +11,7 @@
 import { EVENTO_DADOS_ALTERADOS } from './alertas'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
-const BUCKETS_PRIVADOS = ['notas-fiscais', 'obra-funcionarios-arquivos', 'levantamento-arquivos']
+const BUCKETS_PRIVADOS = ['notas-fiscais', 'obra-funcionarios-arquivos', 'levantamento-arquivos', 'equipe-atividades']
 
 declare global { interface Window { __vigaAuthFetch?: boolean; __vigaTokenValido?: () => Promise<string | null> } }
 

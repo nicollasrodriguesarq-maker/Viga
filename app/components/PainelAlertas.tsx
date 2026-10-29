@@ -7,7 +7,7 @@ import { useAlertas } from '../lib/useAlertas'
 // Resumo dos alertas no Dashboard: contagem por tipo (clicável para filtrar) e a lista dos mais
 // urgentes. Atualiza sozinho — resolveu o problema, o alerta sai daqui.
 // No app do celular (mobile) os links vão para as telas /m/...; o CRM só existe na versão desktop.
-const ROTA_MOBILE: Record<string, string> = { '/agenda': '/m/agenda', '/obras': '/m/obras', '/financeiro': '/m/financeiro', '/levantamento': '/m/levantamento', '/orcamento': '/m/orcamento' }
+const ROTA_MOBILE: Record<string, string> = { '/agenda': '/m/agenda', '/obras': '/m/obras', '/financeiro': '/m/financeiro', '/levantamento': '/m/levantamento', '/orcamento': '/m/orcamento', '/#atividades': '/m#atividades' }
 
 export default function PainelAlertas({ limite = 8, mobile = false, compacto = false, className = 'mb-xl' }: { limite?: number; mobile?: boolean; compacto?: boolean; className?: string }) {
   const { alertas, carregando, recarregar } = useAlertas()

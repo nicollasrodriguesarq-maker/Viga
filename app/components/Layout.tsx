@@ -12,6 +12,7 @@ interface NavItem {
   disabled?: boolean
   modulo?: string
   adminOnly?: boolean
+  gestorOnly?: boolean // admin ou gerente de time
 }
 
 const NAV: NavItem[] = [
@@ -23,7 +24,7 @@ const NAV: NavItem[] = [
   { icon: 'real_estate_agent', label: 'Oportunidades', href: '/oportunidades', modulo: 'oportunidades' },
   { icon: 'inventory_2', label: 'Suprimentos', href: '/suprimentos', disabled: true },
   { icon: 'group', label: 'Clientes & CRM', href: '/crm', modulo: 'crm' },
-  { icon: 'assignment', label: 'Equipes & Times', href: '/equipes', adminOnly: true },
+  { icon: 'assignment', label: 'Equipes & Times', href: '/equipes', gestorOnly: true },
   { icon: 'calendar_today', label: 'Agenda', href: '/agenda', modulo: 'agenda' },
 ]
 
@@ -46,7 +47,8 @@ export default function Layout({ children, userEmail, onLogout, topbarSlot, sear
 
   const navVisivel = NAV.filter(item =>
     (!item.modulo || temAcessoModulo(permissoes, item.modulo)) &&
-    (!item.adminOnly || permissoes?.role === 'admin')
+    (!item.adminOnly || permissoes?.role === 'admin') &&
+    (!item.gestorOnly || permissoes?.role === 'admin' || permissoes?.role === 'gerente_time')
   )
 
   return (

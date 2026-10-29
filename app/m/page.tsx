@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from 'react'
 import Link from 'next/link'
 import MobileShell from './components/MobileShell'
 import PainelAlertas from '../components/PainelAlertas'
+import AtividadesHoje from '../components/AtividadesHoje'
 import { obterMinhasPermissoesApp, obterUsuariosVisiveis } from '../lib/permissoes'
 import { hojeISO } from '../lib/datas'
 import { convitesDoDia } from '../lib/agendaParticipantes'
@@ -28,6 +29,7 @@ export default function DashboardMobile() {
   const [aPagar, setAPagar] = useState(0)
   const [obrasRecentes, setObrasRecentes] = useState<any[]>([])
   const [compromissosHoje, setCompromissosHoje] = useState<any[]>([])
+  const [todosUsuarios, setTodosUsuarios] = useState<any[]>([])
   const [carregando, setCarregando] = useState(true)
   const [meuId, setMeuId] = useState('')
   const [anotacoes, setAnotacoes] = useState('')
@@ -61,6 +63,7 @@ export default function DashboardMobile() {
     const perm = await obterMinhasPermissoesApp()
     if (perm?.id) {
       setMeuId(perm.id)
+      get('usuarios', '?select=id,nome,email&order=nome').then(setTodosUsuarios)
       const notas = await get('anotacoes_pessoais', '?usuario_id=eq.' + perm.id + '&select=conteudo')
       setAnotacoes(notas[0]?.conteudo || '')
       setAnotacoesCarregadas(true)
@@ -123,6 +126,8 @@ export default function DashboardMobile() {
         </div>
 
         <PainelAlertas limite={5} mobile />
+
+        {meuId && <AtividadesHoje meuId={meuId} usuarios={todosUsuarios} mobile />}
 
         <div className="bg-surface-container border border-outline-variant rounded-xl p-4">
           <div className="text-sm font-bold text-on-surface mb-3">📅 Compromissos de Hoje</div>

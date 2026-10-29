@@ -3,6 +3,7 @@ import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import Layout from './components/Layout'
 import PainelAlertas from './components/PainelAlertas'
+import AtividadesHoje from './components/AtividadesHoje'
 import { obterMinhasPermissoes, obterUsuariosVisiveis } from './lib/permissoes'
 import { hojeISO } from './lib/datas'
 import { convitesDoDia } from './lib/agendaParticipantes'
@@ -36,7 +37,7 @@ const MODULOS = [
   { icon: '🏚️', nome: 'Oportunidades', desc: 'Captação de imóveis para flip', href: '/oportunidades', ativo: true },
   { icon: '📦', nome: 'Suprimentos', desc: 'Compras e estoque', href: '/suprimentos', ativo: false },
   { icon: '🤝', nome: 'CRM', desc: 'Clientes e vendas', href: '/crm', ativo: true },
-  { icon: '👥', nome: 'Equipes', desc: 'Tarefas e alocação', href: '/equipes', ativo: true, adminOnly: true },
+  { icon: '👥', nome: 'Equipes', desc: 'Tarefas e alocação', href: '/equipes', ativo: true, gestorOnly: true },
   { icon: '📅', nome: 'Agenda', desc: 'Compromissos', href: '/agenda', ativo: true },
 ]
 
@@ -64,6 +65,7 @@ export default function Home() {
   const [souAdmin, setSouAdmin] = useState(false)
   const [souGestor, setSouGestor] = useState(false)
   const [usuariosEquipe, setUsuariosEquipe] = useState<any[]>([])
+  const [todosUsuarios, setTodosUsuarios] = useState<any[]>([])
   const [obrasAtivas, setObrasAtivas] = useState(0)
   const [faturamentoMes, setFaturamentoMes] = useState(0)
   const [aReceber, setAReceber] = useState(0)
@@ -129,8 +131,9 @@ export default function Home() {
         setAnotacoesCarregadas(true)
       }
       const visiveis = await obterUsuariosVisiveis(perm)
+      const u = await get('usuarios', '?select=id,nome,email&order=nome')
+      setTodosUsuarios(u)
       if (ehGestor) {
-        const u = await get('usuarios', '?select=id,nome,email&order=nome')
         setUsuariosEquipe(u.filter((x: any) => visiveis.includes(x.id) && x.id !== perm?.id))
       }
 
@@ -299,9 +302,14 @@ export default function Home() {
           </Link>
         </div>
 
-        {/* Meus alertas ao lado dos compromissos de hoje (aproveita a largura da tela) */}
+        {/* Meus alertas ao lado das minhas atividades de hoje (aproveita a largura da tela) */}
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-lg mb-xl items-stretch">
         <PainelAlertas compacto className="h-full" />
+        {/* Minhas atividades de hoje (a pessoa atualiza o status e anexa arquivos ali mesmo) */}
+        {meuId ? <AtividadesHoje meuId={meuId} usuarios={todosUsuarios} /> : <div />}
+        </div>
+
+        <div className="mb-xl">
 
         {/* Compromissos de hoje */}
         <section className="bg-surface-container rounded-2xl card-border overflow-hidden flex flex-col h-full">
@@ -460,7 +468,7 @@ export default function Home() {
         <div className="bg-surface-container rounded-2xl card-border p-lg mb-xl">
           <h3 className="font-headline text-headline-sm text-on-surface mb-md">Módulos do Sistema</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-md">
-            {MODULOS.filter(mod => !(mod as any).adminOnly || souAdmin).map(mod => {
+            {MODULOS.filter(mod => (!(mod as any).adminOnly || souAdmin) && (!(mod as any).gestorOnly || souGestor)).map(mod => {
               const conteudo = (
                 <>
                   <div className="text-2xl mb-2">{mod.icon}</div>

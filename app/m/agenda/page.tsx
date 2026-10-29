@@ -2,8 +2,9 @@
 import { useEffect, useState } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp, obterUsuariosVisiveis } from '../../lib/permissoes'
+import { CHAVE, useAbrirAlvo } from '../../lib/abrirAlvo'
 import { hojeISO } from '../../lib/datas'
-import { carregarCompromissos, carregarTodosCompromissos, gravarCompromisso, excluirCompromissoDb, salvarParticipantes, responderConvite, type StatusConvite } from '../../lib/agendaParticipantes'
+import { carregarCompromissos, carregarTodosCompromissos, gravarCompromisso, excluirCompromissoDb, salvarParticipantes, responderConvite, anexarParticipantes, type StatusConvite } from '../../lib/agendaParticipantes'
 import { CampoParticipantes, AvisoConflitos, ListaParticipantes, BotoesConvite, BotaoEntrarReuniao } from '../../components/ParticipantesCompromisso'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -135,6 +136,14 @@ export default function AgendaMobile() {
   }, [])
 
   useEffect(() => { if (meuId) carregar() }, [alvoAgenda, meuId])
+
+  // abre o compromisso apontado por um alerta (ex.: convite): quem pode editar abre a edição; convidado vê o dia com os botões de aceitar/recusar
+  useAbrirAlvo(CHAVE.compromisso, !!meuId, async id => {
+    const c = compromissos.find((x: any) => x.id === id) || (await anexarParticipantes(await buscar('agenda_compromissos', '?id=eq.' + id)))[0]
+    if (!c) return
+    if (c.data) setDataRef(new Date(c.data + 'T00:00:00'))
+    if (podeEditar(c)) abrirEditar(c); else setVisualizacao('dia')
+  })
 
   async function carregar() {
     // agenda da pessoa = o que é dela + os compromissos para os quais foi convidada

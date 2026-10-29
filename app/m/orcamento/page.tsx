@@ -2,6 +2,7 @@
 import { useEffect, useState, Fragment } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
+import { CHAVE, useAbrirAlvo } from '../../lib/abrirAlvo'
 import { rotuloRev, codigoComRev } from '../../lib/revisoes'
 import { brutoItem, descontoItem, liquidoItem, pctDescontoItem, fatorDesconto, tipoDescontoItem } from '../../lib/orcamentoCalc'
 
@@ -73,6 +74,12 @@ export default function OrcamentoMobile() {
     obterMinhasPermissoesApp().then(perm => { if (!temAcessoModuloApp(perm, 'orcamento')) window.location.href = '/m' })
     carregar()
   }, [])
+
+  // abre o orçamento apontado por um alerta
+  useAbrirAlvo(CHAVE.orcamento, true, async id => {
+    const r = await buscar('orcamentos', '?id=eq.' + id)
+    if (r[0]) { setDetalhe(r[0]); setAmbienteAberto(null) }
+  })
 
   async function carregar() {
     const [o, a, i, b, ob] = await Promise.all([

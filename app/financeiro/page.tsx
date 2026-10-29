@@ -2,6 +2,7 @@
 import { useState, useEffect, useRef } from 'react'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
+import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 import { hojeISO, somarDiasISO, somarMesesISO, arred2, dividirParcelas, dataBR } from '../lib/datas'
 import { calcularPeriodo, dataEfetiva, ehMovInvestimento, lancamentosDaEmpresa, CAT_APORTE, CAT_RESGATE, CAT_FATURA } from '../lib/financeiroCalc'
 import { agruparFaturas, vencimentoDaFatura } from '../lib/faturasCartao'
@@ -353,6 +354,15 @@ export default function Financeiro() {
     obterMinhasPermissoes().then(perm => { if (!temAcessoModulo(perm, 'financeiro')) window.location.href = '/' })
     carregar()
   }, [])
+
+  // abre o lançamento apontado por um alerta (conta a pagar/receber) já no mês dele
+  useAbrirAlvo(CHAVE.lancamento, !loading, id => {
+    const l = lancamentos.find((x: any) => x.id === id)
+    if (!l) return alert('Esse lançamento não existe mais (pode já ter sido pago ou excluído).')
+    const mes = String(l.data_vencimento || l.data || '').slice(0, 7)
+    if (/^d{4}-d{2}$/.test(mes)) setFiltroMes(mes)
+    editarLancamento(l)
+  })
 
   function sair() {
     localStorage.removeItem('viga_token')

@@ -3,7 +3,8 @@ import { useState, useEffect } from 'react'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo, obterUsuariosVisiveis } from '../lib/permissoes'
 import { hojeISO } from '../lib/datas'
-import { carregarCompromissos, carregarTodosCompromissos, gravarCompromisso, excluirCompromissoDb, salvarParticipantes, responderConvite, type StatusConvite } from '../lib/agendaParticipantes'
+import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
+import { carregarCompromissos, carregarTodosCompromissos, gravarCompromisso, excluirCompromissoDb, salvarParticipantes, responderConvite, anexarParticipantes, type StatusConvite } from '../lib/agendaParticipantes'
 import { CampoParticipantes, AvisoConflitos, ListaParticipantes, BotoesConvite, BotaoEntrarReuniao } from '../components/ParticipantesCompromisso'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -149,6 +150,15 @@ export default function Agenda() {
   }, [])
 
   useEffect(() => { if (meuId) carregar() }, [alvoAgenda, meuId])
+
+  // abre o compromisso apontado por um alerta (ex.: convite de reunião), já na semana dele
+  useAbrirAlvo(CHAVE.compromisso, !loading && !!meuId, async id => {
+    let c = compromissos.find((x: any) => x.id === id)
+    if (!c) { const r = await buscar('agenda_compromissos', '?id=eq.' + id); c = (await anexarParticipantes(r))[0] }
+    if (!c) return alert('Esse compromisso não existe mais.')
+    if (c.data) setDataRef(new Date(c.data + 'T00:00:00'))
+    abrirItem(c)
+  })
 
   function sair() {
     localStorage.removeItem('viga_token')

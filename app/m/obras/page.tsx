@@ -4,6 +4,7 @@ import MobileShell from '../components/MobileShell'
 import ResponsavelDoDocumento from '../../components/ResponsavelDoDocumento'
 import { arred2 } from '../../lib/datas'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
+import { CHAVE, useAbrirAlvo } from '../../lib/abrirAlvo'
 import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../../lib/medicoesCalc'
 import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma } from '../../lib/cronograma'
 
@@ -208,6 +209,12 @@ export default function ObrasMobile() {
     })
     carregar()
   }, [])
+
+  // abre a obra apontada por um alerta (na aba pedida, ex.: cronograma)
+  useAbrirAlvo(CHAVE.obra, true, async (id, abaAlvo) => {
+    const r = await buscar('obras', '?id=eq.' + id)
+    if (r[0]) { setDetalhe(r[0]); setAba(abaAlvo || 'resumo'); setTela('detalhe') }
+  })
 
   async function carregar() {
     const [o, l, g, s, orc, orcIt, med, medIt, et, rv, fu, fua, cronHist, bancoIt] = await Promise.all([

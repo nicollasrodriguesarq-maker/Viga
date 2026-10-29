@@ -12,6 +12,7 @@
 //    não entram (é dinheiro do cliente, igual ao Financeiro);
 //  • propostas (orçamentos) enviadas com validade vencida: somem ao mudar o status do orçamento.
 import { obterMinhasPermissoes, temAcessoModulo, type Permissoes } from './permissoes'
+import { CHAVE, definirAlvo } from './abrirAlvo'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -28,6 +29,7 @@ export interface AlertaItem {
   descricao: string
   href: string
   obraId?: string // abre a obra direto ao clicar
+  alvo?: { chave: string; id: string; aba?: string } // item que a página de destino abre sozinha ao clicar no alerta
   peso: number // dias de atraso (maior = mais urgente)
 }
 
@@ -88,7 +90,7 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
   for (const o of emExecucao) {
     if (o.data_previsao && o.data_previsao < hoje) {
       const dias = diasEntre(o.data_previsao, hoje)
-      alertas.push({ id: 'obra-' + o.id, categoria: 'obra', titulo: o.nome, descricao: `Prazo venceu em ${dataBR(o.data_previsao)} — atrasada há ${dias} ${plural(dias, 'dia', 'dias')}`, href: '/obras', obraId: o.id, peso: dias })
+      alertas.push({ id: 'obra-' + o.id, categoria: 'obra', titulo: o.nome, descricao: `Prazo venceu em ${dataBR(o.data_previsao)} — atrasada há ${dias} ${plural(dias, 'dia', 'dias')}`, href: '/obras', obraId: o.id, alvo: { chave: CHAVE.obra, id: o.id }, peso: dias })
     }
   }
   if (emExecucao.length > 0) {
@@ -107,7 +109,7 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
         alertas.push({
           id: 'etapas-' + o.id, categoria: 'etapa', titulo: o.nome,
           descricao: `${atrasadas.length} ${plural(atrasadas.length, 'etapa atrasada', 'etapas atrasadas')} no cronograma (mais antiga: “${atrasadas[0].nome || 'etapa'}”, ${pior} ${plural(pior, 'dia', 'dias')})`,
-          href: '/obras', obraId: o.id, peso: pior,
+          href: '/obras', obraId: o.id, alvo: { chave: CHAVE.obra, id: o.id, aba: 'cronograma' }, peso: pior,
         })
       }
     }
@@ -124,10 +126,10 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
         if (l.obra_id && gerenciamento.has(l.obra_id)) continue
         if (venc > em7) continue
         const dias = diasEntre(venc, hoje)
-        alertas.push({ id: 'pagar-' + l.id, categoria: 'pagar', titulo: l.descricao || 'Pagamento', descricao: `${moeda(l.valor)} · ${dias > 0 ? `venceu em ${dataBR(venc)} (${dias} ${plural(dias, 'dia', 'dias')} em atraso)` : dias === 0 ? 'vence hoje' : `vence em ${dataBR(venc)}`}`, href: '/financeiro', peso: dias })
+        alertas.push({ id: 'pagar-' + l.id, categoria: 'pagar', titulo: l.descricao || 'Pagamento', descricao: `${moeda(l.valor)} · ${dias > 0 ? `venceu em ${dataBR(venc)} (${dias} ${plural(dias, 'dia', 'dias')} em atraso)` : dias === 0 ? 'vence hoje' : `vence em ${dataBR(venc)}`}`, href: '/financeiro', alvo: { chave: CHAVE.lancamento, id: l.id }, peso: dias })
       } else if (l.tipo === 'entrada' && venc < hoje) {
         const dias = diasEntre(venc, hoje)
-        alertas.push({ id: 'receber-' + l.id, categoria: 'receber', titulo: l.descricao || 'Recebimento', descricao: `${moeda(l.valor)} · venceu em ${dataBR(venc)} (${dias} ${plural(dias, 'dia', 'dias')} sem receber)`, href: '/financeiro', peso: dias })
+        alertas.push({ id: 'receber-' + l.id, categoria: 'receber', titulo: l.descricao || 'Recebimento', descricao: `${moeda(l.valor)} · venceu em ${dataBR(venc)} (${dias} ${plural(dias, 'dia', 'dias')} sem receber)`, href: '/financeiro', alvo: { chave: CHAVE.lancamento, id: l.id }, peso: dias })
       }
     }
   }
@@ -151,12 +153,12 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
         if (l.proximo_followup > hoje) continue // reagendado para o futuro
         if (contato && contato >= l.proximo_followup) continue // contato feito desde a data do follow-up
         const dias = diasEntre(l.proximo_followup, hoje)
-        alertas.push({ id: 'followup-' + l.id, categoria: 'followup', titulo: l.nome, descricao: dias <= 0 ? 'Retorno agendado para hoje' : `Retorno atrasado há ${dias} ${plural(dias, 'dia', 'dias')} (era ${dataBR(l.proximo_followup)})`, href: '/crm', peso: dias })
+        alertas.push({ id: 'followup-' + l.id, categoria: 'followup', titulo: l.nome, descricao: dias <= 0 ? 'Retorno agendado para hoje' : `Retorno atrasado há ${dias} ${plural(dias, 'dia', 'dias')} (era ${dataBR(l.proximo_followup)})`, href: '/crm', alvo: { chave: CHAVE.lead, id: l.id }, peso: dias })
       } else if (l.etapa === 'proposta_enviada' && l.data_proposta_enviada) {
         const base = contato && contato > l.data_proposta_enviada ? contato : l.data_proposta_enviada
         const dias = diasEntre(base, hoje)
         if (dias < 3) continue
-        alertas.push({ id: 'proposta-' + l.id, categoria: 'proposta', titulo: l.nome, descricao: contato && contato > l.data_proposta_enviada ? `Proposta enviada, sem novo contato há ${dias} ${plural(dias, 'dia', 'dias')}` : `Proposta enviada há ${dias} ${plural(dias, 'dia', 'dias')} sem retorno`, href: '/crm', peso: dias })
+        alertas.push({ id: 'proposta-' + l.id, categoria: 'proposta', titulo: l.nome, descricao: contato && contato > l.data_proposta_enviada ? `Proposta enviada, sem novo contato há ${dias} ${plural(dias, 'dia', 'dias')}` : `Proposta enviada há ${dias} ${plural(dias, 'dia', 'dias')} sem retorno`, href: '/crm', alvo: { chave: CHAVE.lead, id: l.id }, peso: dias })
       }
     }
   }
@@ -170,7 +172,7 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
       const validade = somarDias(envio, Number(o.validade_dias) || 30)
       if (validade >= hoje) continue
       const dias = diasEntre(validade, hoje)
-      alertas.push({ id: 'orc-' + o.id, categoria: 'orcamento_vencido', titulo: `${o.codigo || ''} — ${o.cliente_nome || ''}`.trim(), descricao: `Validade de ${o.validade_dias || 30} dias venceu há ${dias} ${plural(dias, 'dia', 'dias')} — defina como aprovado, reprovado ou expirado`, href: '/orcamento', peso: dias })
+      alertas.push({ id: 'orc-' + o.id, categoria: 'orcamento_vencido', titulo: `${o.codigo || ''} — ${o.cliente_nome || ''}`.trim(), descricao: `Validade de ${o.validade_dias || 30} dias venceu há ${dias} ${plural(dias, 'dia', 'dias')} — defina como aprovado, reprovado ou expirado`, href: '/orcamento', alvo: { chave: CHAVE.orcamento, id: o.id }, peso: dias })
     }
   }
 
@@ -195,9 +197,9 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
           const faltam = diasEntre(hoje, a.data_fim)
           if (faltam < 0) {
             const dias = -faltam
-            alertas.push({ id: 'atv-atraso-' + a.id, categoria: 'atividade_atrasada', titulo: a.titulo, descricao: `${a.tipo} · prazo era ${dataBR(a.data_fim)} — atrasada há ${dias} ${plural(dias, 'dia', 'dias')}`, href: '/#atividades', peso: dias })
+            alertas.push({ id: 'atv-atraso-' + a.id, categoria: 'atividade_atrasada', titulo: a.titulo, descricao: `${a.tipo} · prazo era ${dataBR(a.data_fim)} — atrasada há ${dias} ${plural(dias, 'dia', 'dias')}`, href: '/#atividades', alvo: { chave: CHAVE.atividade, id: a.id }, peso: dias })
           } else if (faltam <= (a.alerta_dias ?? 1)) {
-            alertas.push({ id: 'atv-prazo-' + a.id, categoria: 'atividade_vencendo', titulo: a.titulo, descricao: `${a.tipo} · ${faltam === 0 ? 'vence hoje' : faltam === 1 ? `vence amanhã (${dataBR(a.data_fim)})` : `vence em ${faltam} dias (${dataBR(a.data_fim)})`}`, href: '/#atividades', peso: 30 - faltam })
+            alertas.push({ id: 'atv-prazo-' + a.id, categoria: 'atividade_vencendo', titulo: a.titulo, descricao: `${a.tipo} · ${faltam === 0 ? 'vence hoje' : faltam === 1 ? `vence amanhã (${dataBR(a.data_fim)})` : `vence em ${faltam} dias (${dataBR(a.data_fim)})`}`, href: '/#atividades', alvo: { chave: CHAVE.atividade, id: a.id }, peso: 30 - faltam })
           }
         }
       }
@@ -213,7 +215,7 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
       for (const c of comps) {
         const org: any = donos.find((u: any) => u.id === (c.criado_por || c.usuario_id))
         const dias = diasEntre(hoje, c.data)
-        alertas.push({ id: 'convite-' + c.id, categoria: 'convite', titulo: `Convite: ${c.titulo}`, descricao: `${dataBR(c.data)}${c.hora_inicio ? ' às ' + c.hora_inicio.slice(0, 5) : ''} — de ${org?.nome || (org?.email || 'alguém').split('@')[0]} · aceite ou recuse na Agenda`, href: '/agenda', peso: Math.max(0, 30 - dias) })
+        alertas.push({ id: 'convite-' + c.id, categoria: 'convite', titulo: `Convite: ${c.titulo}`, descricao: `${dataBR(c.data)}${c.hora_inicio ? ' às ' + c.hora_inicio.slice(0, 5) : ''} — de ${org?.nome || (org?.email || 'alguém').split('@')[0]} · aceite ou recuse na Agenda`, href: '/agenda', alvo: { chave: CHAVE.compromisso, id: c.id }, peso: Math.max(0, 30 - dias) })
       }
     }
   }
@@ -228,7 +230,7 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
         for (const s of sl) {
           const lev: any = mapa.get(s.levantamento_id)
           if (!(ehAdmin || (lev && lev.criado_por === meuId))) continue
-          alertas.push({ id: 'sol-lev-' + s.id, categoria: 'solicitacao', titulo: `${s.solicitante_nome || 'Alguém'} pediu acesso`, descricao: `Levantamento: ${lev?.nome || lev?.cliente || ''}`, href: '/levantamento', peso: 0 })
+          alertas.push({ id: 'sol-lev-' + s.id, categoria: 'solicitacao', titulo: `${s.solicitante_nome || 'Alguém'} pediu acesso`, descricao: `Levantamento: ${lev?.nome || lev?.cliente || ''}`, href: '/levantamento', alvo: { chave: CHAVE.levantamento, id: s.levantamento_id }, peso: 0 })
         }
       }
       const so = await get('orcamento_solicitacoes', '?status=eq.pendente&select=id,orcamento_id,solicitante_nome')
@@ -238,7 +240,7 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
         for (const s of so) {
           const orc: any = mapa.get(s.orcamento_id)
           if (!(ehAdmin || (orc && orc.criado_por === meuId))) continue
-          alertas.push({ id: 'sol-orc-' + s.id, categoria: 'solicitacao', titulo: `${s.solicitante_nome || 'Alguém'} pediu acesso`, descricao: `Orçamento: ${orc?.codigo || ''} — ${orc?.cliente_nome || ''}`, href: '/orcamento', peso: 0 })
+          alertas.push({ id: 'sol-orc-' + s.id, categoria: 'solicitacao', titulo: `${s.solicitante_nome || 'Alguém'} pediu acesso`, descricao: `Orçamento: ${orc?.codigo || ''} — ${orc?.cliente_nome || ''}`, href: '/orcamento', alvo: { chave: CHAVE.orcamento, id: s.orcamento_id }, peso: 0 })
         }
       }
     } catch {}
@@ -247,8 +249,9 @@ export async function carregarAlertas(permEntrada?: Permissoes | null): Promise<
   return alertas.sort((a, b) => ORDEM_CATEGORIAS.indexOf(a.categoria) - ORDEM_CATEGORIAS.indexOf(b.categoria) || b.peso - a.peso)
 }
 
-// Abre o destino de um alerta (e, se for de uma obra, já abre a obra).
+// Abre o destino de um alerta: a página de destino abre o item exato (orçamento, lead, lançamento, obra, atividade...).
 export function destinoDoAlerta(a: AlertaItem): string {
-  if (a.obraId) { try { localStorage.setItem('viga_obra_abrir', a.obraId) } catch {} }
+  if (a.alvo) definirAlvo(a.alvo.chave, a.alvo.id, a.alvo.aba)
+  else if (a.obraId) definirAlvo(CHAVE.obra, a.obraId)
   return a.href
 }

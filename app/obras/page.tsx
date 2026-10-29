@@ -10,6 +10,7 @@ import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../lib/clienteCrm'
 import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../lib/medicoesCalc'
 import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma, type ModoCronograma } from '../lib/cronograma'
+import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -366,22 +367,19 @@ export default function Obras() {
       setSouGerenteTime(perm?.role === 'gerente_time')
     })
     carregar()
-    const abrirId = localStorage.getItem('viga_obra_abrir')
-    if (abrirId) {
-      localStorage.removeItem('viga_obra_abrir')
-      const abaAlvo = localStorage.getItem('viga_obra_abrir_aba')
-      const abrirNovaVisitaFlag = localStorage.getItem('viga_obra_abrir_nova_visita')
-      localStorage.removeItem('viga_obra_abrir_aba')
-      localStorage.removeItem('viga_obra_abrir_nova_visita')
-      buscar('obras', '?id=eq.' + abrirId).then(r => {
-        if (r[0]) {
-          setDetalhe(r[0])
-          setAbaDetalhe(abaAlvo || 'resumo')
-          if (abaAlvo === 'visitas' && abrirNovaVisitaFlag) abrirNovaVisita()
-        }
-      })
-    }
   }, [])
+
+  // abre a obra apontada por um alerta (ou pelo 'Upload RDO' do Dashboard), na aba pedida
+  useAbrirAlvo(CHAVE.obra, true, async (id, abaAlvo) => {
+    const abrirNovaVisitaFlag = localStorage.getItem('viga_obra_abrir_nova_visita')
+    localStorage.removeItem('viga_obra_abrir_nova_visita')
+    const r = await buscar('obras', '?id=eq.' + id)
+    if (r[0]) {
+      setDetalhe(r[0])
+      setAbaDetalhe(abaAlvo || 'resumo')
+      if (abaAlvo === 'visitas' && abrirNovaVisitaFlag) abrirNovaVisita()
+    }
+  })
 
   function sair() {
     localStorage.removeItem('viga_token')

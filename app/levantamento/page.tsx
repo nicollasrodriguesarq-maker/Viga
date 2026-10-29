@@ -4,6 +4,7 @@ import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
 import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
+import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 import { CLIENTE_CRM_VAZIO, leadDoLevantamento, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../lib/clienteCrm'
 import { liquidoItem } from '../lib/orcamentoCalc'
 
@@ -200,6 +201,12 @@ export default function Levantamento() {
     })
     carregar()
   }, [])
+
+  // abre o levantamento apontado por um alerta (ex.: pedido de acesso)
+  useAbrirAlvo(CHAVE.levantamento, !loading, async id => {
+    const l = (await buscar('levantamentos', '?id=eq.' + id))[0]
+    if (l) { setDetalhe(l); setAmbienteAtivo(null); setAbaDetalhe('ambientes') }
+  })
 
   function sair() {
     localStorage.removeItem('viga_token')

@@ -7,6 +7,7 @@ import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
 import { rotuloRev, codigoBase, codigoComRev, compararRevisoes, dataBRts } from '../lib/revisoes'
 import { brutoItem, descontoItem, liquidoItem, custoItem, pctDescontoItem, fatorDesconto, tipoDescontoItem } from '../lib/orcamentoCalc'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, type ValorClienteCrm } from '../lib/clienteCrm'
+import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -162,14 +163,13 @@ export default function Orcamento() {
       if (perm) { setMeuId(perm.id); setSouAdmin(perm.role === 'admin') }
     })
     carregar()
-    const abrirId = localStorage.getItem('viga_orcamento_abrir')
-    if (abrirId) {
-      localStorage.removeItem('viga_orcamento_abrir')
-      buscar('orcamentos', '?id=eq.' + abrirId).then(r => {
-        if (r[0]) { setDetalhe(r[0]); setAmbienteAtivo(null); setAbaDetalhe('itens') }
-      })
-    }
   }, [])
+
+  // abre o orçamento apontado por um alerta (ou vindo do Levantamento)
+  useAbrirAlvo(CHAVE.orcamento, !loading, async id => {
+    const r = await buscar('orcamentos', '?id=eq.' + id)
+    if (r[0]) { setDetalhe(r[0]); setAmbienteAtivo(null); setAbaDetalhe('itens') }
+  })
 
   function sair() {
     localStorage.removeItem('viga_token')

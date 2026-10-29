@@ -7,6 +7,7 @@ import {
   type Atividade, type Responsavel, type StatusResp,
 } from '../lib/atividades'
 import { hojeISO } from '../lib/datas'
+import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 
 // "Minhas atividades de hoje": o que está no prazo hoje, o que atrasou e o que começa nos próximos dias.
 // A pessoa atualiza o status ali mesmo e abre o detalhe para comentar e anexar arquivos.
@@ -29,6 +30,15 @@ export default function AtividadesHoje({ meuId, usuarios, mobile = false }: { me
     window.addEventListener('focus', carregar)
     return () => { clearInterval(t); window.removeEventListener('focus', carregar) }
   }, [carregar])
+
+  // alerta de atividade: abre a atividade apontada (e mostra as próximas, se for uma delas)
+  useAbrirAlvo(CHAVE.atividade, lista !== null, id => {
+    const a = (lista || []).find(x => x.id === id)
+    if (!a) return
+    if (a.data_inicio > hojeISO()) setVerProximas(true)
+    setAberta(id)
+    setTimeout(() => document.getElementById('atividades')?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 100)
+  })
 
   async function mudarStatus(a: Atividade, s: StatusResp) {
     setSalvando(a.id)

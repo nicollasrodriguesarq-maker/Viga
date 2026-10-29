@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
+import { CHAVE, useAbrirAlvo } from '../../lib/abrirAlvo'
 import SeletorClienteCrm from '../../components/SeletorClienteCrm'
 import ResponsavelDoDocumento from '../../components/ResponsavelDoDocumento'
 import { CLIENTE_CRM_VAZIO, leadDoLevantamento, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../../lib/clienteCrm'
@@ -146,6 +147,12 @@ export default function LevantamentoMobile() {
     })
     carregar()
   }, [])
+
+  // abre o levantamento apontado por um alerta
+  useAbrirAlvo(CHAVE.levantamento, true, async id => {
+    const r = await buscar('levantamentos', '?id=eq.' + id)
+    if (r[0]) { setDetalhe(r[0]); setTela('detalhe') }
+  })
 
   async function carregar() {
     const [l, a, it, o, b, orc] = await Promise.all([

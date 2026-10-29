@@ -4,6 +4,7 @@ import Layout from '../components/Layout'
 import { sincronizarLeadsComClientes, criarContatoDoCliente, encontrarClienteDuplicado } from '../lib/clienteCrm'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import Prospeccao from './Prospeccao'
+import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -139,6 +140,12 @@ export default function CRM() {
     })
     carregar()
   }, [])
+
+  // abre o lead apontado por um alerta (follow-up ou proposta parada)
+  useAbrirAlvo(CHAVE.lead, !loading, async id => {
+    const l = leads.find((x: any) => x.id === id) || (await buscar('crm_leads', '?id=eq.' + id))[0]
+    if (l) { setAbaTopo('pipeline'); abrirDetalheLead(l) }
+  })
 
   async function carregar() {
     setLoading(true)

@@ -4,6 +4,8 @@ import Layout from '../components/Layout'
 import { sincronizarLeadsComClientes, criarContatoDoCliente, encontrarClienteDuplicado } from '../lib/clienteCrm'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import Prospeccao from './Prospeccao'
+import { atualizarPropostaDoLead } from '../lib/propostaPipeline'
+import AvisoAutomatico from '../components/AvisoAutomatico'
 import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -108,6 +110,7 @@ export default function CRM() {
   const [levantamentos, setLevantamentos] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [userEmail, setUserEmail] = useState('')
+  const [avisoAuto, setAvisoAuto] = useState('')
   const [abaTopo, setAbaTopo] = useState<'pipeline' | 'clientes' | 'prospeccao'>('pipeline')
 
   const [busca, setBusca] = useState('')
@@ -315,6 +318,9 @@ export default function CRM() {
       descricao: `${ETAPA_NOME[etapaAnterior] || etapaAnterior} → ${ETAPA_NOME[novaEtapa] || novaEtapa}`,
       etapa_anterior: etapaAnterior, etapa_nova: novaEtapa,
     })
+    // a proposta vinculada acompanha o pipeline (enviada / aprovada / reprovada) sem precisar abrir o Orçamento
+    const avisoProposta = await atualizarPropostaDoLead(detalhe.id, novaEtapa)
+    if (avisoProposta) { setAvisoAuto(avisoProposta); }
     const atualizado = { ...detalhe, ...dados }
     setDetalhe(atualizado)
     setJanela('detalhe')
@@ -374,6 +380,9 @@ export default function CRM() {
       dadosLead.valor_proposta = orc ? num(orc.total_geral) : detalhe.valor_proposta
       if (!detalhe.data_proposta_enviada) dadosLead.data_proposta_enviada = new Date().toISOString().slice(0, 10)
       await editar('crm_leads', detalhe.id, dadosLead)
+      // se o lead já está numa etapa de proposta/fechamento, a proposta vinculada assume o status correspondente
+      const aviso = await atualizarPropostaDoLead(detalhe.id, detalhe.etapa)
+      if (aviso) setAvisoAuto(aviso)
     }
     setDetalhe({ ...detalhe, ...dadosLead })
     carregar()
@@ -1278,6 +1287,7 @@ export default function CRM() {
           </div>
         </div>
       )}
+      {avisoAuto && <AvisoAutomatico texto={avisoAuto} onFechar={() => setAvisoAuto('')} />}
     </Layout>
   )
 }

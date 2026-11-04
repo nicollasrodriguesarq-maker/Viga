@@ -8,6 +8,8 @@ import { rotuloRev, codigoBase, codigoComRev, compararRevisoes, dataBRts } from 
 import { brutoItem, descontoItem, liquidoItem, custoItem, pctDescontoItem, fatorDesconto, tipoDescontoItem } from '../lib/orcamentoCalc'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, type ValorClienteCrm } from '../lib/clienteCrm'
 import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
+import { atualizarPipelineDaProposta } from '../lib/propostaPipeline'
+import AvisoAutomatico from '../components/AvisoAutomatico'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -119,6 +121,7 @@ export default function Orcamento() {
   const [crmLeads, setCrmLeads] = useState<any[]>([])
   const [clienteCrm, setClienteCrm] = useState<ValorClienteCrm>(CLIENTE_CRM_VAZIO)
   const [loading, setLoading] = useState(true)
+  const [avisoAuto, setAvisoAuto] = useState('')
   const [detalhe, setDetalhe] = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('itens')
   const [ambienteAtivo, setAmbienteAtivo] = useState<any>(null)
@@ -1356,6 +1359,9 @@ export default function Orcamento() {
                   const ok = await editar('orcamentos', detalhe.id, { status: novoStatus })
                   if (!ok) return alert('Não foi possível salvar o status. Tente novamente.')
                   setDetalhe({ ...detalhe, status: novoStatus }); carregar()
+                  // enviado / aprovado / reprovado / expirado atualizam o lead do Pipeline sozinhos
+                  const aviso = await atualizarPipelineDaProposta(detalhe.id, novoStatus)
+                  if (aviso) setAvisoAuto(aviso)
                 }}
                 className={inputCls + ' w-auto text-xs py-1.5'}>
                 {Object.entries(STATUS_ORC).map(([v, n]) => <option key={v} value={v}>{n}</option>)}
@@ -1658,7 +1664,7 @@ export default function Orcamento() {
               <div>
                 <label className={labelCls}>Lead do CRM Vinculado</label>
                 <select className={inputCls + ' disabled:opacity-50'} disabled={!podeEditar} value={detalhe.crm_lead_id || ''}
-                  onChange={e => { const v = e.target.value || null; editar('orcamentos', detalhe.id, { crm_lead_id: v }); setDetalhe({ ...detalhe, crm_lead_id: v }) }}>
+                  onChange={async e => { const v = e.target.value || null; await editar('orcamentos', detalhe.id, { crm_lead_id: v }); setDetalhe({ ...detalhe, crm_lead_id: v }); if (v) { const aviso = await atualizarPipelineDaProposta(detalhe.id, detalhe.status); if (aviso) setAvisoAuto(aviso) } }}>
                   <option value="">Nenhum / prospecção direta</option>
                   {crmLeads.map(l => <option key={l.id} value={l.id}>{l.codigo} — {l.nome}</option>)}
                 </select>
@@ -2015,6 +2021,7 @@ export default function Orcamento() {
         )}
 
         {modalBancoJsx}
+      {avisoAuto && <AvisoAutomatico texto={avisoAuto} onFechar={() => setAvisoAuto('')} />}
       </Layout>
     )
   }
@@ -2258,6 +2265,7 @@ export default function Orcamento() {
           </div>
         </div>
       )}
+      {avisoAuto && <AvisoAutomatico texto={avisoAuto} onFechar={() => setAvisoAuto('')} />}
     </Layout>
   )
 }

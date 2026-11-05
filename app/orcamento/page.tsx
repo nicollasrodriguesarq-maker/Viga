@@ -148,6 +148,7 @@ export default function Orcamento() {
   const [usarComposicao, setUsarComposicao] = useState(false)
   const [editBanco, setEditBanco] = useState<any>(null)
   const [fAmb, setFAmb] = useState('')
+  const [dupAmb, setDupAmb] = useState<null | { origem: any; nome: string; salvando: boolean }>(null)
   const [fTransformar, setFTransformar] = useState({ data_inicio: '', dias_trabalho: 'seg_sex', periodo_trabalho: 'comercial' })
   const [regimeProposta, setRegimeProposta] = useState('seg_sex')
   const [observacaoProposta, setObservacaoProposta] = useState('')
@@ -548,6 +549,45 @@ export default function Orcamento() {
     const ordem = ambientes.filter(a => a.orcamento_id === detalhe.id).length
     await criar('orcamento_ambientes', { orcamento_id: detalhe.id, nome: fAmb.trim(), ordem })
     setJanela(null); setFAmb(''); carregar()
+  }
+
+  // Copia um ambiente inteiro (itens, preços, descontos e composições) com outro nome — para reaproveitar tudo e só
+  // ajustar as metragens. Tudo-ou-nada: se algo falhar, a cópia incompleta é desfeita.
+  async function duplicarAmbiente() {
+    if (!dupAmb || !detalhe || dupAmb.salvando) return
+    const nome = dupAmb.nome.trim()
+    if (!nome) return alert('Informe o nome do novo ambiente')
+    const jaExiste = ambientes.some(a => a.orcamento_id === detalhe.id && a.nome.trim().toLowerCase() === nome.toLowerCase())
+    if (jaExiste && !confirm('Já existe um ambiente chamado "' + nome + '" neste orçamento. Criar mesmo assim?')) return
+    setDupAmb({ ...dupAmb, salvando: true })
+    let novoId: string | null = null
+    try {
+      const origem = dupAmb.origem
+      const its = await buscar('orcamento_itens', '?ambiente_id=eq.' + origem.id + '&order=created_at')
+      const comps = its.length ? await buscar('orcamento_itens_composicao', '?orcamento_item_id=in.(' + its.map((i: any) => i.id).join(',') + ')&order=created_at') : []
+      const ordem = ambientes.filter(a => a.orcamento_id === detalhe.id).length
+      const novo = await gravar('orcamento_ambientes', { orcamento_id: detalhe.id, nome, ordem, levantamento_ambiente_id: null })
+      novoId = novo.id
+      if (its.length) {
+        const novos = await gravarVarios('orcamento_itens', its.map(({ id: _i, created_at: _c, ...r }: any) => ({ ...r, ambiente_id: novo.id, levantamento_item_id: null })))
+        if (comps.length) {
+          const mapaItem = new Map<string, string>(its.map((i: any, idx: number) => [i.id, novos[idx].id]))
+          await gravarVarios('orcamento_itens_composicao', comps.map(({ id: _i, created_at: _c, ...r }: any) => ({ ...r, orcamento_item_id: mapaItem.get(r.orcamento_item_id) })))
+        }
+      }
+      await atualizarTotais(detalhe.id)
+      if (detalhe.obra_id) await sincronizarServicosObra(detalhe.id, detalhe.obra_id)
+      setDupAmb(null); setJanela(null)
+      const [a, it, o] = await Promise.all([buscar('orcamento_ambientes', '?order=ordem'), buscar('orcamento_itens', '?order=created_at'), buscar('orcamentos', '?order=created_at.desc')])
+      setAmbientes(a); setItens(it); setOrcamentos(o)
+      const atualizado = o.find((x: any) => x.id === detalhe.id)
+      if (atualizado) setDetalhe(atualizado)
+      setAmbienteAtivo(a.find((x: any) => x.id === novo.id) || null) // já abre o novo ambiente para ajustar as quantidades
+    } catch (e: any) {
+      if (novoId) await remover('orcamento_ambientes', novoId) // desfaz a cópia incompleta
+      setDupAmb(d => d ? { ...d, salvando: false } : d)
+      alert('Não foi possível duplicar o ambiente: ' + (e?.message || 'tente novamente') + '. Nada foi alterado.')
+    }
   }
 
   async function vincularObra(obraId: string) {
@@ -1497,6 +1537,7 @@ export default function Orcamento() {
                             <div className="text-secondary font-semibold">M.O: {fmt(maoAmb)}</div>
                           </div>
                           <span className="text-[11px] text-on-surface-variant">{isAtivo ? '▲' : '▼'}</span>
+                          {podeEditar && <button className={btnEditSmCls} title="Copiar este ambiente com todos os itens" data-testid="btn-duplicar-ambiente" onClick={e => { e.stopPropagation(); setDupAmb({ origem: amb, nome: amb.nome + ' (cópia)', salvando: false }); setJanela('duplicarAmbiente') }}>📑 Duplicar</button>}
                           {podeEditar && <button className={btnDangerSmCls} onClick={e => { e.stopPropagation(); if (confirm('Excluir ambiente e itens?')) remover('orcamento_ambientes', amb.id).then(carregar) }}>×</button>}
                         </div>
                       </div>
@@ -1946,6 +1987,23 @@ export default function Orcamento() {
           </div>
           )
         })()}
+
+        {janela === 'duplicarAmbiente' && dupAmb && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && !dupAmb.salvando && (setDupAmb(null), setJanela(null))}>
+            <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[440px]" data-testid="modal-duplicar-ambiente">
+              <div className="text-base font-bold text-on-surface mb-1">📑 Duplicar ambiente</div>
+              <div className="text-body-sm text-on-surface-variant mb-5">Copia todos os itens de <strong>{dupAmb.origem.nome}</strong> ({itens.filter(i => i.ambiente_id === dupAmb.origem.id).length} item(ns)) com os mesmos preços, descontos e quantidades. Depois é só ajustar as metragens.</div>
+              <div className="mb-5">
+                <label className={labelCls}>Nome do novo ambiente</label>
+                <input className={inputCls} autoFocus value={dupAmb.nome} onChange={e => setDupAmb({ ...dupAmb, nome: e.target.value })} onFocus={e => e.target.select()} onKeyDown={e => e.key === 'Enter' && duplicarAmbiente()} data-testid="dup-nome" />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button className={btnSecondaryCls} disabled={dupAmb.salvando} onClick={() => { setDupAmb(null); setJanela(null) }}>Cancelar</button>
+                <button className={btnPrimaryCls + ' disabled:opacity-50'} disabled={dupAmb.salvando} onClick={duplicarAmbiente} data-testid="dup-confirmar">{dupAmb.salvando ? 'Copiando...' : 'Duplicar ambiente'}</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {janela === 'ambiente' && (
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>

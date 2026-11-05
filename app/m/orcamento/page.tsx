@@ -386,7 +386,7 @@ export default function OrcamentoMobile() {
       if (levRows[0]) paginasLev = paginasLevantamentoEncarte(levRows[0], ambsLev, itensLev, cfg)
     }
 
-    const prazoDias = calcularPrazoProposta(itensDoOrc, bancoItens, regimeProposta, ritmoValido(detalhe.ritmo_execucao)).prazoDias
+    const prazoDias = calcularPrazoProposta(itensDoOrc, bancoItens, regimeProposta, ritmoValido(detalhe.ritmo_execucao), new Date(), ambientes.filter(a => a.orcamento_id === detalhe.id)).prazoDias
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =

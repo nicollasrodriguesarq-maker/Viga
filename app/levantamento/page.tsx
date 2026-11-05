@@ -1010,7 +1010,7 @@ export default function Levantamento() {
     const orcItens = orc ? await buscar('orcamento_itens', `?orcamento_id=eq.${orc.id}`) : []
     const orcAmbientes = orc ? await buscar('orcamento_ambientes', `?orcamento_id=eq.${orc.id}`) : []
 
-    const prazoDias = calcularPrazoProposta(orcItens, bancoItens, regimeProposta, ritmoValido(orc?.ritmo_execucao)).prazoDias
+    const prazoDias = calcularPrazoProposta(orcItens, bancoItens, regimeProposta, ritmoValido(orc?.ritmo_execucao), new Date(), orcAmbientes).prazoDias
 
     const paginas =
       paginaCapaInversa(lev.nome || lev.cliente, lev.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', lev.cliente, lev.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(orc?.validade_dias || '30'), cfg, origin, lev.contato_nome) +

@@ -10,7 +10,7 @@ import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, 
 import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 import { atualizarPipelineDaProposta } from '../lib/propostaPipeline'
 import AvisoAutomatico from '../components/AvisoAutomatico'
-import { calcularDatasOrcamento, calcularPrazoProposta, RITMOS, ritmoValido, type Ritmo } from '../lib/prazoObra'
+import { calcularDatasOrcamento, calcularPrazoProposta, RITMOS, ritmoValido, tipoDoItem, type Ritmo } from '../lib/prazoObra'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -620,11 +620,21 @@ export default function Orcamento() {
   function resumoPrazo(regime: string) {
     if (!detalhe) return null
     const lista = ordenarPorCategoria(itens.filter(i => i.orcamento_id === detalhe.id))
-    const p = calcularPrazoProposta(lista, bancoItens, regime, ritmo)
+    const p = calcularPrazoProposta(lista, bancoItens, regime, ritmo, new Date(), ambientes.filter(a => a.orcamento_id === detalhe.id))
+    const est = p.estimativa
     return (
       <div className="bg-primary/5 border border-primary/20 rounded-lg px-3.5 py-3 mb-5 text-sm" data-testid="resumo-prazo">
         <div className="font-bold text-primary">Prazo estimado: {p.prazoDias} dia{p.prazoDias === 1 ? '' : 's'} corrido{p.prazoDias === 1 ? '' : 's'} ({p.diasUteis} dia{p.diasUteis === 1 ? '' : 's'} de trabalho)</div>
-        <div className="text-[12px] text-on-surface-variant mt-0.5">{ritmo === 'sequencial' ? 'Todos os serviços em fila.' : `Em fila seriam ${p.diasUteisSequencial} dias de trabalho — o trabalho em paralelo economiza ${Math.max(0, p.diasUteisSequencial - p.diasUteis)}.`} Tempo dos itens × quantidade, jornada de 8 h.</div>
+        <div className="text-[12px] text-on-surface-variant mt-0.5">{ritmo === 'sequencial' ? 'Uma equipe só, tudo em fila.' : `Em fila (uma equipe só) seriam ${p.diasUteisSequencial} dias de trabalho — equipes e ambientes em paralelo economizam ${Math.max(0, p.diasUteisSequencial - p.diasUteis)}.`} Jornada de 8 h.</div>
+        {ritmo !== 'sequencial' && est.especialidades.length > 0 && (
+          <div className="text-[11px] text-on-surface-variant mt-2" data-testid="gargalos-prazo">
+            <span className="font-semibold">Onde está o tempo: </span>
+            {est.especialidades.slice(0, 4).map(e => `${e.categoria} ${e.dias} d (${Math.round(e.horas)} h${e.equipes > 1 ? ', ' + e.equipes + ' equipes' : ''})`).join(' · ')}
+          </div>
+        )}
+        {est.apoio.length > 0 && <div className="text-[11px] text-on-surface-variant mt-1.5">Não entram na fila (acompanham a obra): {est.apoio.length} {est.apoio.length === 1 ? 'item' : 'itens'} de apoio — gerenciamento, ART/RRT, caçamba.</div>}
+        {est.semTempo > 0 && <div className="text-[11px] text-tertiary mt-1.5">⚠️ {est.semTempo} {est.semTempo === 1 ? 'item sem tempo cadastrado conta' : 'itens sem tempo cadastrado contam'} 1 dia cada.</div>}
+        {est.longos.length > 0 && <div className="text-[11px] text-tertiary mt-1.5" data-testid="aviso-longos">⚠️ Confira o tempo cadastrado: {est.longos.map(l => `${l.servico.slice(0, 48)} (${Math.round(l.horas / 8 * 10) / 10} dias)`).join('; ')}.</div>}
       </div>
     )
   }
@@ -658,7 +668,7 @@ export default function Orcamento() {
     const valorContrato = totalGeral * (1 - descontoPct / 100)
 
     // datas das etapas: tempo por unidade × quantidade, com as especialidades de cada fase em paralelo (ritmo escolhido)
-    const etapasCalculadas = calcularDatasOrcamento(itensOrc, fTransformar.data_inicio, fTransformar.dias_trabalho, bancoItens, ritmo)
+    const etapasCalculadas = calcularDatasOrcamento(itensOrc, fTransformar.data_inicio, fTransformar.dias_trabalho, bancoItens, ritmo, ambientes.filter(a => a.orcamento_id === detalhe.id))
     const dataFimFinal = etapasCalculadas.reduce((m, e) => (e.fim > m ? e.fim : m), fTransformar.data_inicio)
 
     const novaObra = await criar('obras', {
@@ -1175,7 +1185,7 @@ export default function Orcamento() {
       if (levRows[0]) paginasLev = paginasLevantamentoEncarte(levRows[0], ambsLev, itensLev, cfg)
     }
 
-    const prazoDias = calcularPrazoProposta(itensDoOrc, bancoItens, regimeProposta, ritmo).prazoDias
+    const prazoDias = calcularPrazoProposta(itensDoOrc, bancoItens, regimeProposta, ritmo, new Date(), ambientesDoOrc).prazoDias
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =
@@ -1237,12 +1247,13 @@ export default function Orcamento() {
           </div>
         </div>
         <div className="mb-3.5">
-          <label className={labelCls}>Tempo de execução <span className="normal-case font-normal">(por {fBanco.unidade || 'unidade'} — ex.: 1 {fBanco.unidade || 'un'} em 1 hora)</span></label>
+          <label className={labelCls}>Tempo de execução <span className="normal-case font-normal">(horas ou dias POR {fBanco.unidade || 'unidade'} — ou os dias do serviço completo)</span></label>
           <div className="grid grid-cols-2 gap-3">
             <input className={inputCls} type="number" placeholder="0" value={fBanco.tempo_execucao} onChange={e => setFBanco({ ...fBanco, tempo_execucao: e.target.value })} />
             <select className={inputCls} value={fBanco.tempo_execucao_unidade} onChange={e => setFBanco({ ...fBanco, tempo_execucao_unidade: e.target.value })}>
-              <option value="dias">dias</option>
-              <option value="horas">horas</option>
+              <option value="horas">horas por {fBanco.unidade || 'unidade'}</option>
+              <option value="dias_un">dias por {fBanco.unidade || 'unidade'}</option>
+              <option value="dias">dias (serviço completo)</option>
             </select>
           </div>
         </div>
@@ -1850,18 +1861,23 @@ export default function Orcamento() {
                 </div>
               </div>
               <div className="mb-3.5">
-                <label className={labelCls}>Tempo de execução <span className="normal-case font-normal">(por {fItem.unidade || 'unidade'})</span></label>
+                <label className={labelCls}>Tempo de execução <span className="normal-case font-normal">(horas ou dias POR {fItem.unidade || 'unidade'} — ou os dias do serviço completo)</span></label>
                 <div className="grid grid-cols-2 gap-3">
                   <input className={inputCls} type="number" placeholder="0" value={fItem.tempo_execucao} onChange={e => setFItem({ ...fItem, tempo_execucao: e.target.value })} />
                   <select className={inputCls} value={fItem.tempo_execucao_unidade} onChange={e => setFItem({ ...fItem, tempo_execucao_unidade: e.target.value })}>
-                    <option value="dias">dias</option>
-                    <option value="horas">horas</option>
+                    <option value="horas">horas por {fItem.unidade || 'unidade'}</option>
+                    <option value="dias_un">dias por {fItem.unidade || 'unidade'}</option>
+                    <option value="dias">dias (serviço completo)</option>
                   </select>
                 </div>
-                {parseFloat(fItem.tempo_execucao) > 0 && parseFloat(fItem.quantidade) > 0 && (() => {
-                  const total = parseFloat(fItem.tempo_execucao) * parseFloat(fItem.quantidade)
-                  const horas = fItem.tempo_execucao_unidade === 'horas' ? total : total * 8
-                  return <div className="text-[11px] text-primary mt-1.5" data-testid="tempo-total-item">Total deste item: {fItem.quantidade} {fItem.unidade} × {fItem.tempo_execucao} {fItem.tempo_execucao_unidade} = {horas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h de trabalho ({(horas / 8).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dia{horas / 8 === 1 ? '' : 's'})</div>
+                {tipoDoItem({ servico: fItem.servico }) !== 'normal' ? (
+                  <div className="text-[11px] text-on-surface-variant mt-1.5" data-testid="tempo-apoio-item">Item de apoio (gerenciamento, ART/RRT, caçamba...): acompanha a obra e não entra no prazo de execução.</div>
+                ) : parseFloat(fItem.tempo_execucao) > 0 && (() => {
+                  const v = parseFloat(fItem.tempo_execucao), qtd = parseFloat(fItem.quantidade) > 0 ? parseFloat(fItem.quantidade) : 1
+                  const un = fItem.tempo_execucao_unidade
+                  const horas = un === 'horas' ? v * qtd : un === 'dias_un' ? v * 8 * qtd : v * 8
+                  const formula = un === 'dias' ? `serviço completo: ${v} dia${v === 1 ? '' : 's'} (não multiplica pela quantidade)` : `${qtd} ${fItem.unidade} × ${v} ${un === 'horas' ? 'h' : 'dia(s)'}`
+                  return <div className="text-[11px] text-primary mt-1.5" data-testid="tempo-total-item">Tempo deste item: {formula} = {horas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h de trabalho ({(horas / 8).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dia{horas / 8 === 1 ? '' : 's'})</div>
                 })()}
               </div>
 
@@ -2044,7 +2060,7 @@ export default function Orcamento() {
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
             <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
               <div className="text-base font-bold text-on-surface mb-1.5">🏗️ Transformar em Obra</div>
-              <div className="text-body-sm text-on-surface-variant mb-5">O cronograma será gerado automaticamente a partir do tempo de execução de cada item (tempo × quantidade), com os serviços de especialidades diferentes andando em paralelo.</div>
+              <div className="text-body-sm text-on-surface-variant mb-5">O cronograma será gerado automaticamente a partir do tempo de execução de cada item, com equipes e ambientes trabalhando em paralelo.</div>
               <div className="mb-3.5">
                 <label className={labelCls}>Data de Início *</label>
                 <input className={inputCls} type="date" value={fTransformar.data_inicio} onChange={e => setFTransformar({ ...fTransformar, data_inicio: e.target.value })} />

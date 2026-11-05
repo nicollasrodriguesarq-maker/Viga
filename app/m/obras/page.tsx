@@ -850,7 +850,8 @@ export default function ObrasMobile() {
     const ultimoFim = atuais.map((e: any) => e.data_fim_prevista).filter(Boolean).sort().pop()
     let inicioISO = obra.data_inicio || hojeISO()
     if (ultimoFim && atuais.length > 0) { const d = new Date(ultimoFim + 'T00:00:00'); d.setDate(d.getDate() + 1); inicioISO = dataParaISO(d) }
-    const calculado = calcularDatasOrcamento(novos, inicioISO, obra.dias_trabalho || 'seg_sex', bancoItens, ritmoValido(obra.ritmo_execucao))
+    const ambientesOrc = await buscar('orcamento_ambientes', '?orcamento_id=eq.' + orc.id)
+    const calculado = calcularDatasOrcamento(novos, inicioISO, obra.dias_trabalho || 'seg_sex', bancoItens, ritmoValido(obra.ritmo_execucao), ambientesOrc)
     let ordem = Math.max(0, ...atuais.map((e: any) => e.ordem || 0))
     for (const { item, inicio, fim } of calculado) {
       await criar('cronograma_etapas', {

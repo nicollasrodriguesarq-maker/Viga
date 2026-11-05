@@ -9,7 +9,8 @@ import SeletorClienteCrm from '../components/SeletorClienteCrm'
 import ResponsavelDoDocumento from '../components/ResponsavelDoDocumento'
 import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, vincularLeadAoRegistro, type ValorClienteCrm } from '../lib/clienteCrm'
 import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../lib/medicoesCalc'
-import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma, type ModoCronograma } from '../lib/cronograma'
+import { calcularDatasOrcamento, ritmoValido } from '../lib/prazoObra'
+import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma, type ModoCronograma } from '../lib/cronograma'
 import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
@@ -1946,7 +1947,7 @@ export default function Obras() {
     const ultimoFim = atuais.map((e: any) => e.data_fim_prevista).filter(Boolean).sort().pop()
     let inicioISO = obra.data_inicio || hojeISO()
     if (ultimoFim && atuais.length > 0) { const d = new Date(ultimoFim + 'T00:00:00'); d.setDate(d.getDate() + 1); inicioISO = dataParaISO(d) }
-    const calculado = calcularDatasOrcamento(novos, inicioISO, obra.dias_trabalho || 'seg_sex', bancoItens)
+    const calculado = calcularDatasOrcamento(novos, inicioISO, obra.dias_trabalho || 'seg_sex', bancoItens, ritmoValido(obra.ritmo_execucao))
     let ordem = Math.max(0, ...atuais.map((e: any) => e.ordem || 0))
     for (const { item, inicio, fim } of calculado) {
       await criar('cronograma_etapas', {

@@ -10,6 +10,7 @@ import { CLIENTE_CRM_VAZIO, registrarClienteNoCrmInterativo, validarClienteCrm, 
 import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
 import { atualizarPipelineDaProposta } from '../lib/propostaPipeline'
 import AvisoAutomatico from '../components/AvisoAutomatico'
+import { calcularDatasOrcamento, calcularPrazoProposta, RITMOS, ritmoValido, type Ritmo } from '../lib/prazoObra'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -122,9 +123,12 @@ export default function Orcamento() {
   const [clienteCrm, setClienteCrm] = useState<ValorClienteCrm>(CLIENTE_CRM_VAZIO)
   const [loading, setLoading] = useState(true)
   const [avisoAuto, setAvisoAuto] = useState('')
+  const [ritmo, setRitmo] = useState<Ritmo>('equilibrado')
   const [detalhe, setDetalhe] = useState<any>(null)
   const [abaDetalhe, setAbaDetalhe] = useState('itens')
   const [ambienteAtivo, setAmbienteAtivo] = useState<any>(null)
+  // o ritmo de execução escolhido fica salvo na proposta (e vai para a obra); sem escolha, vale o recomendado
+  useEffect(() => { setRitmo(ritmoValido(detalhe?.ritmo_execucao)) }, [detalhe?.id])
   const [janela, setJanela] = useState<string | null>(null)
   const [busca, setBusca] = useState('')
   const [buscaBanco, setBuscaBanco] = useState('')
@@ -460,6 +464,8 @@ export default function Orcamento() {
     const obraRows = await buscar('obras', '?id=eq.' + obraId)
     const obra = obraRows[0]
     if (!obra?.data_inicio || !obra?.data_previsao) return
+    // obra com cronograma por itens do orçamento já tem as etapas (com datas calculadas): não duplica por serviço
+    if (obra.cronograma_modo === 'orcamento') return
     const svsObra = (await buscar('obra_servicos', '?obra_id=eq.' + obraId))
       .sort((a: any, b: any) => (a.ordem ?? 0) - (b.ordem ?? 0))
     if (svsObra.length === 0) return
@@ -606,40 +612,32 @@ export default function Orcamento() {
   }
 
   // ── Transformar orçamento aprovado em Obra + cronograma automático ──
-  // Cronograma trabalha em dias; itens medidos em horas são convertidos assumindo jornada de 8h.
-  function tempoExecucaoItem(item: any): number {
-    const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
-    const valorBanco = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
-    const valorProprio = item.tempo_execucao ? parseFloat(item.tempo_execucao) : 0
-    const valor = valorBanco > 0 ? valorBanco : valorProprio
-    const unidade = valorBanco > 0 ? bi?.tempo_execucao_unidade : item.tempo_execucao_unidade
-    const dias = unidade === 'horas' ? valor / 8 : valor
-    return dias > 0 ? dias : 1
+  // O prazo vem de lib/prazoObra: tempo por unidade × quantidade, com as especialidades de cada fase em paralelo.
+  function escolherRitmo(r: Ritmo) {
+    setRitmo(r)
+    if (detalhe) { editar('orcamentos', detalhe.id, { ritmo_execucao: r }); setDetalhe({ ...detalhe, ritmo_execucao: r }) } // melhor esforço
   }
-  function diaValido(d: Date, pattern: string): boolean {
-    const dow = d.getDay()
-    if (pattern === 'todos_dias') return true
-    if (pattern === 'seg_sab') return dow >= 1 && dow <= 6
-    return dow >= 1 && dow <= 5
+  function resumoPrazo(regime: string) {
+    if (!detalhe) return null
+    const lista = ordenarPorCategoria(itens.filter(i => i.orcamento_id === detalhe.id))
+    const p = calcularPrazoProposta(lista, bancoItens, regime, ritmo)
+    return (
+      <div className="bg-primary/5 border border-primary/20 rounded-lg px-3.5 py-3 mb-5 text-sm" data-testid="resumo-prazo">
+        <div className="font-bold text-primary">Prazo estimado: {p.prazoDias} dia{p.prazoDias === 1 ? '' : 's'} corrido{p.prazoDias === 1 ? '' : 's'} ({p.diasUteis} dia{p.diasUteis === 1 ? '' : 's'} de trabalho)</div>
+        <div className="text-[12px] text-on-surface-variant mt-0.5">{ritmo === 'sequencial' ? 'Todos os serviços em fila.' : `Em fila seriam ${p.diasUteisSequencial} dias de trabalho — o trabalho em paralelo economiza ${Math.max(0, p.diasUteisSequencial - p.diasUteis)}.`} Tempo dos itens × quantidade, jornada de 8 h.</div>
+      </div>
+    )
   }
-  function proximoDiaUtil(d: Date, pattern: string): Date {
-    const nd = new Date(d)
-    while (!diaValido(nd, pattern)) nd.setDate(nd.getDate() + 1)
-    return nd
-  }
-  function somarDiasUteis(inicio: Date, dias: number, pattern: string): Date {
-    let atual = proximoDiaUtil(inicio, pattern)
-    let restante = Math.max(1, dias) - 1
-    while (restante > 0) {
-      atual = new Date(atual)
-      atual.setDate(atual.getDate() + 1)
-      atual = proximoDiaUtil(atual, pattern)
-      restante--
-    }
-    return atual
-  }
-  function formatarDataISO(d: Date): string {
-    return d.toISOString().slice(0, 10)
+  function seletorRitmo() {
+    return (
+      <div className="mb-3.5">
+        <label className={labelCls}>Ritmo de execução</label>
+        <select className={inputCls} value={ritmo} onChange={e => escolherRitmo(e.target.value as Ritmo)} data-testid="select-ritmo">
+          {RITMOS.map(r => <option key={r.id} value={r.id}>{r.titulo}</option>)}
+        </select>
+        <div className="text-[11px] text-on-surface-variant mt-1">{RITMOS.find(r => r.id === ritmo)?.descricao}</div>
+      </div>
+    )
   }
 
   async function transformarEmObra() {
@@ -659,18 +657,9 @@ export default function Orcamento() {
     const descontoPct = parseFloat(detalhe.desconto_percentual || 0)
     const valorContrato = totalGeral * (1 - descontoPct / 100)
 
-    let cursor = new Date(fTransformar.data_inicio + 'T00:00:00')
-    let dataFimFinal = cursor
-    const etapasCalculadas: { item: any, inicio: Date, fim: Date }[] = []
-    for (const item of itensOrc) {
-      const inicio = proximoDiaUtil(cursor, fTransformar.dias_trabalho)
-      const dur = tempoExecucaoItem(item)
-      const fim = somarDiasUteis(inicio, dur, fTransformar.dias_trabalho)
-      etapasCalculadas.push({ item, inicio, fim })
-      dataFimFinal = fim
-      const prox = new Date(fim); prox.setDate(prox.getDate() + 1)
-      cursor = prox
-    }
+    // datas das etapas: tempo por unidade × quantidade, com as especialidades de cada fase em paralelo (ritmo escolhido)
+    const etapasCalculadas = calcularDatasOrcamento(itensOrc, fTransformar.data_inicio, fTransformar.dias_trabalho, bancoItens, ritmo)
+    const dataFimFinal = etapasCalculadas.reduce((m, e) => (e.fim > m ? e.fim : m), fTransformar.data_inicio)
 
     const novaObra = await criar('obras', {
       codigo,
@@ -684,7 +673,8 @@ export default function Orcamento() {
       responsavel: '',
       status: 'em_execucao',
       data_inicio: fTransformar.data_inicio,
-      data_previsao: itensOrc.length > 0 ? formatarDataISO(dataFimFinal) : fTransformar.data_inicio,
+      cronograma_modo: 'orcamento',
+      data_previsao: itensOrc.length > 0 ? dataFimFinal : fTransformar.data_inicio,
       valor_contrato: valorContrato,
       dias_trabalho: fTransformar.dias_trabalho,
       periodo_trabalho: fTransformar.periodo_trabalho,
@@ -693,14 +683,15 @@ export default function Orcamento() {
 
     await editar('orcamentos', detalhe.id, { obra_id: novaObra.id })
     setDetalhe({ ...detalhe, obra_id: novaObra.id })
+    editar('obras', novaObra.id, { ritmo_execucao: ritmo }) // melhor esforço: o cronograma da obra herda o ritmo
 
     for (const { item, inicio, fim } of etapasCalculadas) {
       await criar('cronograma_etapas', {
         orcamento_item_id: item.id,
         obra_id: novaObra.id,
         status: 'pendente',
-        data_inicio_prevista: formatarDataISO(inicio),
-        data_fim_prevista: formatarDataISO(fim),
+        data_inicio_prevista: inicio,
+        data_fim_prevista: fim,
       })
     }
 
@@ -1184,11 +1175,7 @@ export default function Orcamento() {
       if (levRows[0]) paginasLev = paginasLevantamentoEncarte(levRows[0], ambsLev, itensLev, cfg)
     }
 
-    const totalDiasUteis = Math.max(1, Math.round(itensDoOrc.reduce((a, i) => a + tempoExecucaoItem(i), 0)))
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-    const inicioValido = proximoDiaUtil(hoje, regimeProposta)
-    const fimPrazo = somarDiasUteis(hoje, totalDiasUteis, regimeProposta)
-    const prazoDias = Math.round((fimPrazo.getTime() - inicioValido.getTime()) / 86400000) + 1
+    const prazoDias = calcularPrazoProposta(itensDoOrc, bancoItens, regimeProposta, ritmo).prazoDias
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =
@@ -1250,7 +1237,7 @@ export default function Orcamento() {
           </div>
         </div>
         <div className="mb-3.5">
-          <label className={labelCls}>Tempo Execução</label>
+          <label className={labelCls}>Tempo de execução <span className="normal-case font-normal">(por {fBanco.unidade || 'unidade'} — ex.: 1 {fBanco.unidade || 'un'} em 1 hora)</span></label>
           <div className="grid grid-cols-2 gap-3">
             <input className={inputCls} type="number" placeholder="0" value={fBanco.tempo_execucao} onChange={e => setFBanco({ ...fBanco, tempo_execucao: e.target.value })} />
             <select className={inputCls} value={fBanco.tempo_execucao_unidade} onChange={e => setFBanco({ ...fBanco, tempo_execucao_unidade: e.target.value })}>
@@ -1863,7 +1850,7 @@ export default function Orcamento() {
                 </div>
               </div>
               <div className="mb-3.5">
-                <label className={labelCls}>Tempo Execução</label>
+                <label className={labelCls}>Tempo de execução <span className="normal-case font-normal">(por {fItem.unidade || 'unidade'})</span></label>
                 <div className="grid grid-cols-2 gap-3">
                   <input className={inputCls} type="number" placeholder="0" value={fItem.tempo_execucao} onChange={e => setFItem({ ...fItem, tempo_execucao: e.target.value })} />
                   <select className={inputCls} value={fItem.tempo_execucao_unidade} onChange={e => setFItem({ ...fItem, tempo_execucao_unidade: e.target.value })}>
@@ -1871,6 +1858,11 @@ export default function Orcamento() {
                     <option value="horas">horas</option>
                   </select>
                 </div>
+                {parseFloat(fItem.tempo_execucao) > 0 && parseFloat(fItem.quantidade) > 0 && (() => {
+                  const total = parseFloat(fItem.tempo_execucao) * parseFloat(fItem.quantidade)
+                  const horas = fItem.tempo_execucao_unidade === 'horas' ? total : total * 8
+                  return <div className="text-[11px] text-primary mt-1.5" data-testid="tempo-total-item">Total deste item: {fItem.quantidade} {fItem.unidade} × {fItem.tempo_execucao} {fItem.tempo_execucao_unidade} = {horas.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h de trabalho ({(horas / 8).toLocaleString('pt-BR', { maximumFractionDigits: 1 })} dia{horas / 8 === 1 ? '' : 's'})</div>
+                })()}
               </div>
 
               <div className="flex items-center justify-between mb-2 mt-4">
@@ -2034,6 +2026,8 @@ export default function Orcamento() {
                   <option value="todos_dias">Todos os dias (dias corridos)</option>
                 </select>
               </div>
+              {seletorRitmo()}
+              {resumoPrazo(regimeProposta)}
               <div className="mb-5">
                 <label className={labelCls}>Observações (opcional)</label>
                 <textarea className={inputCls} rows={3} placeholder="Algo específico desta proposta que o cliente precisa saber..." value={observacaoProposta} onChange={e => setObservacaoProposta(e.target.value)} />
@@ -2050,7 +2044,7 @@ export default function Orcamento() {
           <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-[1000] p-4" onClick={e => e.target === e.currentTarget && setJanela(null)}>
             <div className="bg-surface-container border border-outline-variant rounded-2xl p-7 w-full max-w-[480px]">
               <div className="text-base font-bold text-on-surface mb-1.5">🏗️ Transformar em Obra</div>
-              <div className="text-body-sm text-on-surface-variant mb-5">O cronograma será gerado automaticamente a partir do tempo de execução de cada item, na ordem das etapas.</div>
+              <div className="text-body-sm text-on-surface-variant mb-5">O cronograma será gerado automaticamente a partir do tempo de execução de cada item (tempo × quantidade), com os serviços de especialidades diferentes andando em paralelo.</div>
               <div className="mb-3.5">
                 <label className={labelCls}>Data de Início *</label>
                 <input className={inputCls} type="date" value={fTransformar.data_inicio} onChange={e => setFTransformar({ ...fTransformar, data_inicio: e.target.value })} />
@@ -2063,6 +2057,8 @@ export default function Orcamento() {
                   <option value="todos_dias">Todos os dias (inclusive domingo)</option>
                 </select>
               </div>
+              {seletorRitmo()}
+              {resumoPrazo(fTransformar.dias_trabalho)}
               <div className="mb-5">
                 <label className={labelCls}>Período</label>
                 <select className={inputCls} value={fTransformar.periodo_trabalho} onChange={e => setFTransformar({ ...fTransformar, periodo_trabalho: e.target.value })}>

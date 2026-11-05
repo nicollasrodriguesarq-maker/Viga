@@ -6,7 +6,8 @@ import { arred2 } from '../../lib/datas'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 import { CHAVE, useAbrirAlvo } from '../../lib/abrirAlvo'
 import { calcularAbatimento, modoAbatimentoDe, type ModoAbatimento } from '../../lib/medicoesCalc'
-import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, calcularDatasOrcamento, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma } from '../../lib/cronograma'
+import { calcularDatasOrcamento, ritmoValido } from '../../lib/prazoObra'
+import { MODOS_CRONOGRAMA, TIPOS_ALTERACAO_CRONOGRAMA, modoEfetivoCronograma, montarLinhasCronograma, ordenarLinhasCronograma, statusVisualEtapa, ultimoMotivoEtapa, htmlSecaoCronogramaPDF, hojeISO, dataParaISO, type LinhaCronograma } from '../../lib/cronograma'
 
 const BASE = 'https://vupjtoeqltzlnplijnzr.supabase.co/rest/v1'
 const ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ1cGp0b2VxbHR6bG5wbGlqbnpyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk2NTE4MzIsImV4cCI6MjA5NTIyNzgzMn0.gPSHIeM_dFQ_dmR1Ui1GSDLTVkFny2LDe2YtASapgPQ'
@@ -849,7 +850,7 @@ export default function ObrasMobile() {
     const ultimoFim = atuais.map((e: any) => e.data_fim_prevista).filter(Boolean).sort().pop()
     let inicioISO = obra.data_inicio || hojeISO()
     if (ultimoFim && atuais.length > 0) { const d = new Date(ultimoFim + 'T00:00:00'); d.setDate(d.getDate() + 1); inicioISO = dataParaISO(d) }
-    const calculado = calcularDatasOrcamento(novos, inicioISO, obra.dias_trabalho || 'seg_sex', bancoItens)
+    const calculado = calcularDatasOrcamento(novos, inicioISO, obra.dias_trabalho || 'seg_sex', bancoItens, ritmoValido(obra.ritmo_execucao))
     let ordem = Math.max(0, ...atuais.map((e: any) => e.ordem || 0))
     for (const { item, inicio, fim } of calculado) {
       await criar('cronograma_etapas', {

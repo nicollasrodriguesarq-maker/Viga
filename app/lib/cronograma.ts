@@ -176,30 +176,8 @@ export function dataParaISO(d: Date): string {
   return `${d.getFullYear()}-${m}-${dia}`
 }
 
-// Tempo de execução (em dias) de um item do orçamento; horas viram dias de jornada de 8h.
-// Sem tempo cadastrado, assume 1 dia.
-export function tempoExecucaoItemDias(item: any, bancoItens: any[]): number {
-  const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
-  const valorBanco = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
-  const valorProprio = item.tempo_execucao ? parseFloat(item.tempo_execucao) : 0
-  const valor = valorBanco > 0 ? valorBanco : valorProprio
-  const unidade = valorBanco > 0 ? bi?.tempo_execucao_unidade : item.tempo_execucao_unidade
-  const dias = unidade === 'horas' ? valor / 8 : valor
-  return dias > 0 ? dias : 1
-}
-
-// Datas sequenciais (um item depois do outro) a partir de uma data de início, respeitando os
-// dias de trabalho da obra. Os itens devem vir já ordenados.
-export function calcularDatasOrcamento(itens: any[], dataInicioISO: string, regime: string, bancoItens: any[]) {
-  let cursor = new Date(dataInicioISO + 'T00:00:00')
-  return itens.map(item => {
-    const inicio = proximoDiaUtil(cursor, regime)
-    const fim = somarDiasUteis(inicio, tempoExecucaoItemDias(item, bancoItens), regime)
-    const prox = new Date(fim); prox.setDate(prox.getDate() + 1)
-    cursor = prox
-    return { item, inicio: dataParaISO(inicio), fim: dataParaISO(fim) }
-  })
-}
+// O tempo de execução dos itens e as datas do cronograma gerado a partir do orçamento ficam em lib/prazoObra.ts
+// (tempo por unidade × quantidade, com as especialidades de cada fase em paralelo).
 
 // ── Seção de cronograma para os PDFs (tema escuro, igual aos demais relatórios da obra) ──
 const COR_STATUS: Record<string, string> = { concluida: '#6ee9e0', atrasada: '#ffb4ab', em_andamento: '#ffcbac', pendente: '#69736f' }

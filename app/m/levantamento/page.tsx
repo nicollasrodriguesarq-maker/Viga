@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { calcularPrazoProposta, ritmoValido } from '../../lib/prazoObra'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 import { CHAVE, useAbrirAlvo } from '../../lib/abrirAlvo'
@@ -560,34 +561,6 @@ export default function LevantamentoMobile() {
   function calcularTotalItemLev(item: any) {
     return calcularValorUnitarioLev(item) * parseFloat(item.quantidade || 1)
   }
-  function tempoExecucaoItemLev(item: any): number {
-    const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
-    const valor = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
-    const dias = bi?.tempo_execucao_unidade === 'horas' ? valor / 8 : valor
-    return dias > 0 ? dias : 1
-  }
-  function diaValidoLev(d: Date, pattern: string): boolean {
-    const dow = d.getDay()
-    if (pattern === 'todos_dias') return true
-    if (pattern === 'seg_sab') return dow >= 1 && dow <= 6
-    return dow >= 1 && dow <= 5
-  }
-  function proximoDiaUtilLev(d: Date, pattern: string): Date {
-    const nd = new Date(d)
-    while (!diaValidoLev(nd, pattern)) nd.setDate(nd.getDate() + 1)
-    return nd
-  }
-  function somarDiasUteisLev(inicio: Date, dias: number, pattern: string): Date {
-    let atual = proximoDiaUtilLev(inicio, pattern)
-    let restante = Math.max(1, dias) - 1
-    while (restante > 0) {
-      atual = new Date(atual)
-      atual.setDate(atual.getDate() + 1)
-      atual = proximoDiaUtilLev(atual, pattern)
-      restante--
-    }
-    return atual
-  }
   function paginaCapaInversa(tituloProjeto: string, subtitulo: string, cliente: string, local: string, dataStr: string, validadeDias: number, cfg: any, origin: string, responsavel?: string | null) {
     return `
     <div class="page" style="background:#1A1A1A;color:#fff;display:flex">
@@ -852,11 +825,7 @@ export default function LevantamentoMobile() {
     const orcItens = orc ? await buscar('orcamento_itens', `?orcamento_id=eq.${orc.id}`) : []
     const orcAmbientes = orc ? await buscar('orcamento_ambientes', `?orcamento_id=eq.${orc.id}`) : []
 
-    const totalDiasUteis = Math.max(1, Math.round(orcItens.reduce((a: number, i: any) => a + tempoExecucaoItemLev(i), 0)))
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-    const inicioValido = proximoDiaUtilLev(hoje, regimeProposta)
-    const fimPrazo = somarDiasUteisLev(hoje, totalDiasUteis, regimeProposta)
-    const prazoDias = Math.round((fimPrazo.getTime() - inicioValido.getTime()) / 86400000) + 1
+    const prazoDias = calcularPrazoProposta(orcItens, bancoItens, regimeProposta, ritmoValido(orc?.ritmo_execucao)).prazoDias
 
     const paginas =
       paginaCapaInversa(lev.nome || lev.cliente, lev.tipo_execucao === 'projeto' ? 'Projeto' : 'Proposta de Obra', lev.cliente, lev.endereco, new Date().toLocaleDateString('pt-BR'), parseInt(orc?.validade_dias || '30'), cfg, origin, lev.contato_nome) +

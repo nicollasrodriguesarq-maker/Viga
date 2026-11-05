@@ -1,6 +1,7 @@
 'use client'
 import { useEffect, useState, Fragment } from 'react'
 import MobileShell from '../components/MobileShell'
+import { calcularPrazoProposta, ritmoValido } from '../../lib/prazoObra'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 import { CHAVE, useAbrirAlvo } from '../../lib/abrirAlvo'
 import { rotuloRev, codigoComRev } from '../../lib/revisoes'
@@ -92,37 +93,6 @@ export default function OrcamentoMobile() {
     setOrcamentos(o); setAmbientes(a); setItens(i); setBancoItens(b); setObras(ob)
   }
 
-  function tempoExecucaoItem(item: any): number {
-    const bi = item.banco_item_id ? bancoItens.find(b => b.id === item.banco_item_id) : null
-    const valorBanco = bi?.tempo_execucao ? parseFloat(bi.tempo_execucao) : 0
-    const valorProprio = item.tempo_execucao ? parseFloat(item.tempo_execucao) : 0
-    const valor = valorBanco > 0 ? valorBanco : valorProprio
-    const unidade = valorBanco > 0 ? bi?.tempo_execucao_unidade : item.tempo_execucao_unidade
-    const dias = unidade === 'horas' ? valor / 8 : valor
-    return dias > 0 ? dias : 1
-  }
-  function diaValido(d: Date, pattern: string): boolean {
-    const dow = d.getDay()
-    if (pattern === 'todos_dias') return true
-    if (pattern === 'seg_sab') return dow >= 1 && dow <= 6
-    return dow >= 1 && dow <= 5
-  }
-  function proximoDiaUtil(d: Date, pattern: string): Date {
-    const nd = new Date(d)
-    while (!diaValido(nd, pattern)) nd.setDate(nd.getDate() + 1)
-    return nd
-  }
-  function somarDiasUteis(inicio: Date, dias: number, pattern: string): Date {
-    let atual = proximoDiaUtil(inicio, pattern)
-    let restante = Math.max(1, dias) - 1
-    while (restante > 0) {
-      atual = new Date(atual)
-      atual.setDate(atual.getDate() + 1)
-      atual = proximoDiaUtil(atual, pattern)
-      restante--
-    }
-    return atual
-  }
 
   function abrirRegimeProposta(orc: any) {
     const obraVinculada = obras.find(o => o.id === orc.obra_id)
@@ -416,11 +386,7 @@ export default function OrcamentoMobile() {
       if (levRows[0]) paginasLev = paginasLevantamentoEncarte(levRows[0], ambsLev, itensLev, cfg)
     }
 
-    const totalDiasUteis = Math.max(1, Math.round(itensDoOrc.reduce((a, i) => a + tempoExecucaoItem(i), 0)))
-    const hoje = new Date(); hoje.setHours(0, 0, 0, 0)
-    const inicioValido = proximoDiaUtil(hoje, regimeProposta)
-    const fimPrazo = somarDiasUteis(hoje, totalDiasUteis, regimeProposta)
-    const prazoDias = Math.round((fimPrazo.getTime() - inicioValido.getTime()) / 86400000) + 1
+    const prazoDias = calcularPrazoProposta(itensDoOrc, bancoItens, regimeProposta, ritmoValido(detalhe.ritmo_execucao)).prazoDias
     const obraNome = obras.find(o => o.id === detalhe.obra_id)?.nome
 
     const paginas =

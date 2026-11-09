@@ -86,7 +86,7 @@ export async function otimizarImagemParaUpload(file: File, maxLado = MAX_ENVIO):
 const cachePdf = new Map<string, Promise<string>>() // url → data URL otimizada ('' = manter a original)
 const lerComoDataUrl = (b: Blob) => new Promise<string>((ok, erro) => { const l = new FileReader(); l.onload = () => ok(String(l.result)); l.onerror = () => erro(l.error); l.readAsDataURL(b) })
 
-async function prepararParaPdf(url: string): Promise<string> {
+async function prepararParaPdf(url: string, maxLado: number): Promise<string> {
   const r = await fetch(url)
   if (!r.ok) return ''
   const blob = await r.blob()
@@ -94,14 +94,15 @@ async function prepararParaPdf(url: string): Promise<string> {
   const dec = await decodificar(blob)
   if (!dec) return await lerComoDataUrl(blob)
   const { w, h } = dec; dec.liberar()
-  if (Math.max(w, h) <= MAX_PDF && blob.size <= LEVE_BYTES) return await lerComoDataUrl(blob) // já leve: só embute
-  const red = await reduzir(blob, MAX_PDF, QUALIDADE_PDF)
+  if (Math.max(w, h) <= maxLado && blob.size <= LEVE_BYTES) return await lerComoDataUrl(blob) // já leve: só embute
+  const red = await reduzir(blob, maxLado, QUALIDADE_PDF)
   return await lerComoDataUrl(red && red.blob.size < blob.size ? red.blob : blob)
 }
 
-function imagemParaPdf(url: string): Promise<string> {
-  let p = cachePdf.get(url)
-  if (!p) { p = prepararParaPdf(url).catch(() => ''); cachePdf.set(url, p) }
+function imagemParaPdf(url: string, maxLado: number): Promise<string> {
+  const chave = url + '|' + maxLado
+  let p = cachePdf.get(chave)
+  if (!p) { p = prepararParaPdf(url, maxLado).catch(() => ''); cachePdf.set(chave, p) }
   return p
 }
 
@@ -116,6 +117,14 @@ export async function otimizarImagensDoHtml(html: string, aoProgredir?: (feitas:
   const urls = new Set<string>()
   for (const m of html.matchAll(RE_IMG)) if (ehImagemRemota(m[3]) && naoEhEmbutida(m[3])) urls.add(m[3])
   for (const m of html.matchAll(RE_FUNDO)) if (ehImagemRemota(m[2]) && naoEhEmbutida(m[2])) urls.add(m[2])
+  // tamanho máximo sugerido por foto (data-max na tag <img>); sem dica, vale o padrão. Usada em mais de um lugar: vale o maior.
+  const maxPorUrl = new Map<string, number>()
+  for (const tag of html.match(/<img\b[^>]*>/gi) || []) {
+    const src = /\bsrc=(["'])([^"']+)\1/i.exec(tag)?.[2]
+    if (!src) continue
+    const dica = Number(/\bdata-max=(["'])(\d+)\1/i.exec(tag)?.[2]) || MAX_PDF
+    maxPorUrl.set(src, Math.max(maxPorUrl.get(src) || 0, dica))
+  }
   const lista = [...urls]
   const resolvidas = new Map<string, string>()
   let feitas = 0
@@ -123,7 +132,7 @@ export async function otimizarImagensDoHtml(html: string, aoProgredir?: (feitas:
   const trabalhador = async () => {
     for (let u = fila.shift(); u !== undefined; u = fila.shift()) {
       const abs = u.startsWith('//') ? 'https:' + u : u
-      resolvidas.set(u, await imagemParaPdf(abs))
+      resolvidas.set(u, await imagemParaPdf(abs, maxPorUrl.get(u) || MAX_PDF))
       aoProgredir?.(++feitas, lista.length)
     }
   }

@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, Fragment } from 'react'
+import { paginasLevantamentoEncarte } from '../../lib/propostaLevantamento'
 import { escreverRelatorio } from '../../lib/imagem'
 import MobileShell from '../components/MobileShell'
 import { calcularPrazoProposta, ritmoValido } from '../../lib/prazoObra'
@@ -344,31 +345,7 @@ export default function OrcamentoMobile() {
     </body></html>`
   }
 
-  // Reaproveita as mesmas páginas de levantamento (estilo escuro do sistema) já usadas em
-  // app/levantamento/page.tsx — inseridas como um encarte entre o portfólio e o orçamento.
-  function paginasLevantamentoEncarte(lev: any, ambs: any[], itensList: any[], cfg: any) {
-    const nomeAmbiente = (ambienteId: string) => ambs.find((a: any) => a.id === ambienteId)?.nome || '—'
-    const itensHtml = itensList.map((item: any, i: number) => `
-      <div style="display:flex;gap:20px;margin-bottom:20px;break-inside:avoid;padding-bottom:20px;border-bottom:1px solid #333">
-        <div style="width:38%;aspect-ratio:1;border-radius:6px;overflow:hidden;background:#171c23;flex-shrink:0;position:relative">
-          <div style="position:absolute;top:10px;left:10px;width:24px;height:24px;border-radius:999px;background:#fff;color:#1A1A1A;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:12px">${i + 1}</div>
-          ${item.foto_url ? `<img src="${item.foto_url}" style="width:100%;height:100%;object-fit:cover;display:block" />` : ''}
-        </div>
-        <div style="flex:1">
-          <h3 style="font-size:15px;color:#eee;margin-bottom:4px">${item.servico || ''}</h3>
-          <p style="font-size:10px;letter-spacing:0.08em;color:#999;text-transform:uppercase;font-weight:700;margin-bottom:8px">${nomeAmbiente(item.ambiente)}</p>
-          ${item.descricao ? `<p style="font-size:11px;color:#bbb;font-style:italic">"${item.descricao}"</p>` : ''}
-        </div>
-      </div>`).join('')
-    return `
-    <div class="page-flow" style="background:#0f141b;color:#dee2ec;padding:36px 40px">
-      <div style="display:flex;justify-content:space-between;margin-bottom:20px;border-bottom:1px solid #3d4948;padding-bottom:10px">
-        <span style="font-size:11px;color:#6ee9e0;font-weight:700;text-transform:uppercase;letter-spacing:0.08em">Levantamento Técnico — ${lev.codigo}</span>
-        <span style="font-size:10px;color:#869391">${(cfg.nome_empresa||'INVERSO').toUpperCase()}</span>
-      </div>
-      ${itensList.length > 0 ? itensHtml : '<p style="color:#869391;text-align:center;padding:40px 0">Nenhum item de levantamento registrado.</p>'}
-    </div>`
-  }
+  // O layout do levantamento dentro da proposta fica em lib/propostaLevantamento.ts (duas fotos por linha).
 
   async function gerarPropostaCompleta() {
     if (!detalhe) return

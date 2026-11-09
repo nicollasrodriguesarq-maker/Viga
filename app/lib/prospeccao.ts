@@ -101,7 +101,7 @@ const INCLUIR_FRACAS = ['revestimento', 'piso', 'forro', 'muro', 'quadra', 'banh
 const SINAL_SERVICO = /(contrata[cç][aã]o|servi[cç]os?|execu[cç][aã]o|instala[cç][aã]o|substitui[cç][aã]o|remo[cç][aã]o|empresa especializada|reforma|obra)/
 // Exclusões que não valem quando o edital é, de fato, contratação de obra/serviço de engenharia ("reforma com fornecimento de material")
 const EXCLUSOES_BRANDAS = ['equipamento', 'fornecimento de (material|materiais|equipamento)']
-const SERVICO_FORTE = /(servi[cç]os? (comuns )?de engenharia|execu[cç][aã]o d[eao]s? (obra|servi[cç]os? de)|obras? (civis?|de)|reforma d[aoe]|contrata[cç][aã]o de empresa[^.]{0,80}(reforma|obra|constru|pintura))/
+const SERVICO_FORTE = /(servi[cç]os? (comuns )?de engenharia|execu[cç][aã]o d[eao]s? (obra|servi[cç]os? de)|obras? (civis?|de)|\breforma d[aoe]|contrata[cç][aã]o de empresa[^.]{0,80}(reforma|obra|constru|pintura))/
 const EXCLUIR_PADRAO = [
   've[ií]culo', 'equipamento', 'mobili[aá]rio', 'software', 'ar[- ]condicionado', 'el[ei]vador', 'medicamento', 'aliment', 'merenda', 'uniforme',
   'reforma tribut', 'reforma agr', '[oó]rtese', 'pr[oó]tese', 'laudo', 'cr[eé]dito', 'consultoria', 'treinamento', 'licen[cç]a', 'topogr', 'did[aá]tic', 'laborat[oó]rio', 'desinsetiza', 'desratiza', 'estacionamento rotativo',

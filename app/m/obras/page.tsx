@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, Fragment } from 'react'
+import { otimizarImagemParaUpload, escreverRelatorio } from '../../lib/imagem'
 import MobileShell from '../components/MobileShell'
 import ResponsavelDoDocumento from '../../components/ResponsavelDoDocumento'
 import { arred2 } from '../../lib/datas'
@@ -37,6 +38,7 @@ function botaoVoltarApp(path: string) {
 
 async function uploadFotoVisita(file: File): Promise<string | null> {
   try {
+    file = await otimizarImagemParaUpload(file) // foto leve (máx. 2048 px), sem perda visível
     const ext = file.name.split('.').pop()
     const nome = `visita_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
     const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/relatorio-visita-fotos/${nome}`, {
@@ -719,7 +721,7 @@ export default function ObrasMobile() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   function abrirPreenchimentoMedicao(medicao: any, itensFiltrados: any[]) {
@@ -1029,7 +1031,7 @@ export default function ObrasMobile() {
     <script>window.onload = () => { window.print() }</script>
     </body></html>`
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // Mesmo padrao visual/logico de gerarPDFObra (desktop): resumo, curva S, Gantt, curva ABC e financeiro.
@@ -1399,7 +1401,7 @@ export default function ObrasMobile() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // Relatório de Visita em PDF — mesmo padrão visual/lógico de app/obras/page.tsx (desktop).
@@ -1479,7 +1481,7 @@ export default function ObrasMobile() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   async function confirmarProgramarPagamento(totalLiquido: number) {
@@ -1845,7 +1847,7 @@ export default function ObrasMobile() {
                   <div key={i} className="flex items-center gap-2.5 bg-surface-container-low border border-outline-variant rounded-lg p-2.5">
                     <div className="w-11 h-11 rounded-lg bg-surface-container border border-outline-variant overflow-hidden shrink-0 flex items-center justify-center">
                       {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={f.url || (f.file ? URL.createObjectURL(f.file) : '')} alt="" className="w-full h-full object-cover" />
+                      <img loading="lazy" decoding="async" src={f.url || (f.file ? URL.createObjectURL(f.file) : '')} alt="" className="w-full h-full object-cover" />
                     </div>
                     <input className={inputCls} placeholder="Descrição da foto" value={f.descricao}
                       onChange={e => setFotosRv(fotosRv.map((x, idx) => idx === i ? { ...x, descricao: e.target.value } : x))} />

@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { otimizarImagemParaUpload, escreverRelatorio } from '../lib/imagem'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import { CHAVE, useAbrirAlvo } from '../lib/abrirAlvo'
@@ -61,6 +62,7 @@ async function atualizarOnde(tabela: string, filtro: string, dados: object) {
 // Upload de arquivo para Supabase Storage (bucket notas-fiscais). Devolve null se falhar.
 async function uploadNF(file: File, lancamentoDesc: string): Promise<string | null> {
   try {
+    file = await otimizarImagemParaUpload(file) // foto leve (máx. 2048 px), sem perda visível
     const ext = (file.name.split('.').pop() || 'pdf').toLowerCase().replace(/[^a-z0-9]/g, '')
     const limpo = lancamentoDesc.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 20)
     const nome = `nf_${Date.now()}_${limpo}.${ext}`
@@ -251,7 +253,7 @@ async function gerarPDFRelatorioMensal(lancamentos: any[], obras: any[], contas:
   </body></html>`
 
   const win = window.open('', '_blank')
-  if (win) { win.document.write(html); win.document.close() }
+  if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
 }
 
 const CAT_IN  = ['Medição de obra','Adiantamento','Sinal de contrato','Parcela de contrato', CAT_RESGATE, 'Outros']

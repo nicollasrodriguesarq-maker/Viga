@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, useRef } from 'react'
+import { otimizarImagemParaUpload } from '../../lib/imagem'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
 import { hojeISO, somarDiasISO, somarMesesISO, arred2, dividirParcelas, dataBR } from '../../lib/datas'
@@ -36,6 +37,7 @@ async function atualizar(tabela: string, id: string, dados: object) {
 
 async function uploadNF(file: File, lancamentoDesc: string): Promise<string | null> {
   try {
+    file = await otimizarImagemParaUpload(file) // foto leve (máx. 2048 px), sem perda visível
     const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '')
     const limpo = lancamentoDesc.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]+/g, '_').slice(0, 20)
     const nome = `nf_${Date.now()}_${limpo}.${ext}`

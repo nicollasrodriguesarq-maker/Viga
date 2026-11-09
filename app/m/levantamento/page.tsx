@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState } from 'react'
+import { otimizarImagemParaUpload, escreverRelatorio } from '../../lib/imagem'
 import { calcularPrazoProposta, ritmoValido } from '../../lib/prazoObra'
 import MobileShell from '../components/MobileShell'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
@@ -28,6 +29,7 @@ async function remover(tabela: string, id: string) {
 
 async function uploadFotoServico(file: File): Promise<string | null> {
   try {
+    file = await otimizarImagemParaUpload(file) // foto leve (máx. 2048 px), sem perda visível
     const ext = file.name.split('.').pop()
     const nome = `foto_${Date.now()}.${ext}`
     const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/levantamento-fotos/${nome}`, {
@@ -551,7 +553,7 @@ export default function LevantamentoMobile() {
     const paginas = paginasLevantamento(lev, ambs, itensList, cfg)
     const html = envolverPaginasPdf(`Levantamento ${lev.codigo} — ${nomeEmpresa}`, paginas)
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // ═══ Proposta Completa (Inverso) — mesmo padrão visual de app/levantamento/page.tsx ═══
@@ -839,7 +841,7 @@ export default function LevantamentoMobile() {
 
     const html = envolverPropostaInversa(`Proposta ${lev.codigo} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   const ambsDetalhe = detalhe ? ambientes.filter(a => a.levantamento_id === detalhe.id) : []
@@ -1181,7 +1183,7 @@ export default function LevantamentoMobile() {
                           }}>
                           {item.foto_url ? (
                             // eslint-disable-next-line @next/next/no-img-element
-                            <img src={item.foto_url} alt="" className="w-full h-full object-cover" />
+                            <img loading="lazy" decoding="async" src={item.foto_url} alt="" className="w-full h-full object-cover" />
                           ) : <span className="material-symbols-outlined text-[16px] text-on-surface-variant/40">image</span>}
                         </div>
                         <div className="min-w-0 flex-1 cursor-pointer"

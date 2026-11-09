@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import { otimizarImagemParaUpload, escreverRelatorio } from '../lib/imagem'
 import { calcularPrazoProposta, ritmoValido } from '../lib/prazoObra'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
@@ -52,6 +53,7 @@ function calcularArea(unidade: string, comprimento: string, largura: string, alt
 
 async function uploadFotoServico(file: File): Promise<string | null> {
   try {
+    file = await otimizarImagemParaUpload(file) // foto leve (máx. 2048 px), sem perda visível
     const ext = file.name.split('.').pop()
     const nome = `foto_${Date.now()}.${ext}`
     const r = await fetch(`${BASE.replace('/rest/v1','')}/storage/v1/object/levantamento-fotos/${nome}`, {
@@ -66,6 +68,7 @@ async function uploadFotoServico(file: File): Promise<string | null> {
 
 async function uploadArquivoLevantamento(file: File): Promise<string | null> {
   try {
+    file = await otimizarImagemParaUpload(file) // foto leve (máx. 2048 px), sem perda visível
     const ext = file.name.split('.').pop()
     const nome = `arq_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
     const r = await fetch(`${BASE.replace('/rest/v1','')}/storage/v1/object/levantamento-arquivos/${nome}`, {
@@ -724,7 +727,7 @@ export default function Levantamento() {
     const paginas = paginasLevantamento(lev, ambs, itensList, cfg)
     const html = envolverPaginasPdf(`Levantamento ${lev.codigo} — ${nomeEmpresa}`, paginas)
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -1024,7 +1027,7 @@ export default function Levantamento() {
 
     const html = envolverPropostaInversa(`Proposta ${lev.codigo} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   const lista = levantamentos.filter(l => {
@@ -1206,7 +1209,7 @@ export default function Levantamento() {
                                       <td className="px-2.5 py-2.5">
                                         {item.foto_url ? (
                                           // eslint-disable-next-line @next/next/no-img-element
-                                          <img src={item.foto_url} alt={item.servico} className="w-10 h-10 object-cover rounded-md border border-outline-variant" />
+                                          <img loading="lazy" decoding="async" src={item.foto_url} alt={item.servico} className="w-10 h-10 object-cover rounded-md border border-outline-variant" />
                                         ) : (
                                           <div className="w-10 h-10 rounded-md border border-outline-variant bg-surface-container-low flex items-center justify-center text-on-surface-variant/40 text-xs">—</div>
                                         )}
@@ -1267,7 +1270,7 @@ export default function Levantamento() {
                     <div key={item.id} className="flex justify-between items-start py-2 border-b border-outline-variant/30 last:border-0 gap-3">
                       {item.foto_url && (
                         // eslint-disable-next-line @next/next/no-img-element
-                        <img src={item.foto_url} alt={item.servico} className="w-12 h-12 object-cover rounded-md border border-outline-variant shrink-0" />
+                        <img loading="lazy" decoding="async" src={item.foto_url} alt={item.servico} className="w-12 h-12 object-cover rounded-md border border-outline-variant shrink-0" />
                       )}
                       <div className="flex-1">
                         <div className="font-semibold text-sm text-on-surface">{item.servico}</div>

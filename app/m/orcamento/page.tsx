@@ -1,5 +1,6 @@
 'use client'
 import { useEffect, useState, Fragment } from 'react'
+import { escreverRelatorio } from '../../lib/imagem'
 import MobileShell from '../components/MobileShell'
 import { calcularPrazoProposta, ritmoValido } from '../../lib/prazoObra'
 import { obterMinhasPermissoesApp, temAcessoModuloApp } from '../../lib/permissoes'
@@ -401,7 +402,7 @@ export default function OrcamentoMobile() {
 
     const html = envolverPropostaInversa(`Proposta ${codigoComRev(detalhe)} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   const filtrados = orcamentos.filter(o => {
@@ -527,7 +528,7 @@ export default function OrcamentoMobile() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // ── Tela: Detalhe (somente leitura) ─────────────────────────────

@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, Fragment } from 'react'
+import { otimizarImagemParaUpload, escreverRelatorio } from '../lib/imagem'
 import Link from 'next/link'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
@@ -126,6 +127,7 @@ async function remover(tabela: string, id: string) {
 
 async function uploadFotoVisita(file: File): Promise<string | null> {
   try {
+    file = await otimizarImagemParaUpload(file) // foto leve (máx. 2048 px), sem perda visível
     const ext = file.name.split('.').pop()
     const nome = `visita_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.${ext}`
     const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/relatorio-visita-fotos/${nome}`, {
@@ -143,6 +145,7 @@ const FRV_VAZIO = { data: hojeISO(), clima: '', descricao: '', pendencias: '', e
 
 async function uploadArquivoFuncionario(file: File): Promise<string | null> {
   try {
+    file = await otimizarImagemParaUpload(file) // foto leve (máx. 2048 px), sem perda visível
     const nome = `arq_${Date.now()}_${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
     const r = await fetch(`${BASE.replace('/rest/v1', '')}/storage/v1/object/obra-funcionarios-arquivos/${nome}`, {
       method: 'POST',
@@ -867,7 +870,7 @@ export default function Obras() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // Relatório Completo de Medições — histórico acumulado de TODAS as medições já lançadas
@@ -1140,7 +1143,7 @@ export default function Obras() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   async function gerarPDFCronograma(obra: any, linhas: LinhaCronograma[]) {
@@ -1217,7 +1220,7 @@ export default function Obras() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // Relatório de Visita em PDF — pensado pra mandar direto pro cliente sempre que uma visita
@@ -1297,7 +1300,7 @@ export default function Obras() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   function obraAtrasada(obra: any) {
@@ -1673,7 +1676,7 @@ export default function Obras() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // ── cálculos ──────────────────────────────────────────────
@@ -3449,7 +3452,7 @@ export default function Obras() {
                           {v.fotos.map((f: any, i: number) => (
                             <div key={i} className="w-16 h-16 rounded-lg overflow-hidden border border-outline-variant relative group">
                               {/* eslint-disable-next-line @next/next/no-img-element */}
-                              <img src={f.url} alt={f.descricao || ''} className="w-full h-full object-cover" title={f.descricao || ''} />
+                              <img loading="lazy" decoding="async" src={f.url} alt={f.descricao || ''} className="w-full h-full object-cover" title={f.descricao || ''} />
                             </div>
                           ))}
                         </div>
@@ -3518,7 +3521,7 @@ export default function Obras() {
                         <div key={i} className="flex items-center gap-2.5 bg-surface-container-low border border-outline-variant rounded-lg p-2.5">
                           <div className="w-11 h-11 rounded-lg bg-surface-container border border-outline-variant overflow-hidden shrink-0 flex items-center justify-center">
                             {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img src={f.url || (f.file ? URL.createObjectURL(f.file) : '')} alt="" className="w-full h-full object-cover" />
+                            <img loading="lazy" decoding="async" src={f.url || (f.file ? URL.createObjectURL(f.file) : '')} alt="" className="w-full h-full object-cover" />
                           </div>
                           <input className={inputCls} placeholder="Descrição da foto" value={f.descricao}
                             onChange={e => setFotosRv(fotosRv.map((x, idx) => idx === i ? { ...x, descricao: e.target.value } : x))} />

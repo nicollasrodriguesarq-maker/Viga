@@ -1,6 +1,7 @@
 // Atividades da equipe: o gestor cria, define responsáveis (uma ou mais pessoas), prazo e anexos; cada responsável
 // atualiza a própria parte pelo Dashboard. O prazo gera alertas (atrasada / vencendo) — ver lib/alertas.ts.
 import { hojeISO, somarDiasISO } from './datas'
+import { otimizarImagemParaUpload } from './imagem'
 
 const SUPABASE_URL = 'https://vupjtoeqltzlnplijnzr.supabase.co'
 const BASE = SUPABASE_URL + '/rest/v1'
@@ -167,6 +168,7 @@ function nomeSeguro(nome: string) {
 }
 
 export async function enviarAnexo(atividadeId: string, arquivo: File, usuarioId: string) {
+  arquivo = await otimizarImagemParaUpload(arquivo) // foto leve (máx. 2048 px); PDFs e outros arquivos ficam como estão
   if (arquivo.size > LIMITE_ANEXO_MB * 1024 * 1024) throw new Error(`O arquivo "${arquivo.name}" passa de ${LIMITE_ANEXO_MB} MB`)
   const caminho = `${atividadeId}/${Date.now()}-${nomeSeguro(arquivo.name)}`
   const r = await fetch(`${SUPABASE_URL}/storage/v1/object/${BUCKET_ATIVIDADES}/${caminho}`, {

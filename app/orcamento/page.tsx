@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, Fragment } from 'react'
+import { escreverRelatorio } from '../lib/imagem'
 import Layout from '../components/Layout'
 import { obterMinhasPermissoes, temAcessoModulo } from '../lib/permissoes'
 import SeletorClienteCrm from '../components/SeletorClienteCrm'
@@ -874,7 +875,7 @@ export default function Orcamento() {
     </body></html>`
 
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   // ════════════════════════════════════════════════════════════════════
@@ -1200,7 +1201,7 @@ export default function Orcamento() {
 
     const html = envolverPropostaInversa(`Proposta ${codigoComRev(detalhe)} — ${cfg.nome_empresa || 'Inverso'}`, paginas)
     const win = window.open('', '_blank')
-    if (win) { win.document.write(html); win.document.close() }
+    if (win) escreverRelatorio(win, html) // imagens otimizadas antes de montar o PDF
   }
 
   const vigentes = orcamentos.filter(o => !o.revisao_de)
